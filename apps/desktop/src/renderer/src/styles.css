@@ -320,3 +320,22 @@ button.danger:hover { border-color: #ff6b6b; color: #ffb4a8; }
 .f3d-pill { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 16px; font-size: 12px; background: #1b2130; border: 1px solid var(--line); color: var(--fg); }
 .f3d-pill.on { background: var(--acc); color: #06111f; border-color: transparent; }
 .f3d-pill.new:hover { border-color: var(--acc); }
+/* Agent Usage */
+.au { position: absolute; z-index: 8; right: 14px; bottom: 56px; width: 340px; max-height: 72vh; display: flex; flex-direction: column; background: #16161a; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 16px 50px rgba(0,0,0,.6); overflow: hidden; }
+.au-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.au-body { overflow: auto; padding: 6px; }
+.au-empty { padding: 16px; text-align: center; font-size: 12px; }
+.au-agent { padding: 10px; border-radius: 10px; margin: 4px; background: #1b1b20; } .au-agent.off { opacity: .6; }
+.au-agent-head { display: flex; align-items: center; gap: 10px; }
+.au-ring { width: 34px; height: 34px; border-radius: 50%; flex: none; background: conic-gradient(currentColor 0 30%, #ffffff18 0); position: relative; }
+.au-name { font-weight: 600; font-size: 13px; } .au-note { font-size: 11px; margin-top: 1px; }
+.au-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 10px; }
+.au-metric { background: #121216; border: 1px solid var(--line); border-radius: 7px; padding: 6px 4px; text-align: center; }
+.au-val { font-size: 14px; font-weight: 700; } .au-lbl { font-size: 10px; margin-top: 2px; }
+.au-models { margin-top: 10px; display: flex; flex-direction: column; gap: 5px; }
+.au-model { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+.au-m-name { width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.au-bar { flex: 1; height: 6px; background: #ffffff12; border-radius: 3px; overflow: hidden; }
+.au-bar span { display: block; height: 100%; background: var(--acc); }
+.au-m-tok { width: 44px; text-align: right; }
+.au-models-cap { font-size: 10px; margin-top: 2px; text-align: right; }

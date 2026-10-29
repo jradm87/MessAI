@@ -5,6 +5,7 @@ import { EventEmitter } from "node:events";
 import { newId, nowIso, type Config } from "./config.js";
 import { dirname, join, delimiter, basename, extname, relative } from "node:path";
 import { closeSync, existsSync, mkdirSync, openSync, readSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 const CLI_DIR = join(dirname(fileURLToPath(import.meta.url)), "../../cli/bin");
@@ -152,6 +153,30 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const path = join(d, "role.json");
     writeFileSync(path, JSON.stringify({ name: r.name, badge: r.badge, instructions: r.instructions }, null, 2) + "\n");
     return succeed({ path });
+  }
+
+  // ---- uso dos agentes (dados locais reais; cotas de plano não existem localmente) ----
+  agentUsage(): { agents: { id: string; label: string; available: boolean; note?: string; metrics: { label: string; value: string }[]; models: { name: string; input: number; output: number }[] }[] } {
+    const agents: { id: string; label: string; available: boolean; note?: string; metrics: { label: string; value: string }[]; models: { name: string; input: number; output: number }[] }[] = [];
+    const fmt = (n: number) => n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n);
+    const cf = join(homedir(), ".claude", "stats-cache.json");
+    if (existsSync(cf)) {
+      try {
+        const d = JSON.parse(readFileSync(cf, "utf8")) as { totalSessions?: number; totalMessages?: number; firstSessionDate?: string; dailyActivity?: { toolCallCount?: number }[]; modelUsage?: Record<string, { inputTokens?: number; outputTokens?: number }> };
+        const toolCalls = (d.dailyActivity ?? []).reduce((s, x) => s + (x.toolCallCount ?? 0), 0);
+        const models = Object.entries(d.modelUsage ?? {}).map(([name, v]) => ({ name: name.replace(/-\d{8}$/, ""), input: v.inputTokens ?? 0, output: v.outputTokens ?? 0 })).sort((a, b) => b.output - a.output).slice(0, 4);
+        agents.push({ id: "claude", label: "Claude Code", available: true, note: "Limites de plano não disponíveis localmente.",
+          metrics: [
+            { label: "Sessões", value: fmt(d.totalSessions ?? 0) },
+            { label: "Mensagens", value: fmt(d.totalMessages ?? 0) },
+            { label: "Ferramentas", value: fmt(toolCalls) },
+            { label: "Desde", value: (d.firstSessionDate ?? "").slice(0, 10) || "—" },
+          ], models });
+      } catch { agents.push({ id: "claude", label: "Claude Code", available: false, note: "stats-cache.json ilegível.", metrics: [], models: [] }); }
+    } else agents.push({ id: "claude", label: "Claude Code", available: false, note: "Sem ~/.claude/stats-cache.json.", metrics: [], models: [] });
+    for (const [id, label] of [["codex", "Codex"], ["gemini", "Gemini"], ["opencode", "OpenCode"]] as const)
+      agents.push({ id, label, available: false, note: "Uso não exposto localmente por esta CLI.", metrics: [], models: [] });
+    return { agents };
   }
 
   // ---- chat por terminal ----

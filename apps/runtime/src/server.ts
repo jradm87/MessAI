@@ -56,6 +56,7 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
     for (const dir of (process.env["PATH"] ?? "").split(delimiter)) { try { accessSync(joinPath(dir, cmd), constants.X_OK); return true; } catch { /* próximo */ } }
     return false;
   };
+  app.get("/v1/agent-usage", async () => svc.agentUsage());
   app.get("/v1/presets", async () => PRESETS.map((p) => ({ ...p, available: onPath(p.command) })));
   app.get("/v1/machine", async () => ({ machineId: cfg.machineId, name: cfg.machineName, platform: cfg.platform, protocolVersion: PROTOCOL_VERSION }));
 

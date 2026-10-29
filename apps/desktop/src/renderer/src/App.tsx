@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Background, BackgroundVariant, MiniMap, ReactFlow, applyNodeChanges, applyEdgeChanges, type EdgeChange, useReactFlow, ReactFlowProvider, useOnViewportChange, type Connection as FlowConnection, type Edge, type EdgeTypes, type Node as FlowNode, type NodeChange, type NodeTypes } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Map as MapIcon, Minus, Plus, Maximize2 } from "lucide-react";
+import { Map as MapIcon, Minus, Plus, Maximize2, Activity } from "lucide-react";
 import { BUILD_VERSION, type Role, type Drawing, type Folder, type Geometry, type Preset, type Sidebar as SidebarData, type Workspace, type WorkspaceSnapshot } from "@messyai/contracts";
 import { Sidebar } from "./Sidebar.js";
 import { WorkspaceDialog, type WorkspaceInput } from "./WorkspaceDialog.js";
@@ -10,6 +10,7 @@ import { askText } from "./ask.js";
 import { FloorDialog } from "./FloorDialog.js";
 import { FloorOverview, STATUS_COLOR, STATUS_LABEL } from "./FloorOverview.js";
 import { NodeActionBar, type NodeAction } from "./NodeActionBar.js";
+import { AgentUsage } from "./AgentUsage.js";
 import { Api, ApiClientError, Stream, type Connection } from "./api.js";
 import { TerminalNode } from "./TerminalNode.js";
 import { NoteNode } from "./NoteNode.js";
@@ -35,11 +36,12 @@ function freeSpot(nodes: { geometry: Geometry }[], size: { w: number; h: number 
 }
 const isTyping = () => { const el = document.activeElement as HTMLElement | null; return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable || el.classList.contains("xterm-helper-textarea")); };
 
-function ZoomBar({ minimap, setMinimap }: { minimap: boolean; setMinimap: (v: boolean) => void }) {
+function ZoomBar({ minimap, setMinimap, onUsage }: { minimap: boolean; setMinimap: (v: boolean) => void; onUsage: () => void }) {
   const rf = useReactFlow(); const [z, setZ] = useState(100);
   useOnViewportChange({ onChange: (v) => setZ(Math.round(v.zoom * 100)) });
   return (
     <div className="zoombar">
+      <button className="tb" title="Agent Usage" onClick={onUsage}><Activity size={14} /></button>
       <button className="tb" title="Minimapa (Ctrl+Shift+M)" onClick={() => setMinimap(!minimap)}><MapIcon size={14} /></button>
       <button className="tb" title="Enquadrar tudo" onClick={() => void rf.fitView({ padding: 0.15, duration: 250 })}><Maximize2 size={14} /></button>
       <span className="sep" />
@@ -87,6 +89,7 @@ function Canvas({ conn }: { conn: Connection }) {
   const [rolesDialog, setRolesDialog] = useState(false);
   const [floorDialog, setFloorDialog] = useState<Workspace | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
+  const [usage, setUsage] = useState(false);
   const fittedFor = useRef<string | null>(null); // espaço já enquadrado ao abrir
   const [renameSig, setRenameSig] = useState<{ id: string; n: number }>({ id: "", n: 0 });
   const bumpRename = (id: string) => setRenameSig((p) => ({ id, n: p.id === id ? p.n + 1 : 1 }));
@@ -428,7 +431,8 @@ function Canvas({ conn }: { conn: Connection }) {
             onErase={(id) => void mutate((r) => api.deleteDrawing(id, r))}
             onCreateRect={onCreateRect} />
         </ReactFlow>
-        <ZoomBar minimap={minimap} setMinimap={setMinimap} />
+        <ZoomBar minimap={minimap} setMinimap={setMinimap} onUsage={() => setUsage(true)} />
+        {usage && <AgentUsage api={api} onClose={() => setUsage(false)} />}
       </main>
     </div>
   );
