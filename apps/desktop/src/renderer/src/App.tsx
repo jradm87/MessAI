@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Background, BackgroundVariant, MiniMap, ReactFlow, applyNodeChanges, applyEdgeChanges, type EdgeChange, useReactFlow, ReactFlowProvider, useOnViewportChange, type Connection as FlowConnection, type Edge, type EdgeTypes, type Node as FlowNode, type NodeChange, type NodeTypes } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Map as MapIcon, Minus, Plus, Activity, Layers } from "lucide-react";
+import { Map as MapIcon, Minus, Plus, Activity, Layers, GitBranch } from "lucide-react";
 import { BUILD_VERSION, type Role, type Drawing, type Folder, type Geometry, type Preset, type Sidebar as SidebarData, type Workspace, type WorkspaceSnapshot } from "@messai/contracts";
 import { Sidebar } from "./Sidebar.js";
 import { WorkspaceDialog, type WorkspaceInput } from "./WorkspaceDialog.js";
@@ -37,12 +37,17 @@ function freeSpot(nodes: { geometry: Geometry }[], size: { w: number; h: number 
 }
 const isTyping = () => { const el = document.activeElement as HTMLElement | null; return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable || el.classList.contains("xterm-helper-textarea")); };
 
-function ZoomBar({ minimap, setMinimap, onUsage, onOverview, agents, wsName }: { minimap: boolean; setMinimap: (v: boolean) => void; onUsage: () => void; onOverview: () => void; agents: string[]; wsName?: string }) {
-  const rf = useReactFlow(); const [z, setZ] = useState(100);
+function ZoomBar({ minimap, setMinimap, onUsage, agents, wsName, wsList, current, onSwitch }: { minimap: boolean; setMinimap: (v: boolean) => void; onUsage: () => void; agents: string[]; wsName?: string; wsList: { id: string; name: string; parentId?: string }[]; current: string | null; onSwitch: (id: string) => void }) {
+  const rf = useReactFlow(); const [z, setZ] = useState(100); const [sw, setSw] = useState(false);
   useOnViewportChange({ onChange: (v) => setZ(Math.round(v.zoom * 100)) });
   return (
     <div className="botbar">
-      {wsName && <button className="bb-pill" title="Andares (Ctrl+Shift+\\)" onClick={onOverview}><Layers size={15} /><span className="bb-name">{wsName}</span></button>}
+      {wsName && <div className="bb-wrap">
+        <button className="bb-pill" title="Trocar de workspace" onClick={() => setSw((v) => !v)}><Layers size={15} /><span className="bb-name">{wsName}</span></button>
+        {sw && <div className="menu-backdrop" onMouseDown={() => setSw(false)}><div className="bb-switch" onMouseDown={(e) => e.stopPropagation()}>
+          {wsList.map((w) => <div key={w.id} className={`mi ${w.id === current ? "on" : ""} ${w.parentId ? "sub" : ""}`} onClick={() => { onSwitch(w.id); setSw(false); }}>{w.parentId ? <GitBranch size={12} /> : <Layers size={13} />}<span className="nm">{w.name}</span></div>)}
+        </div></div>}
+      </div>}
       {agents.slice(0, 5).map((a) => <button key={a} className="bb-circle" title={`${a} — Agent Usage`} onClick={onUsage}><AgentIcon id={a} size={20} /></button>)}
       {agents.length === 0 && <button className="bb-circle" title="Agent Usage" onClick={onUsage}><Activity size={15} /></button>}
       <button className="bb-circle" title="Minimapa (Ctrl+Shift+M)" onClick={() => setMinimap(!minimap)}><MapIcon size={15} /></button>
@@ -444,7 +449,7 @@ function Canvas({ conn }: { conn: Connection }) {
             <button className={`f-pill-c ground ${isGround ? "on" : ""}`} onClick={() => (isGround ? setOverview(grd.workspaceId) : setCurrent(grd.workspaceId))} data-testid="canvas-ground">Ground</button>
           </div>
         )}
-        <ZoomBar minimap={minimap} setMinimap={setMinimap} onUsage={() => setUsage(true)} onOverview={() => { const g = groundOf(current); if (g) setOverview(g.workspaceId); }} agents={barAgents} {...(curWs ? { wsName: curWs.name } : {})} />
+        <ZoomBar minimap={minimap} setMinimap={setMinimap} onUsage={() => setUsage(true)} agents={barAgents} {...(curWs ? { wsName: curWs.name } : {})} wsList={side.workspaces.map((w) => ({ id: w.workspaceId, name: w.name, ...(w.parentId ? { parentId: w.parentId } : {}) }))} current={current} onSwitch={setCurrent} />
         {usage && <AgentUsage api={api} onClose={() => setUsage(false)} />}
       </main>
     </div>

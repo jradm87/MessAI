@@ -374,3 +374,10 @@ button.danger:hover { border-color: #ff6b6b; color: #ffb4a8; }
 .bb-zoom { display: inline-flex; align-items: center; gap: 2px; height: 36px; padding: 0 8px; border-radius: 18px; background: #1b1b1f; border: 1px solid var(--line); }
 .bb-zoom .pct { font-size: 12px; min-width: 42px; text-align: center; cursor: pointer; }
 .bb-zoom .tb { width: 24px; height: 24px; }
+/* seletor de workspace na pílula inferior */
+.bb-wrap { position: relative; }
+.bb-switch { position: absolute; bottom: 44px; left: 0; min-width: 200px; max-height: 50vh; overflow: auto; background: #1b1b1f; border: 1px solid var(--line); border-radius: 10px; padding: 4px; box-shadow: 0 10px 30px rgba(0,0,0,.6); z-index: 60; }
+.bb-switch .mi { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+.bb-switch .mi:hover { background: #28324a; } .bb-switch .mi.on { background: #1f2d44; }
+.bb-switch .mi.sub { padding-left: 22px; color: var(--mut); }
+.bb-switch .mi .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
