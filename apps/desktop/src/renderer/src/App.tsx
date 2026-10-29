@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Background, BackgroundVariant, MiniMap, ReactFlow, applyNodeChanges, applyEdgeChanges, type EdgeChange, useReactFlow, ReactFlowProvider, useOnViewportChange, type Connection as FlowConnection, type Edge, type EdgeTypes, type Node as FlowNode, type NodeChange, type NodeTypes } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Map as MapIcon, Minus, Plus, Maximize2, Activity } from "lucide-react";
+import { Map as MapIcon, Minus, Plus, Activity, Layers } from "lucide-react";
 import { BUILD_VERSION, type Role, type Drawing, type Folder, type Geometry, type Preset, type Sidebar as SidebarData, type Workspace, type WorkspaceSnapshot } from "@messyai/contracts";
 import { Sidebar } from "./Sidebar.js";
 import { WorkspaceDialog, type WorkspaceInput } from "./WorkspaceDialog.js";
@@ -34,16 +34,18 @@ function freeSpot(nodes: { geometry: Geometry }[], size: { w: number; h: number 
   const top = Math.min(...nodes.map((n) => n.geometry.y));
   return { x: right + 40, y: top, ...size };
 }
+const AGENT_COLORS: Record<string, string> = { claude: "#d97757", codex: "#10a37f", gemini: "#4a9eff", opencode: "#a66bff", shell: "#8a8a90" };
+const agentKind = (title: string): string => { const t = title.toLowerCase(); return t.includes("claude") ? "claude" : t.includes("codex") ? "codex" : t.includes("gemini") ? "gemini" : t.includes("opencode") ? "opencode" : "shell"; };
 const isTyping = () => { const el = document.activeElement as HTMLElement | null; return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable || el.classList.contains("xterm-helper-textarea")); };
 
-function ZoomBar({ minimap, setMinimap, onUsage }: { minimap: boolean; setMinimap: (v: boolean) => void; onUsage: () => void }) {
+function ZoomBar({ minimap, setMinimap, onUsage, onOverview, agents }: { minimap: boolean; setMinimap: (v: boolean) => void; onUsage: () => void; onOverview: () => void; agents: { id: string; color: string }[] }) {
   const rf = useReactFlow(); const [z, setZ] = useState(100);
   useOnViewportChange({ onChange: (v) => setZ(Math.round(v.zoom * 100)) });
   return (
     <div className="zoombar">
-      <button className="tb" title="Agent Usage" onClick={onUsage}><Activity size={14} /></button>
+      <button className="tb" title="Andares (Ctrl+Shift+\\)" onClick={onOverview}><Layers size={15} /></button>
+      <button className="tb agents" title="Agent Usage" onClick={onUsage}>{agents.length ? <span className="agent-cluster">{agents.slice(0, 5).map((a) => <span key={a.id} className="agent-av" style={{ background: a.color }} />)}</span> : <Activity size={14} />}</button>
       <button className="tb" title="Minimapa (Ctrl+Shift+M)" onClick={() => setMinimap(!minimap)}><MapIcon size={14} /></button>
-      <button className="tb" title="Enquadrar tudo" onClick={() => void rf.fitView({ padding: 0.15, duration: 250 })}><Maximize2 size={14} /></button>
       <span className="sep" />
       <button className="tb" title="Reduzir (Ctrl+-)" onClick={() => void rf.zoomOut({ duration: 120 })}><Minus size={14} /></button>
       <span className="pct" onClick={() => void rf.zoomTo(1, { duration: 150 })} title="100%">{z}%</span>
@@ -373,6 +375,10 @@ function Canvas({ conn }: { conn: Connection }) {
   };
   const drawings: Drawing[] = snap?.drawings ?? [];
   const selectMode = tool === "select";
+  const barAgents = (() => { const m = new Map<string, string>(); for (const n of snap?.nodes ?? []) if (n.kind === "terminal") { const k = agentKind(n.title); m.set(k, AGENT_COLORS[k] ?? "#8a8a90"); } return [...m.entries()].map(([id, color]) => ({ id, color })); })();
+  const curWs = side.workspaces.find((w) => w.workspaceId === current);
+  const grd = groundOf(current);
+  const isGround = curWs ? !curWs.parentId : true;
 
   return (
     <div className={`app ${sideMini ? "mini" : ""}`}>
@@ -431,7 +437,13 @@ function Canvas({ conn }: { conn: Connection }) {
             onErase={(id) => void mutate((r) => api.deleteDrawing(id, r))}
             onCreateRect={onCreateRect} />
         </ReactFlow>
-        <ZoomBar minimap={minimap} setMinimap={setMinimap} onUsage={() => setUsage(true)} />
+        {current && grd && !usage && (
+          <div className="floor-pills-c">
+            <button className="f-pill-c new" onClick={() => setFloorDialog(grd)} data-testid="canvas-new-floor">+ New Floor</button>
+            <button className={`f-pill-c ground ${isGround ? "on" : ""}`} onClick={() => (isGround ? setOverview(grd.workspaceId) : setCurrent(grd.workspaceId))} data-testid="canvas-ground">Ground</button>
+          </div>
+        )}
+        <ZoomBar minimap={minimap} setMinimap={setMinimap} onUsage={() => setUsage(true)} onOverview={() => { const g = groundOf(current); if (g) setOverview(g.workspaceId); }} agents={barAgents} />
         {usage && <AgentUsage api={api} onClose={() => setUsage(false)} />}
       </main>
     </div>

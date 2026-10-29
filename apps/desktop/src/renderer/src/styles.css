@@ -350,3 +350,16 @@ button.danger:hover { border-color: #ff6b6b; color: #ffb4a8; }
 .au-ticks { display: flex; gap: 2px; height: 16px; }
 .au-ticks span { flex: 1; border-radius: 1px; background: #ffffff14; }
 .au-reset { font-size: 10px; margin-top: 3px; }
+/* cluster de agentes na barra inferior + pílulas de floor no canvas */
+.zoombar .tb.agents { width: auto; min-width: 24px; padding: 0 6px; }
+.agent-cluster { display: inline-flex; align-items: center; }
+.agent-av { width: 15px; height: 15px; border-radius: 50%; border: 2px solid #1b2130; margin-left: -5px; }
+.agent-av:first-child { margin-left: 0; }
+.floor-pills-c { position: absolute; right: 14px; bottom: 58px; z-index: 7; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
+.f-pill-c { display: inline-flex; align-items: center; gap: 6px; padding: 7px 16px; border-radius: 18px; font-size: 12px; background: #1b2130; border: 1px solid var(--line); color: var(--fg); box-shadow: 0 4px 14px rgba(0,0,0,.4); }
+.f-pill-c.new { border-style: dashed; color: var(--mut); }
+.f-pill-c.new:hover { color: var(--fg); border-color: var(--acc); }
+.f-pill-c.ground { gap: 7px; }
+.f-pill-c.ground.on { background: var(--acc); color: #06111f; border-color: transparent; }
+.f-pill-c.ground::before { content: "◆"; font-size: 10px; opacity: .8; }
+.react-flow__minimap { bottom: 150px !important; }
