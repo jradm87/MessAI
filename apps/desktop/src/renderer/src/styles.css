@@ -164,6 +164,9 @@ select { background: #0c1017; color: var(--fg); border: 1px solid var(--line); b
 .nodebar .tb:disabled { color: var(--mut); cursor: not-allowed; background: transparent; }
 .nodebar .tb.danger:hover { background: #4b1f1f; color: #ffb4a8; }
 .nb-badge { position: absolute; top: -4px; right: -4px; background: var(--acc); color: #06111f; border-radius: 8px; font-size: 9px; font-weight: 700; padding: 0 4px; line-height: 13px; }
+.align-bar { position: absolute; z-index: 7; top: 52px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 2px; background: #161618; border: 1px solid var(--line); border-radius: 10px; padding: 4px; box-shadow: 0 6px 20px rgba(0,0,0,.5); }
+.align-bar .tb { width: 30px; height: 30px; }
+.align-bar .sep { width: 1px; align-self: stretch; margin: 2px 4px; background: var(--line); }
 /* modo conectar */
 .canvas.linking .react-flow__node { cursor: crosshair !important; }
 .canvas.linking .react-flow__node:hover .node { border-color: var(--acc); box-shadow: 0 0 0 2px rgba(90,169,255,.35); }

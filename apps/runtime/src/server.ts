@@ -3,7 +3,7 @@ import websocket from "@fastify/websocket";
 import { Value } from "@sinclair/typebox/value";
 import type { WebSocket } from "ws";
 import {
-  BUILD_VERSION, PROTOCOL_VERSION, SendMessage, CreateConnection, CreateDrawing, CreateNode, CreateWorkspace, DeleteNode, PatchNode, PatchWorkspace, WsClientMessage,
+  BUILD_VERSION, PROTOCOL_VERSION, SendMessage, CreateConnection, CreateDrawing, CreateNode, CreateWorkspace, DeleteNode, PatchNode, PatchWorkspace, ApplyLayout, WsClientMessage,
   type Capabilities, type WsServerMessage, type ApiError,
  CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, CreateFloor, LandFloor, FsOp } from "@messai/contracts";
 import type { Result } from "@messai/domain";
@@ -152,6 +152,14 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
   app.delete<{ Params: { id: string } }>("/v1/nodes/:id", async (req, reply) => {
     const b = body<DeleteNode>(DeleteNode, req.body ?? {}); if ("code" in b) return invalid(reply, b);
     return send(reply, svc.deleteNode(req.params.id, b.expectedRevision), 204);
+  });
+  app.post<{ Params: { id: string } }>("/v1/nodes/:id/duplicate", async (req, reply) => {
+    const b = body<DeleteNode>(DeleteNode, req.body ?? {}); if ("code" in b) return invalid(reply, b);
+    return send(reply, svc.duplicateNode(req.params.id, b.expectedRevision), 201);
+  });
+  app.post<{ Params: { id: string } }>("/v1/workspaces/:id/layout", async (req, reply) => {
+    const b = body<ApplyLayout>(ApplyLayout, req.body); if ("code" in b) return invalid(reply, b);
+    return send(reply, svc.applyLayout(req.params.id, b.expectedRevision, b.moves));
   });
   app.post<{ Params: { id: string } }>("/v1/workspaces/:id/drawings", async (req, reply) => {
     const b = body<CreateDrawing>(CreateDrawing, req.body); if ("code" in b) return invalid(reply, b);

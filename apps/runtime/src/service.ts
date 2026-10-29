@@ -546,6 +546,40 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     return succeed(session ? { node, session, revision: rev.value } : { node, revision: rev.value });
   }
 
+  /** Duplica um nó: cria uma cópia deslocada com os mesmos dados. Terminal relança o mesmo comando/cwd/papel. */
+  duplicateNode(nodeId: string, expectedRevision: number): Result<{ node: Node; session?: Session; revision: number }> {
+    const node = this.store.getNode(nodeId);
+    if (!node) return fail("NOT_FOUND", "nó não encontrado");
+    const OFF = 32;
+    const geometry = { x: node.geometry.x + OFF, y: node.geometry.y + OFF, w: node.geometry.w, h: node.geometry.h };
+    const input: CreateNode = { expectedRevision, kind: node.kind, title: node.title, geometry };
+    if (node.kind === "terminal") {
+      const sess = node.sessionId ? this.store.getSession(node.sessionId) : undefined;
+      if (sess) { input.command = sess.command; input.args = sess.args; input.cwd = sess.cwd; if (sess.persistent) input.persistent = true; }
+      if (node.roleId) input.roleId = node.roleId;
+    } else {
+      // nota/texto/árvore: copia o conteúdo. Nota ligada a arquivo vira nota do app com o mesmo conteúdo (não liga dois nós ao mesmo .md).
+      input.content = node.content ?? "";
+      if (node.kind === "note" && node.color) input.color = node.color;
+    }
+    return this.createNode(node.workspaceId, input);
+  }
+
+  /** Move vários nós numa única revisão (alinhar/organizar em grade). Ignora ids que não são do espaço. */
+  applyLayout(workspaceId: string, expectedRevision: number, moves: { nodeId: string; geometry: Node["geometry"] }[]): Result<{ revision: number }> {
+    const w = this.store.getWorkspace(workspaceId);
+    if (!w) return fail("NOT_FOUND", "espaço não encontrado");
+    const rev = checkRevision(w, expectedRevision);
+    if (!rev.ok) return rev;
+    const valid = moves.filter((m) => { const n = this.store.getNode(m.nodeId); return !!n && n.workspaceId === workspaceId; });
+    this.store.transaction(() => {
+      for (const m of valid) this.store.updateNode(m.nodeId, { geometry: normalizeGeometry(m.geometry) });
+      this.store.bumpRevision(workspaceId, rev.value);
+    });
+    this.publish(workspaceId);
+    return succeed({ revision: rev.value });
+  }
+
   private plan(w: Workspace, node: Node, s: Session) {
     const baseEnv: Record<string, string> = {};
     // Não herdar marcadores de sessão de agentes que possam ter lançado o runtime.

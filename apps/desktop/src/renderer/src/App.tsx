@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Background, BackgroundVariant, MiniMap, ReactFlow, applyNodeChanges, applyEdgeChanges, type EdgeChange, useReactFlow, ReactFlowProvider, useOnViewportChange, type Connection as FlowConnection, type Edge, type EdgeTypes, type Node as FlowNode, type NodeChange, type NodeTypes } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Map as MapIcon, Minus, Plus, Activity, Layers } from "lucide-react";
+import { Map as MapIcon, Minus, Plus, Activity, Layers, AlignStartVertical, AlignCenterVertical, AlignEndVertical, AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal, LayoutGrid } from "lucide-react";
 import { BUILD_VERSION, type Role, type Drawing, type Folder, type Geometry, type Preset, type Sidebar as SidebarData, type Workspace, type WorkspaceSnapshot } from "@messai/contracts";
+import { gridLayout, alignGeometries, type AlignMode } from "@messai/domain";
 import { Sidebar } from "./Sidebar.js";
 import { WorkspaceDialog, type WorkspaceInput } from "./WorkspaceDialog.js";
 import { RolesDialog } from "./RolesDialog.js";
@@ -290,6 +291,25 @@ function Canvas({ conn }: { conn: Connection }) {
     const sel = flowRef.current.filter((n) => n.selected);
     for (const n of sel) void mutate((r) => api.deleteNode(n.id, r));
   };
+  const duplicateSelected = async () => {
+    const sel = flowRef.current.filter((n) => n.selected); if (!sel.length || !current) return;
+    for (const n of sel) {
+      try { const r = await api.duplicateNode(n.id, revision.current); revision.current = r.revision; }
+      catch (e) { if (e instanceof ApiClientError && e.error.code === "CONFLICT") { setSnap(await api.snapshot(current)); } toast(e instanceof ApiClientError ? `${e.error.code}: ${e.message}` : String(e)); break; }
+    }
+  };
+  // Alinhar/organizar: lê a geometria viva do flow (o efeito de atalhos não depende de snap), calcula no domínio (testado) e aplica tudo numa revisão só.
+  const geoOf = (n: FlowNode): Geometry => ({ x: Math.round(n.position.x), y: Math.round(n.position.y), w: Math.round(Number((n.style as { width?: number } | undefined)?.width ?? n.measured?.width ?? 40)), h: Math.round(Number((n.style as { height?: number } | undefined)?.height ?? n.measured?.height ?? 40)) });
+  const layoutSelected = (fn: (items: { id: string; geometry: Geometry }[]) => { id: string; geometry: Geometry }[], wantAll: boolean) => {
+    if (!current) return;
+    const all = flowRef.current; const sel = all.filter((n) => n.selected);
+    const pool = sel.length >= 2 ? sel : wantAll ? all : [];
+    const items = pool.map((n) => ({ id: n.id, geometry: geoOf(n) }));
+    const moves = fn(items); if (!moves.length) { toast("Selecione 2+ nós"); return; }
+    void mutate((r) => api.applyLayout(current, r, moves));
+  };
+  const arrangeGrid = () => layoutSelected((items) => gridLayout(items, 40), true);
+  const alignSelected = (mode: AlignMode) => layoutSelected((items) => alignGeometries(items, mode), false);
 
   // Atalhos (iguais ao Maestri onde já existe a função)
   useEffect(() => {
@@ -330,6 +350,8 @@ function Canvas({ conn }: { conn: Connection }) {
       if (ctrl && (e.key === "=" || e.key === "+")) { e.preventDefault(); void rf.zoomIn({ duration: 120 }); return; }
       if (ctrl && e.key === "-") { e.preventDefault(); void rf.zoomOut({ duration: 120 }); return; }
       if (ctrl && e.key === "\\") { e.preventDefault(); const sel = flowRef.current.filter((n) => n.selected); void rf.fitView(sel.length ? { nodes: sel, padding: 0.3, duration: 250 } : { padding: 0.15, duration: 250 }); return; }
+      if (ctrl && !e.shiftKey && e.key.toLowerCase() === "d" && !isTyping()) { e.preventDefault(); void duplicateSelected(); return; }
+      if (ctrl && e.shiftKey && e.key.toLowerCase() === "t" && !isTyping()) { e.preventDefault(); arrangeGrid(); return; }
       if (ctrl && e.key.toLowerCase() === "w" && !isTyping()) { e.preventDefault(); deleteSelected(); return; }
       if ((e.key === "Delete" || e.key === "Backspace") && !isTyping() && flowRef.current.some((n) => n.selected)) { e.preventDefault(); deleteSelected(); return; }
       if (e.key === "Escape" && linkingRef.current) { setLinking(null); return; }
@@ -405,6 +427,7 @@ function Canvas({ conn }: { conn: Connection }) {
             kind,
             onEdit: () => bumpRename(id),
             onRaise: () => toast("Elevar/acoplar: em breve"),
+            onDuplicate: () => void duplicateSelected(),
             linkCount,
             onDelete: () => deleteSelected(),
             ...(kind !== "text" ? { onLink: () => startLink(id) } : {}),
@@ -413,6 +436,19 @@ function Canvas({ conn }: { conn: Connection }) {
           };
           return <NodeActionBar a={a} />;
         })()}
+        {flow.filter((n) => n.selected).length >= 2 && (
+          <div className="align-bar" data-testid="align-bar">
+            <button className="tb" title="Alinhar à esquerda" onClick={() => alignSelected("left")}><AlignStartVertical size={15} /></button>
+            <button className="tb" title="Centralizar (horizontal)" onClick={() => alignSelected("hcenter")}><AlignCenterVertical size={15} /></button>
+            <button className="tb" title="Alinhar à direita" onClick={() => alignSelected("right")}><AlignEndVertical size={15} /></button>
+            <span className="sep" />
+            <button className="tb" title="Alinhar ao topo" onClick={() => alignSelected("top")}><AlignStartHorizontal size={15} /></button>
+            <button className="tb" title="Centralizar (vertical)" onClick={() => alignSelected("vcenter")}><AlignCenterHorizontal size={15} /></button>
+            <button className="tb" title="Alinhar embaixo" onClick={() => alignSelected("bottom")}><AlignEndHorizontal size={15} /></button>
+            <span className="sep" />
+            <button className="tb" title="Organizar em grade (Ctrl+Shift+T)" onClick={arrangeGrid}><LayoutGrid size={15} /></button>
+          </div>
+        )}
         <div className="info-bar">{snap?.workspace.parentId && <span className="floor-badge" style={{ borderColor: STATUS_COLOR[snap.workspace.status ?? "working"] }} title={STATUS_LABEL[snap.workspace.status ?? "working"]}>andar · {snap.workspace.branch}</span>}{snap ? `${snap.workspace.name} · rev ${snap.workspace.revision} · ${snap.nodes.length} nós` : "sem espaço"}{linking ? " — conectar: clique no destino (Esc cancela)" : ""}{msg ? ` — ${msg}` : ""}</div>
         <button className="pri add-btn" data-testid="add" disabled={!current} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); const p = e.currentTarget.closest("main")!.getBoundingClientRect(); setMenu({ x: r.left - p.left, y: r.bottom - p.top + 4 }); }}>+ Adicionar</button>
         {stale && <div className="banner">O runtime em execução é de uma versão anterior ao app. Reinicie o runtime para usar os recursos novos (isso encerra os shells dele; eles ficam como "lost" e podem ser reiniciados).</div>}

@@ -1,5 +1,5 @@
 import {  describe, expect, it } from "vitest";
-import { canMessage, formatDelivery, resolveNodeRef, canWrite, checkRevision, decideLease, normalizeGeometry, trimBuffer, MAX_BUFFER_BYTES, applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxAttachPlan, shellQuote, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary } from "./index.js";
+import { canMessage, formatDelivery, resolveNodeRef, canWrite, checkRevision, decideLease, normalizeGeometry, trimBuffer, MAX_BUFFER_BYTES, applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxAttachPlan, shellQuote, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, alignGeometries, gridLayout } from "./index.js";
 
 describe("revisão", () => {
   it("aceita revisão igual e devolve próxima", () => {
@@ -39,6 +39,38 @@ describe("geometria e buffer", () => {
     const big = "x".repeat(MAX_BUFFER_BYTES);
     const r = trimBuffer([big, "fim"], MAX_BUFFER_BYTES + 3);
     expect(r.chunks).toEqual(["fim"]);
+  });
+});
+
+describe("alinhar e organizar", () => {
+  const items = [
+    { id: "a", geometry: { x: 0, y: 0, w: 100, h: 50 } },
+    { id: "b", geometry: { x: 200, y: 80, w: 60, h: 40 } },
+    { id: "c", geometry: { x: 50, y: 300, w: 100, h: 100 } },
+  ];
+  it("alinha à esquerda pela menor borda x", () => {
+    const out = alignGeometries(items, "left");
+    expect(out.find((o) => o.id === "b")!.geometry.x).toBe(0);
+    expect(out.find((o) => o.id === "c")!.geometry.x).toBe(0);
+    expect(out.find((o) => o.id === "a")).toBeUndefined(); // já estava em x=0
+  });
+  it("alinha à direita pela maior borda x+w", () => {
+    const out = alignGeometries(items, "right"); // maxX = 260
+    expect(out.find((o) => o.id === "a")!.geometry.x).toBe(160);
+  });
+  it("centraliza no eixo vertical", () => {
+    const out = alignGeometries(items, "vcenter"); // minY=0, maxY=400, cy=200
+    expect(out.find((o) => o.id === "a")!.geometry.y).toBe(175); // 200 - 50/2
+  });
+  it("não faz nada com menos de 2 itens", () => {
+    expect(alignGeometries([items[0]!], "left")).toEqual([]);
+  });
+  it("organiza em grade a partir do canto do conjunto", () => {
+    const out = gridLayout(items, 40); // cols=2, colW=max(w)=100+40=140, rowH=max(h)=100+40=140, origin (0,0)
+    const pos = (id: string) => { const o = out.find((x) => x.id === id); return o ? o.geometry : items.find((x) => x.id === id)!.geometry; };
+    expect({ x: pos("a").x, y: pos("a").y }).toEqual({ x: 0, y: 0 });
+    expect({ x: pos("b").x, y: pos("b").y }).toEqual({ x: 140, y: 0 });
+    expect({ x: pos("c").x, y: pos("c").y }).toEqual({ x: 0, y: 140 });
   });
 });
 

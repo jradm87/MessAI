@@ -1,4 +1,4 @@
-import type { ApiError, TreeEntry, FileContent, FsOp, SearchHit, CreateFloor, LandFloor, LandResult, PatchConnection, Role, CreateRole, PatchRole, ChatMessage, SendChat, Attachment, CreateAttachment, FileEntry, Connection as WsConnection, CreateDrawing, CreateFolder, CreateNode, CreateWorkspace, Drawing, Folder, PatchFolder, PatchWorkspace, Preset, Node, PatchNode, Session, Sidebar, Workspace, WorkspaceSnapshot, WsClientMessage, WsServerMessage } from "@messai/contracts";
+import type { ApiError, TreeEntry, FileContent, FsOp, SearchHit, CreateFloor, LandFloor, LandResult, PatchConnection, Role, CreateRole, PatchRole, ChatMessage, SendChat, Attachment, CreateAttachment, FileEntry, Connection as WsConnection, CreateDrawing, CreateFolder, CreateNode, CreateWorkspace, Drawing, Folder, Geometry, PatchFolder, PatchWorkspace, Preset, Node, PatchNode, Session, Sidebar, Workspace, WorkspaceSnapshot, WsClientMessage, WsServerMessage } from "@messai/contracts";
 
 export type Connection = { baseUrl: string; wsUrl: string; token: string; homeDir?: string };
 declare global { interface Window { messai: { connection(): Promise<Connection | null>; pickDirectory?: () => Promise<string | null>; pathForFile?: (f: File) => string } } }
@@ -43,6 +43,8 @@ export class Api {
   createNode(wsId: string, input: CreateNode) { return this.req<{ node: Node; session?: Session; revision: number }>("POST", `/v1/workspaces/${wsId}/nodes`, input); }
   patchNode(id: string, input: PatchNode) { return this.req<Node>("PATCH", `/v1/nodes/${id}`, input); }
   deleteNode(id: string, expectedRevision: number) { return this.req<void>("DELETE", `/v1/nodes/${id}`, { expectedRevision }); }
+  duplicateNode(id: string, expectedRevision: number) { return this.req<{ node: Node; session?: Session; revision: number }>("POST", `/v1/nodes/${id}/duplicate`, { expectedRevision }); }
+  applyLayout(wsId: string, expectedRevision: number, moves: { nodeId: string; geometry: Geometry }[]) { return this.req<{ revision: number }>("POST", `/v1/workspaces/${wsId}/layout`, { expectedRevision, moves }); }
   createConnectionRev(wsId: string, expectedRevision: number, sourceNodeId: string, targetNodeId: string) { return this.req<WsConnection>("POST", `/v1/workspaces/${wsId}/connections`, { expectedRevision, sourceNodeId, targetNodeId }); }
   patchConnection(id: string, input: PatchConnection) { return this.req<WsConnection>("PATCH", `/v1/connections/${id}`, input); }
   deleteConnection(id: string, expectedRevision: number) { return this.req<void>("DELETE", `/v1/connections/${id}`, { expectedRevision }); }

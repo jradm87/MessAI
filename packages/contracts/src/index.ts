@@ -290,6 +290,13 @@ export const PatchNode = Type.Object({
 });
 export type PatchNode = Static<typeof PatchNode>;
 
+/** Mover vários nós de uma vez (alinhar/organizar em grade) numa única revisão. */
+export const ApplyLayout = Type.Object({
+  expectedRevision: Type.Integer(),
+  moves: Type.Array(Type.Object({ nodeId: Id, geometry: Geometry })),
+});
+export type ApplyLayout = Static<typeof ApplyLayout>;
+
 /** Responsabilidade (papel): nome, badge curto e instruções injetadas na partida do agente. Portátil como role.json. */
 export const Role = Type.Object({ roleId: Id, name: Type.String(), badge: Type.String(), instructions: Type.String(), createdAt: Type.String(), updatedAt: Type.String() });
 export type Role = Static<typeof Role>;

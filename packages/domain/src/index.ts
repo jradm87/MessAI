@@ -28,6 +28,44 @@ export function normalizeGeometry(g: Geometry): Geometry {
   };
 }
 
+export type AlignMode = "left" | "right" | "hcenter" | "top" | "bottom" | "vcenter";
+/** Alinha os itens por uma borda/eixo comum. Preserva tamanho; mexe só em x ou y. Retorna só os que mudaram. */
+export function alignGeometries<T extends { id: string; geometry: Geometry }>(items: T[], mode: AlignMode): { id: string; geometry: Geometry }[] {
+  if (items.length < 2) return [];
+  const gs = items.map((i) => i.geometry);
+  const minX = Math.min(...gs.map((g) => g.x)), maxX = Math.max(...gs.map((g) => g.x + g.w));
+  const minY = Math.min(...gs.map((g) => g.y)), maxY = Math.max(...gs.map((g) => g.y + g.h));
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+  const out: { id: string; geometry: Geometry }[] = [];
+  for (const it of items) {
+    const g = it.geometry; let { x, y } = g;
+    if (mode === "left") x = minX;
+    else if (mode === "right") x = maxX - g.w;
+    else if (mode === "hcenter") x = Math.round(cx - g.w / 2);
+    else if (mode === "top") y = minY;
+    else if (mode === "bottom") y = maxY - g.h;
+    else if (mode === "vcenter") y = Math.round(cy - g.h / 2);
+    if (x !== g.x || y !== g.y) out.push({ id: it.id, geometry: { ...g, x: Math.round(x), y: Math.round(y) } });
+  }
+  return out;
+}
+
+/** Organiza os itens numa grade regular a partir do canto superior-esquerdo do conjunto. Colunas ~ raiz quadrada; linhas por altura máxima. Retorna só os que mudaram. */
+export function gridLayout<T extends { id: string; geometry: Geometry }>(items: T[], gap = 40): { id: string; geometry: Geometry }[] {
+  if (items.length < 2) return [];
+  const gs = items.map((i) => i.geometry);
+  const originX = Math.min(...gs.map((g) => g.x)), originY = Math.min(...gs.map((g) => g.y));
+  const cols = Math.max(1, Math.ceil(Math.sqrt(items.length)));
+  const colW = Math.max(...gs.map((g) => g.w)) + gap;
+  const rowH = Math.max(...gs.map((g) => g.h)) + gap;
+  const out: { id: string; geometry: Geometry }[] = [];
+  items.forEach((it, i) => {
+    const x = Math.round(originX + (i % cols) * colW), y = Math.round(originY + Math.floor(i / cols) * rowH);
+    if (x !== it.geometry.x || y !== it.geometry.y) out.push({ id: it.id, geometry: { ...it.geometry, x, y } });
+  });
+  return out;
+}
+
 // ---------- Lease de entrada ----------
 export const LEASE_TTL_MS = 30_000;
 
