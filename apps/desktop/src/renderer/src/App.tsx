@@ -37,18 +37,20 @@ function freeSpot(nodes: { geometry: Geometry }[], size: { w: number; h: number 
 }
 const isTyping = () => { const el = document.activeElement as HTMLElement | null; return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable || el.classList.contains("xterm-helper-textarea")); };
 
-function ZoomBar({ minimap, setMinimap, onUsage, onOverview, agents }: { minimap: boolean; setMinimap: (v: boolean) => void; onUsage: () => void; onOverview: () => void; agents: string[] }) {
+function ZoomBar({ minimap, setMinimap, onUsage, onOverview, agents, wsName }: { minimap: boolean; setMinimap: (v: boolean) => void; onUsage: () => void; onOverview: () => void; agents: string[]; wsName?: string }) {
   const rf = useReactFlow(); const [z, setZ] = useState(100);
   useOnViewportChange({ onChange: (v) => setZ(Math.round(v.zoom * 100)) });
   return (
-    <div className="zoombar">
-      <button className="tb" title="Andares (Ctrl+Shift+\\)" onClick={onOverview}><Layers size={15} /></button>
-      <button className="tb agents" title="Agent Usage" onClick={onUsage}>{agents.length ? <span className="agent-cluster">{agents.slice(0, 5).map((a) => <span key={a} className="agent-ic" title={a}><AgentIcon id={a} size={18} /></span>)}</span> : <Activity size={14} />}</button>
-      <button className="tb" title="Minimapa (Ctrl+Shift+M)" onClick={() => setMinimap(!minimap)}><MapIcon size={14} /></button>
-      <span className="sep" />
-      <button className="tb" title="Reduzir (Ctrl+-)" onClick={() => void rf.zoomOut({ duration: 120 })}><Minus size={14} /></button>
-      <span className="pct" onClick={() => void rf.zoomTo(1, { duration: 150 })} title="100%">{z}%</span>
-      <button className="tb" title="Ampliar (Ctrl++)" onClick={() => void rf.zoomIn({ duration: 120 })}><Plus size={14} /></button>
+    <div className="botbar">
+      {wsName && <button className="bb-pill" title="Andares (Ctrl+Shift+\\)" onClick={onOverview}><Layers size={15} /><span className="bb-name">{wsName}</span></button>}
+      {agents.slice(0, 5).map((a) => <button key={a} className="bb-circle" title={`${a} — Agent Usage`} onClick={onUsage}><AgentIcon id={a} size={20} /></button>)}
+      {agents.length === 0 && <button className="bb-circle" title="Agent Usage" onClick={onUsage}><Activity size={15} /></button>}
+      <button className="bb-circle" title="Minimapa (Ctrl+Shift+M)" onClick={() => setMinimap(!minimap)}><MapIcon size={15} /></button>
+      <div className="bb-zoom">
+        <button className="tb" title="Reduzir (Ctrl+-)" onClick={() => void rf.zoomOut({ duration: 120 })}><Minus size={14} /></button>
+        <span className="pct" onClick={() => void rf.zoomTo(1, { duration: 150 })} title="100%">{z}%</span>
+        <button className="tb" title="Ampliar (Ctrl++)" onClick={() => void rf.zoomIn({ duration: 120 })}><Plus size={14} /></button>
+      </div>
     </div>
   );
 }
@@ -442,7 +444,7 @@ function Canvas({ conn }: { conn: Connection }) {
             <button className={`f-pill-c ground ${isGround ? "on" : ""}`} onClick={() => (isGround ? setOverview(grd.workspaceId) : setCurrent(grd.workspaceId))} data-testid="canvas-ground">Ground</button>
           </div>
         )}
-        <ZoomBar minimap={minimap} setMinimap={setMinimap} onUsage={() => setUsage(true)} onOverview={() => { const g = groundOf(current); if (g) setOverview(g.workspaceId); }} agents={barAgents} />
+        <ZoomBar minimap={minimap} setMinimap={setMinimap} onUsage={() => setUsage(true)} onOverview={() => { const g = groundOf(current); if (g) setOverview(g.workspaceId); }} agents={barAgents} {...(curWs ? { wsName: curWs.name } : {})} />
         {usage && <AgentUsage api={api} onClose={() => setUsage(false)} />}
       </main>
     </div>

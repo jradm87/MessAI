@@ -363,3 +363,14 @@ button.danger:hover { border-color: #ff6b6b; color: #ffb4a8; }
 .f-pill-c.ground.on { background: var(--acc); color: #06111f; border-color: transparent; }
 .f-pill-c.ground::before { content: "◆"; font-size: 10px; opacity: .8; }
 .react-flow__minimap { bottom: 150px !important; }
+
+/* barra inferior em containers separados (estilo Maestri) */
+.botbar { position: absolute; z-index: 7; right: 14px; bottom: 14px; display: flex; align-items: center; gap: 8px; }
+.bb-pill { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 14px; border-radius: 18px; background: #1b1b1f; border: 1px solid var(--line); color: var(--fg); font-size: 13px; }
+.bb-pill:hover { border-color: var(--acc); }
+.bb-name { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bb-circle { width: 36px; height: 36px; border-radius: 50%; display: inline-grid; place-items: center; background: #1b1b1f; border: 1px solid var(--line); color: var(--fg); padding: 0; }
+.bb-circle:hover { border-color: var(--acc); }
+.bb-zoom { display: inline-flex; align-items: center; gap: 2px; height: 36px; padding: 0 8px; border-radius: 18px; background: #1b1b1f; border: 1px solid var(--line); }
+.bb-zoom .pct { font-size: 12px; min-width: 42px; text-align: center; cursor: pointer; }
+.bb-zoom .tb { width: 24px; height: 24px; }
