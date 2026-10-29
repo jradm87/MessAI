@@ -1,10 +1,10 @@
 {
-  "name": "@messyai/domain",
+  "name": "@messai/domain",
   "version": "0.0.1",
   "private": true,
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": { ".": "./dist/index.js" },
-  "dependencies": { "@messyai/contracts": "0.0.1" }
+  "dependencies": { "@messai/contracts": "0.0.1" }
 }

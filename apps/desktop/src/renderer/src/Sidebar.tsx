@@ -1,6 +1,6 @@
 import { useMemo, useState, type DragEvent } from "react";
 import { ChevronDown, ChevronRight, Plus, Settings, FolderPlus, Folder as FolderIcon, FolderOpen, Minus, GitBranch, Layers } from "lucide-react";
-import type { Folder, Sidebar as SidebarData, Workspace } from "@messyai/contracts";
+import type { Folder, Sidebar as SidebarData, Workspace } from "@messai/contracts";
 import { WsIcon } from "./wsicons.js";
 
 export type SidebarActions = {
@@ -34,14 +34,14 @@ export function Sidebar({ data, current, collapsed, machine, act }: { data: Side
   const children = (parent: string | null) => data.folders.filter((f) => (f.parentId ?? null) === parent);
   const hasMatch = (f: Folder): boolean => (byFolder.get(f.folderId)?.length ?? 0) > 0 || children(f.folderId).some(hasMatch);
 
-  const onDragStart = (e: DragEvent, kind: "ws" | "folder", id: string) => { e.dataTransfer.setData("text/messy", `${kind}:${id}`); e.dataTransfer.effectAllowed = "move"; };
+  const onDragStart = (e: DragEvent, kind: "ws" | "folder", id: string) => { e.dataTransfer.setData("text/mess", `${kind}:${id}`); e.dataTransfer.effectAllowed = "move"; };
   const onDrop = (e: DragEvent, target: string | null) => {
     e.preventDefault(); e.stopPropagation(); setOver(null);
-    const [kind, id] = e.dataTransfer.getData("text/messy").split(":");
+    const [kind, id] = e.dataTransfer.getData("text/mess").split(":");
     if (kind === "ws") { const w = data.workspaces.find((x) => x.workspaceId === id); if (w && (w.folderId ?? null) !== target) act.moveWorkspace(w, target); }
     if (kind === "folder") { const f = data.folders.find((x) => x.folderId === id); if (f && f.folderId !== target && (f.parentId ?? null) !== target) act.moveFolder(f, target); }
   };
-  const allow = (e: DragEvent, id: string | null) => { if (e.dataTransfer.types.includes("text/messy")) { e.preventDefault(); setOver(id); } };
+  const allow = (e: DragEvent, id: string | null) => { if (e.dataTransfer.types.includes("text/mess")) { e.preventDefault(); setOver(id); } };
 
   const wsRow = (w: Workspace, depth: number): React.ReactNode => {
     const n = data.terminals[w.workspaceId] ?? 0;
@@ -84,7 +84,7 @@ export function Sidebar({ data, current, collapsed, machine, act }: { data: Side
 
   return (
     <aside className={`side ${collapsed ? "mini" : ""}`} onDragOver={(e) => allow(e, null)} onDrop={(e) => onDrop(e, null)} onContextMenu={(e) => { e.preventDefault(); setCtx({ x: e.clientX, y: e.clientY }); }}>
-      <h1>{collapsed ? "M" : "MessyAI"}</h1>
+      <h1>{collapsed ? "M" : "MessAI"}</h1>
       {!collapsed && <div className="slogan">Many agents. One organized mess.</div>}
       {!collapsed && <div className="machine">máquina {machine}</div>}
       <div className="side-top">

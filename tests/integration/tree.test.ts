@@ -12,11 +12,11 @@ const api = async (method: string, path: string, body?: unknown) => {
   return { status: r.status, json: r.status === 204 ? null : await r.json() };
 };
 beforeAll(async () => {
-  dir = mkdtempSync(join(tmpdir(), "messy-tree-"));
+  dir = mkdtempSync(join(tmpdir(), "mess-tree-"));
   mkdirSync(join(dir, "proj/src/deep"), { recursive: true }); mkdirSync(join(dir, "proj/node_modules/x"), { recursive: true });
   writeFileSync(join(dir, "proj/README.md"), "# Projeto\n\nolá mundo\n"); writeFileSync(join(dir, "proj/src/deep/main.ts"), "export const answer = 42;\n"); writeFileSync(join(dir, "proj/bin.dat"), Buffer.from([1, 0, 2, 0, 3])); writeFileSync(join(dir, "proj/node_modules/x/i.js"), "answer");
   writeFileSync(join(dir, "segredo.txt"), "fora do espaço");
-  rt = spawn("node", [join(ROOT, "apps/runtime/dist/index.js")], { env: { ...process.env, MESSY_DATA_DIR: dir, MESSY_PORT: String(PORT), SHELL: "/bin/sh" }, stdio: "ignore" });
+  rt = spawn("node", [join(ROOT, "apps/runtime/dist/index.js")], { env: { ...process.env, MESS_DATA_DIR: dir, MESS_PORT: String(PORT), SHELL: "/bin/sh" }, stdio: "ignore" });
   for (let i = 0; i < 40; i++) { await new Promise((r) => setTimeout(r, 200)); try { token = readFileSync(join(dir, "runtime.token"), "utf8").trim(); if ((await fetch(`http://127.0.0.1:${PORT}/v1/health`, { headers: { authorization: `Bearer ${token}` } })).ok) break; } catch { /* subindo */ } }
   ws = ((await api("POST", "/v1/workspaces", { name: "Tree", cwd: join(dir, "proj") })).json as { workspaceId: string }).workspaceId;
 }, 30_000);

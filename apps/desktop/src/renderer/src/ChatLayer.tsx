@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Eraser, X } from "lucide-react";
-import type { ChatMessage } from "@messyai/contracts";
+import type { ChatMessage } from "@messai/contracts";
 import type { Api } from "./api.js";
 import { renderMarkdown, useMermaid } from "./md.js";
 
@@ -30,7 +30,7 @@ export function ChatLayer({ nodeId, title, api, thread, setThread, messages, onC
         <button className="tb" title="Fechar (Ctrl+J)" onClick={onClose}><X size={14} /></button>
       </div>
       <div className="bubbles" ref={list} onClick={onClick}>
-        {shown.length === 0 && <div className="mut empty-chat">Sem mensagens neste tópico. Escreva no compositor abaixo; o agente responde com <code>messy say</code>.</div>}
+        {shown.length === 0 && <div className="mut empty-chat">Sem mensagens neste tópico. Escreva no compositor abaixo; o agente responde com <code>mess say</code>.</div>}
         {shown.map((m) => (
           <div key={m.chatId} className={`bubble ${m.role}`} style={m.role === "user" ? { borderColor: THREAD_COLORS[thread - 1] } : undefined}>
             <div className="md" dangerouslySetInnerHTML={{ __html: render(m.text) }} />

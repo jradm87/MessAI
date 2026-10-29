@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { FileContent } from "@messyai/contracts";
+import type { FileContent } from "@messai/contracts";
 import type { Api } from "./api.js";
 
 /** Prévia simples de arquivo (texto com rolagem; binário avisa). Editor embutido vem depois. */

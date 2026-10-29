@@ -12,12 +12,12 @@ const api = async (method: string, path: string, body?: unknown) => {
   return { status: r.status, json: r.status === 204 ? null : await r.json() };
 };
 const cli = (args: string[], env: Record<string, string>) => new Promise<{ code: number; out: string }>((res) => {
-  const p = spawn(join(ROOT, "apps/cli/bin/messy"), args, { env: { ...process.env, ...env } }); let out = "";
+  const p = spawn(join(ROOT, "apps/cli/bin/mess"), args, { env: { ...process.env, ...env } }); let out = "";
   p.stdout.on("data", (d) => (out += d)); p.stderr.on("data", (d) => (out += d)); p.on("exit", (code) => res({ code: code ?? 1, out }));
 });
 beforeAll(async () => {
-  dir = mkdtempSync(join(tmpdir(), "messy-notes-")); mkdirSync(join(dir, "proj"));
-  rt = spawn("node", [join(ROOT, "apps/runtime/dist/index.js")], { env: { ...process.env, MESSY_DATA_DIR: dir, MESSY_PORT: String(PORT), SHELL: "/bin/sh" }, stdio: "ignore" });
+  dir = mkdtempSync(join(tmpdir(), "mess-notes-")); mkdirSync(join(dir, "proj"));
+  rt = spawn("node", [join(ROOT, "apps/runtime/dist/index.js")], { env: { ...process.env, MESS_DATA_DIR: dir, MESS_PORT: String(PORT), SHELL: "/bin/sh" }, stdio: "ignore" });
   for (let i = 0; i < 40; i++) { await new Promise((r) => setTimeout(r, 200)); try { token = readFileSync(join(dir, "runtime.token"), "utf8").trim(); if ((await fetch(`http://127.0.0.1:${PORT}/v1/health`, { headers: { authorization: `Bearer ${token}` } })).ok) break; } catch { /* subindo */ } }
 }, 30_000);
 afterAll(() => { rt?.kill(); rmSync(dir, { recursive: true, force: true }); });
@@ -33,7 +33,7 @@ describe("notas em arquivo .md", () => {
     expect(note.title).toBe("Plano"); expect(note.filePath!.startsWith(join(dir, "notes", ws))).toBe(true);
     expect(readFileSync(note.filePath!, "utf8")).toBe("# Plano\n\ncorpo");
     const t = (await api("POST", `/v1/workspaces/${ws}/nodes`, { expectedRevision: rev++, kind: "terminal", title: "A", command: "cat", geometry: { x: 0, y: 0, w: 200, h: 100 } })).json as { node: { nodeId: string } };
-    env = { MESSY_SOCKET: join(dir, "agent.sock"), MESSY_TOKEN: token, MESSY_WORKSPACE_ID: ws, MESSY_NODE_ID: t.node.nodeId };
+    env = { MESS_SOCKET: join(dir, "agent.sock"), MESS_TOKEN: token, MESS_WORKSPACE_ID: ws, MESS_NODE_ID: t.node.nodeId };
   });
   it("editar conteúdo grava o arquivo e atualiza o título automático; renomear congela o título", async () => {
     await api("PATCH", `/v1/nodes/${note.nodeId}`, { expectedRevision: rev++, content: "Lista de compras\n- pão" });
@@ -48,7 +48,7 @@ describe("notas em arquivo .md", () => {
     const f = Date.now() / 1000 + 5; utimesSync(note.filePath!, f, f); // garante mtime maior
     expect((await snap()).nodes.find((n) => n.nodeId === note.nodeId)!.content).toBe("editado no vim");
   });
-  it("bloqueio: agente não escreve (403), usuário sim; messy context avisa", async () => {
+  it("bloqueio: agente não escreve (403), usuário sim; mess context avisa", async () => {
     await api("PATCH", `/v1/nodes/${note.nodeId}`, { expectedRevision: rev++, locked: true });
     const r = await cli(["note", "append", "Minha nota", "tentativa"], env);
     expect(r.code).not.toBe(0); expect(r.out).toContain("FORBIDDEN");

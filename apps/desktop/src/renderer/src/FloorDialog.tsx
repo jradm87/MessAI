@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Workspace } from "@messyai/contracts";
+import type { Workspace } from "@messai/contracts";
 
 const slug = (n: string) => n.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
 export type FloorInput = { name: string; branch?: string; newBranch?: boolean; base?: string; floorType?: "worktree" | "none"; cloneLayout?: boolean };
@@ -33,7 +33,7 @@ export function FloorDialog({ ground, onSubmit, onClose }: { ground: Workspace; 
               <input value={effBranch} onChange={(e) => { setTouched(true); setBranch(e.target.value); }} placeholder="nome-da-branch" data-testid="floor-branch" />
             </div>
             {mode === "new" && <label>Base <input value={base} onChange={(e) => setBase(e.target.value)} placeholder="(branch atual do térreo)" /></label>}
-            <div className="mut">Cria um worktree em <code>~/.messyai/floors/…</code> com a branch; o térreo continua intocado. Pousar faz merge local.</div>
+            <div className="mut">Cria um worktree em <code>~/.messai/floors/…</code> com a branch; o térreo continua intocado. Pousar faz merge local.</div>
           </>) : <div className="mut">O andar usa o mesmo diretório do térreo: útil para separar o canvas sem separar o código.</div>}
           <label className="chk"><input type="checkbox" checked={clone} onChange={(e) => setClone(e.target.checked)} /> Clonar notas e textos do térreo</label>
         </div>

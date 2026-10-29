@@ -1,5 +1,5 @@
 {
-  "name": "messyai",
+  "name": "messai",
   "private": true,
   "version": "0.0.1",
   "license": "Apache-2.0",
@@ -16,7 +16,7 @@
     "typecheck": "tsc -b --noEmit",
     "test": "vitest run",
     "runtime": "node apps/runtime/dist/index.js",
-    "desktop": "npm run dev -w @messyai/desktop"
+    "desktop": "npm run dev -w @messai/desktop"
   },
   "devDependencies": {
     "@types/node": "22.10.2",

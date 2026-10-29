@@ -6,7 +6,7 @@ import { join } from "node:path";
 
 const ROOT = join(import.meta.dirname, "../..");
 const PORT = 47965;
-const SOCK = `messy-test-${process.pid}`; // servidor tmux isolado (tmux -L): nunca toca no tmux pessoal do usuário
+const SOCK = `mess-test-${process.pid}`; // servidor tmux isolado (tmux -L): nunca toca no tmux pessoal do usuário
 const tmux = (...a: string[]) => execFileSync("tmux", ["-L", SOCK, ...a], { stdio: "ignore" });
 const hasTmux = (() => { try { execFileSync("tmux", ["-V"], { stdio: "ignore" }); return true; } catch { return false; } })();
 let dir: string; let rt: ChildProcess | undefined; let token: string;
@@ -15,12 +15,12 @@ const api = async (method: string, path: string, body?: unknown) => {
   return { status: r.status, json: r.status === 204 ? null : await r.json() };
 };
 const startRuntime = async () => {
-  rt = spawn("node", [join(ROOT, "apps/runtime/dist/index.js")], { env: { ...process.env, MESSY_DATA_DIR: dir, MESSY_PORT: String(PORT), SHELL: "/bin/sh", MESSY_TMUX_SOCKET: SOCK }, stdio: "ignore" });
+  rt = spawn("node", [join(ROOT, "apps/runtime/dist/index.js")], { env: { ...process.env, MESS_DATA_DIR: dir, MESS_PORT: String(PORT), SHELL: "/bin/sh", MESS_TMUX_SOCKET: SOCK }, stdio: "ignore" });
   for (let i = 0; i < 40; i++) { await new Promise((r) => setTimeout(r, 200)); try { token = readFileSync(join(dir, "runtime.token"), "utf8").trim(); if ((await fetch(`http://127.0.0.1:${PORT}/v1/health`, { headers: { authorization: `Bearer ${token}` } })).ok) return; } catch { /* subindo */ } }
   throw new Error("runtime não subiu");
 };
 const wait = async (pred: () => Promise<boolean>, ms = 8000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pred()) return true; await new Promise((r) => setTimeout(r, 150)); } return false; };
-const alive = (sid: string) => { try { tmux("has-session", "-t", `messy-${sid.slice(0, 12)}`); return true; } catch { return false; } };
+const alive = (sid: string) => { try { tmux("has-session", "-t", `mess-${sid.slice(0, 12)}`); return true; } catch { return false; } };
 /** Escreve no PTY pelo WebSocket (o runtime concede o lease quando livre). */
 const typeInto = (sessionId: string, data: string) => new Promise<void>((res, rej) => {
   const ws = new WebSocket(`ws://127.0.0.1:${PORT}/v1/ws?token=${token}`);
@@ -28,12 +28,12 @@ const typeInto = (sessionId: string, data: string) => new Promise<void>((res, re
   ws.onerror = () => rej(new Error("ws"));
 });
 
-beforeAll(async () => { dir = mkdtempSync(join(tmpdir(), "messy-tmux-")); await startRuntime(); }, 30_000);
+beforeAll(async () => { dir = mkdtempSync(join(tmpdir(), "mess-tmux-")); await startRuntime(); }, 30_000);
 afterAll(() => { try { tmux("kill-server"); } catch { /* servidor de teste já encerrado */ } rt?.kill(); rmSync(dir, { recursive: true, force: true }); });
 
 describe.skipIf(!hasTmux)("sessão persistente (tmux)", () => {
   let ws: string, sid: string, plainSid: string, nodeId: string;
-  it("anuncia terminal.tmux e cria sessão persistente dentro do tmux com o ambiente do MessyAI", async () => {
+  it("anuncia terminal.tmux e cria sessão persistente dentro do tmux com o ambiente do MessAI", async () => {
     expect(((await api("GET", "/v1/capabilities")).json as { features: string[] }).features).toContain("terminal.tmux");
     ws = ((await api("POST", "/v1/workspaces", { name: "T", cwd: dir })).json as { workspaceId: string }).workspaceId;
     const r = (await api("POST", `/v1/workspaces/${ws}/nodes`, { expectedRevision: 0, kind: "terminal", title: "P", command: "sh", geometry: { x: 0, y: 0, w: 400, h: 300 }, persistent: true })).json as { node: { nodeId: string }; session: { sessionId: string; persistent?: boolean } };
@@ -42,7 +42,7 @@ describe.skipIf(!hasTmux)("sessão persistente (tmux)", () => {
     plainSid = p.session.sessionId;
     expect(await wait(async () => ((await api("GET", `/v1/sessions/${sid}`)).json as { state: string }).state === "running")).toBe(true);
     expect(await wait(async () => alive(sid))).toBe(true);
-    await typeInto(sid, `echo "node=$MESSY_NODE_ID" > ${dir}/env1.txt; MARK=42\n`);
+    await typeInto(sid, `echo "node=$MESS_NODE_ID" > ${dir}/env1.txt; MARK=42\n`);
     expect(await wait(async () => existsSync(join(dir, "env1.txt")))).toBe(true);
     expect(readFileSync(join(dir, "env1.txt"), "utf8").trim()).toBe(`node=${nodeId}`);
   });

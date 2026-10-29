@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import type { ChatMessage, Connection, Drawing, Folder, Message, Node, Role, Session, Workspace } from "@messyai/contracts";
+import type { ChatMessage, Connection, Drawing, Folder, Message, Node, Role, Session, Workspace } from "@messai/contracts";
 
 const MIGRATIONS: string[] = [
   `CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);

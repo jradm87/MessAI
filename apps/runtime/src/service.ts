@@ -1,6 +1,6 @@
-import { AGENT_ENV, type TreeEntry, type FileContent, type FsOp, type SearchHit, type CreateFloor, type LandFloor, type LandResult, type Role, type CreateRole, type PatchRole, type ChatMessage, type SendChat, type Attachment, type CreateAttachment, type FileEntry, type Connection, type CreateConnection, type PatchConnection, type CreateDrawing, type CreateFolder, type CreateNode, type Drawing, type Folder, type Message, type PatchFolder, type SendMessage, type Sidebar, type CreateWorkspace, type Node, type PatchNode, type PatchWorkspace, type Session, type Workspace, type WorkspaceSnapshot } from "@messyai/contracts";
-import { applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, canMessage, checkRevision, formatDelivery, normalizeGeometry, planLocalTerminal, resolveNodeRef, validateNewNode, fail, succeed, type Result } from "@messyai/domain";
-import type { Store } from "@messyai/storage";
+import { AGENT_ENV, type TreeEntry, type FileContent, type FsOp, type SearchHit, type CreateFloor, type LandFloor, type LandResult, type Role, type CreateRole, type PatchRole, type ChatMessage, type SendChat, type Attachment, type CreateAttachment, type FileEntry, type Connection, type CreateConnection, type PatchConnection, type CreateDrawing, type CreateFolder, type CreateNode, type Drawing, type Folder, type Message, type PatchFolder, type SendMessage, type Sidebar, type CreateWorkspace, type Node, type PatchNode, type PatchWorkspace, type Session, type Workspace, type WorkspaceSnapshot } from "@messai/contracts";
+import { applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, canMessage, checkRevision, formatDelivery, normalizeGeometry, planLocalTerminal, resolveNodeRef, validateNewNode, fail, succeed, type Result } from "@messai/domain";
+import type { Store } from "@messai/storage";
 import { EventEmitter } from "node:events";
 import { newId, nowIso, type Config } from "./config.js";
 import { dirname, join, delimiter, basename, extname, relative } from "node:path";
@@ -165,10 +165,10 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     this.publish(node.workspaceId);
     return succeed(updated);
   }
-  /** Lê role.json em `<dir>/.messyai/roles/<slug>/` (e `.maestri/roles/` por compatibilidade) e cria/atualiza papéis pelo nome. */
+  /** Lê role.json em `<dir>/.messai/roles/<slug>/` (e `.maestri/roles/` por compatibilidade) e cria/atualiza papéis pelo nome. */
   discoverRoles(dir: string): Result<{ imported: Role[] }> {
     const imported: Role[] = [];
-    for (const base of [".messyai", ".maestri"]) {
+    for (const base of [".messai", ".maestri"]) {
       const root = join(dir, base, "roles");
       if (!existsSync(root)) continue;
       for (const e of readdirSync(root, { withFileTypes: true })) {
@@ -187,12 +187,12 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     }
     return succeed({ imported });
   }
-  /** Grava o papel como role.json portátil em `<dir>/.messyai/roles/<slug>/`. */
+  /** Grava o papel como role.json portátil em `<dir>/.messai/roles/<slug>/`. */
   exportRole(id: string, dir: string): Result<{ path: string }> {
     const r = this.store.getRole(id);
     if (!r) return fail("NOT_FOUND", "papel não encontrado");
     const slug = r.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || r.roleId.slice(0, 8);
-    const d = join(dir, ".messyai", "roles", slug);
+    const d = join(dir, ".messai", "roles", slug);
     mkdirSync(d, { recursive: true });
     const path = join(d, "role.json");
     writeFileSync(path, JSON.stringify({ name: r.name, badge: r.badge, instructions: r.instructions }, null, 2) + "\n");

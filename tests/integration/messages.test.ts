@@ -13,13 +13,13 @@ const api = async (method: string, path: string, body?: unknown) => {
   return { status: r.status, json: r.status === 204 ? null : await r.json() };
 };
 const cli = (args: string[], env: Record<string, string>) => new Promise<{ code: number; out: string }>((res) => {
-  const p = spawn(join(ROOT, "apps/cli/bin/messy"), args, { env: { ...process.env, ...env } }); let out = "";
+  const p = spawn(join(ROOT, "apps/cli/bin/mess"), args, { env: { ...process.env, ...env } }); let out = "";
   p.stdout.on("data", (d) => (out += d)); p.stderr.on("data", (d) => (out += d)); p.on("exit", (code) => res({ code: code ?? 1, out }));
 });
 
 beforeAll(async () => {
-  dir = mkdtempSync(join(tmpdir(), "messy-int-"));
-  rt = spawn("node", [join(ROOT, "apps/runtime/dist/index.js")], { env: { ...process.env, MESSY_DATA_DIR: dir, MESSY_PORT: String(PORT), SHELL: "/bin/sh" }, stdio: "ignore" });
+  dir = mkdtempSync(join(tmpdir(), "mess-int-"));
+  rt = spawn("node", [join(ROOT, "apps/runtime/dist/index.js")], { env: { ...process.env, MESS_DATA_DIR: dir, MESS_PORT: String(PORT), SHELL: "/bin/sh" }, stdio: "ignore" });
   for (let i = 0; i < 40; i++) { await new Promise((r) => setTimeout(r, 200)); try { token = readFileSync(join(dir, "runtime.token"), "utf8").trim(); if ((await fetch(`http://127.0.0.1:${PORT}/v1/health`, { headers: H() })).ok) break; } catch { /* subindo */ } }
 }, 30_000);
 afterAll(() => { rt?.kill(); rmSync(dir, { recursive: true, force: true }); });
@@ -31,8 +31,8 @@ describe("mensagens entre agentes", () => {
     const mk = async (rev: number, title: string) => { const r = (await api("POST", `/v1/workspaces/${ws}/nodes`, { expectedRevision: rev, kind: "terminal", title, command: "cat", geometry: { x: 0, y: 0, w: 400, h: 300 } })).json as { node: { nodeId: string }; session: { sessionId: string } }; return { nodeId: r.node.nodeId, sessionId: r.session.sessionId }; };
     a = await mk(0, "Dev"); b = await mk(1, "Revisor");
     const sock = join(dir, "agent.sock");
-    envA = { MESSY_SOCKET: sock, MESSY_TOKEN: token, MESSY_WORKSPACE_ID: ws, MESSY_NODE_ID: a.nodeId };
-    envB = { ...envA, MESSY_NODE_ID: b.nodeId };
+    envA = { MESS_SOCKET: sock, MESS_TOKEN: token, MESS_WORKSPACE_ID: ws, MESS_NODE_ID: a.nodeId };
+    envB = { ...envA, MESS_NODE_ID: b.nodeId };
     expect((await api("GET", `/v1/workspaces/${ws}`)).json).toMatchObject({ workspace: { revision: 2 } });
   });
 

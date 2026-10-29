@@ -60,7 +60,7 @@ describe("mensagens", () => {
   });
   it("formata entrega em uma linha com Enter no fim", () => {
     const t = formatDelivery({ messageId: "1234567890", fromTitle: "Dev", text: "oi\ntudo bem" });
-    expect(t.endsWith("\r")).toBe(true); expect(t).toContain("messy reply 12345678"); expect(t).not.toContain("\n tudo");
+    expect(t.endsWith("\r")).toBe(true); expect(t).toContain("mess reply 12345678"); expect(t).not.toContain("\n tudo");
   });
 });
 
@@ -92,14 +92,14 @@ describe("notas", () => {
 describe("tmux", () => {
   it("embrulha o plano com new-session -A, env injetado e status off", () => {
     const plan = { command: "claude", args: ["--append-system-prompt", "oi lá"], cwd: "/tmp/p", env: { A: "1" } };
-    const t = wrapInTmux(plan, "messy-abc", { MESSY_NODE_ID: "n1" });
+    const t = wrapInTmux(plan, "mess-abc", { MESS_NODE_ID: "n1" });
     expect(t.command).toBe("tmux");
-    expect(t.args.slice(0, 8)).toEqual(["-L", "messy", "new-session", "-A", "-s", "messy-abc", "-c", "/tmp/p"]);
-    expect(t.args).toContain("MESSY_NODE_ID=n1");
+    expect(t.args.slice(0, 8)).toEqual(["-L", "mess", "new-session", "-A", "-s", "mess-abc", "-c", "/tmp/p"]);
+    expect(t.args).toContain("MESS_NODE_ID=n1");
     expect(t.args).toContain("claude --append-system-prompt 'oi lá'");
-    expect(t.args.slice(-5)).toEqual([";", "set-option", "-t", "messy-abc", "status", "off"].slice(1));
-    expect(tmuxAttachPlan(plan, "messy-abc", "t1").args).toEqual(["-L", "t1", "attach-session", "-t", "messy-abc"]);
-    expect(shellQuote("it's")).toBe("'it'\\''s'"); expect(tmuxSessionName("0123456789abcdefXYZ")).toBe("messy-0123456789ab");
+    expect(t.args.slice(-5)).toEqual([";", "set-option", "-t", "mess-abc", "status", "off"].slice(1));
+    expect(tmuxAttachPlan(plan, "mess-abc", "t1").args).toEqual(["-L", "t1", "attach-session", "-t", "mess-abc"]);
+    expect(shellQuote("it's")).toBe("'it'\\''s'"); expect(tmuxSessionName("0123456789abcdefXYZ")).toBe("mess-0123456789ab");
   });
 });
 

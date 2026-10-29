@@ -1,5 +1,5 @@
 // Regras puras. Proibido importar fs, net, pty, banco (ADR-0009).
-import type { ApiError, Connection, ErrorCode, Geometry, Node, Session, Workspace } from "@messyai/contracts";
+import type { ApiError, Connection, ErrorCode, Geometry, Node, Session, Workspace } from "@messai/contracts";
 
 export type Result<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 
@@ -96,14 +96,14 @@ export function trimBuffer(chunks: string[], totalBytes: number): { chunks: stri
 export function canMessage(connections: Pick<Connection, "sourceNodeId" | "targetNodeId">[], from: string, to: string): Result<void> {
   if (from === to) return fail("INVALID", "um nó não envia mensagem para si mesmo");
   const linked = connections.some((c) => (c.sourceNodeId === from && c.targetNodeId === to) || (c.sourceNodeId === to && c.targetNodeId === from));
-  return linked ? succeed(undefined) : fail("FORBIDDEN", "os nós não estão conectados; ligue-os no canvas ou use `messy connect`");
+  return linked ? succeed(undefined) : fail("FORBIDDEN", "os nós não estão conectados; ligue-os no canvas ou use `mess connect`");
 }
 
 /** Texto entregue no terminal de destino. Uma linha de cabeçalho e o corpo; termina com Enter. */
 export function formatDelivery(m: { messageId: string; fromTitle: string; text: string; replyTo?: string | undefined }): string {
   const head = m.replyTo
-    ? `[MessyAI] Resposta de "${m.fromTitle}" (${m.messageId.slice(0, 8)}):`
-    : `[MessyAI] Mensagem de "${m.fromTitle}" (${m.messageId.slice(0, 8)}). Para responder: messy reply ${m.messageId.slice(0, 8)} "texto"`;
+    ? `[MessAI] Resposta de "${m.fromTitle}" (${m.messageId.slice(0, 8)}):`
+    : `[MessAI] Mensagem de "${m.fromTitle}" (${m.messageId.slice(0, 8)}). Para responder: mess reply ${m.messageId.slice(0, 8)} "texto"`;
   return `${head}\n${m.text.replace(/\r?\n/g, " ")}\r`;
 }
 
@@ -144,16 +144,16 @@ export const noteFileName = (title: string): string => `${(title.replace(/[\\/:*
 
 
 // ---------- tmux (sessão persistente) ----------
-export const tmuxSessionName = (sessionId: string): string => `messy-${sessionId.slice(0, 12)}`;
+export const tmuxSessionName = (sessionId: string): string => `mess-${sessionId.slice(0, 12)}`;
 /** Aspas simples POSIX para montar o comando que o tmux executa. */
 export const shellQuote = (a: string): string => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(a) ? a : `'${a.replace(/'/g, `'\\''`)}'`);
 /** Plano equivalente rodando dentro do tmux: cria (ou reanexa, -A) a sessão com o comando e o ambiente injetado; o status bar fica desligado. */
-export function wrapInTmux(plan: TerminalPlan, name: string, inject: Record<string, string>, socket = "messy"): TerminalPlan {
+export function wrapInTmux(plan: TerminalPlan, name: string, inject: Record<string, string>, socket = "mess"): TerminalPlan {
   const cmd = [plan.command, ...plan.args].map(shellQuote).join(" ");
   const envFlags = Object.entries(inject).flatMap(([k, v]) => ["-e", `${k}=${v}`]);
   return { ...plan, command: "tmux", args: ["-L", socket, "new-session", "-A", "-s", name, "-c", plan.cwd, ...envFlags, cmd, ";", "set-option", "-t", name, "status", "off"] };
 }
-export const tmuxAttachPlan = (plan: TerminalPlan, name: string, socket = "messy"): TerminalPlan => ({ ...plan, command: "tmux", args: ["-L", socket, "attach-session", "-t", name] });
+export const tmuxAttachPlan = (plan: TerminalPlan, name: string, socket = "mess"): TerminalPlan => ({ ...plan, command: "tmux", args: ["-L", socket, "attach-session", "-t", name] });
 
 
 // ---------- andares (floors) ----------

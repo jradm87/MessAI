@@ -5,8 +5,8 @@ import type { WebSocket } from "ws";
 import {
   BUILD_VERSION, PROTOCOL_VERSION, SendMessage, CreateConnection, CreateDrawing, CreateNode, CreateWorkspace, DeleteNode, PatchNode, PatchWorkspace, WsClientMessage,
   type Capabilities, type WsServerMessage, type ApiError,
- CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, CreateFloor, LandFloor, FsOp } from "@messyai/contracts";
-import type { Result } from "@messyai/domain";
+ CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, CreateFloor, LandFloor, FsOp } from "@messai/contracts";
+import type { Result } from "@messai/domain";
 import { newId, type Config } from "./config.js";
 import { accessSync, constants } from "node:fs";
 import { delimiter, join as joinPath } from "node:path";
@@ -43,7 +43,7 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
     protocolVersion: PROTOCOL_VERSION, machineId: cfg.machineId,
     features: ["workspaces", "folders", "sidebar", "files", "attachments", "chat", "roles", "notes.file", "notes.lock", "connections.style", "floors", "nodes.tree", ...(SessionManager.tmuxAvailable() ? ["terminal.tmux"] : []), "nodes.terminal", "nodes.note", "connections", "messages", "drawings", "nodes.text", "terminal.lease", "terminal.snapshot", opts.unix ? "agent.socket" : "client.http"],
   }));
-  const AGENT_HINT = "Você está rodando dentro de um nó terminal do MessyAI, um workspace visual para agentes. Outros nós (notas, terminais) podem estar conectados ao seu. Use o comando `messy context` para ver o espaço, seu nó e o conteúdo das notas conectadas; `messy note read <id|título>`, `messy note write <título> <texto>` (cria nota ligada a você), `messy connect <nodeId>`, `messy nodes`. Para falar com outro agente conectado: `messy peers` lista quem está ligado a você, `messy ask <nome> 'pergunta'` envia (chega como mensagem no terminal dele), `messy reply <id> 'texto'` responde, `messy inbox` mostra mensagens recebidas. Chat: quando uma mensagem do usuário vier marcada com [MessyAI chat], responda também com `messy say 'sua resposta em Markdown'` (aparece em balões na tela); `messy chat` mostra o histórico do chat. Quando o usuário mencionar 'a nota conectada' ou 'a nota ligada', leia com `messy context`.";
+  const AGENT_HINT = "Você está rodando dentro de um nó terminal do MessAI, um workspace visual para agentes. Outros nós (notas, terminais) podem estar conectados ao seu. Use o comando `mess context` para ver o espaço, seu nó e o conteúdo das notas conectadas; `mess note read <id|título>`, `mess note write <título> <texto>` (cria nota ligada a você), `mess connect <nodeId>`, `mess nodes`. Para falar com outro agente conectado: `mess peers` lista quem está ligado a você, `mess ask <nome> 'pergunta'` envia (chega como mensagem no terminal dele), `mess reply <id> 'texto'` responde, `mess inbox` mostra mensagens recebidas. Chat: quando uma mensagem do usuário vier marcada com [MessAI chat], responda também com `mess say 'sua resposta em Markdown'` (aparece em balões na tela); `mess chat` mostra o histórico do chat. Quando o usuário mencionar 'a nota conectada' ou 'a nota ligada', leia com `mess context`.";
   const PRESETS = [
     { id: "shell", label: "Shell", command: cfg.defaultShell, args: [] as string[] },
     { id: "claude", label: "Claude Code", command: "claude", args: ["--append-system-prompt", AGENT_HINT] },
@@ -203,15 +203,15 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
         const push = (m: WsServerMessage) => { if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(m)); };
 
         const onOutput = (sessionId: string, sequence: number, data: string) => { if (attached.has(sessionId)) push({ type: "output", sessionId, sequence, data }); };
-        const onSession = (session: Parameters<typeof push>[0] extends never ? never : import("@messyai/contracts").Session) => {
+        const onSession = (session: Parameters<typeof push>[0] extends never ? never : import("@messai/contracts").Session) => {
           if (workspaces.has(session.workspaceId) || attached.has(session.sessionId)) push({ type: "session", session });
           push({ type: "sidebar", sidebar: svc.sidebar() }); // contagem de terminais por espaço
         };
-        const onWorkspace = (snapshot: import("@messyai/contracts").WorkspaceSnapshot) => { if (workspaces.has(snapshot.workspace.workspaceId)) push({ type: "workspace", snapshot }); };
-        const onMessage = (message: import("@messyai/contracts").Message) => { if (workspaces.has(message.workspaceId)) push({ type: "message", message }); };
-        const onSidebar = (sidebar: import("@messyai/contracts").Sidebar) => push({ type: "sidebar", sidebar });
+        const onWorkspace = (snapshot: import("@messai/contracts").WorkspaceSnapshot) => { if (workspaces.has(snapshot.workspace.workspaceId)) push({ type: "workspace", snapshot }); };
+        const onMessage = (message: import("@messai/contracts").Message) => { if (workspaces.has(message.workspaceId)) push({ type: "message", message }); };
+        const onSidebar = (sidebar: import("@messai/contracts").Sidebar) => push({ type: "sidebar", sidebar });
         svc.on("sidebar", onSidebar);
-        const onChat = (message: import("@messyai/contracts").ChatMessage) => { if (workspaces.has(message.workspaceId)) push({ type: "chat", message }); };
+        const onChat = (message: import("@messai/contracts").ChatMessage) => { if (workspaces.has(message.workspaceId)) push({ type: "chat", message }); };
         svc.on("chat", onChat);
         svc.on("message", onMessage);
         svc.sessions.on("output", onOutput);

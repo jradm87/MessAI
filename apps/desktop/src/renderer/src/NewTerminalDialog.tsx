@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { SquareTerminal } from "lucide-react";
 import { AgentIcon } from "./agentIcons.js";
-import type { Preset, Role } from "@messyai/contracts";
+import type { Preset, Role } from "@messai/contracts";
 
 export type NewTerminalInput = { title: string; command?: string; cwd?: string; presetId?: string; roleId?: string; persistent?: boolean };
 const ICON: Record<string, React.ReactNode> = { claude: <AgentIcon id="claude" size={26} />, codex: <AgentIcon id="codex" size={26} />, antigravity: <AgentIcon id="antigravity" size={26} />, opencode: <AgentIcon id="opencode" size={26} />, gemini: <AgentIcon id="gemini" size={26} />, shell: <SquareTerminal size={26} /> };
@@ -13,7 +13,7 @@ export function NewTerminalDialog({ presets, roles, defaultCwd, onCreate, onClos
   const first = presets.find((p) => p.available) ?? presets[0];
   const [sel, setSel] = useState<Preset | undefined>(first);
   const [title, setTitle] = useState(first?.label ?? "Terminal");
-  const [command, setCommand] = useState(first ? [first.command, ...first.args.filter((a) => !a.startsWith("--append-system-prompt") && !a.includes("MessyAI"))].join(" ") : "");
+  const [command, setCommand] = useState(first ? [first.command, ...first.args.filter((a) => !a.startsWith("--append-system-prompt") && !a.includes("MessAI"))].join(" ") : "");
   const [cwd, setCwd] = useState(defaultCwd);
   const [tab, setTab] = useState<"details" | "appearance" | "role">("details");
   useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); }; window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, [onClose]);
@@ -42,7 +42,7 @@ export function NewTerminalDialog({ presets, roles, defaultCwd, onCreate, onClos
             <label className="chk"><input type="checkbox" checked readOnly /> Monitorar atividade <span className="mut">(em breve)</span></label>
             <label className="chk"><input type="checkbox" disabled /> Maestro <span className="mut">(em breve)</span></label>
             <div className="lbl">Diretório de trabalho</div>
-            <div className="row"><input value={cwd} onChange={(e) => setCwd(e.target.value)} /><button onClick={() => void window.messyai.pickDirectory?.().then((d) => d && setCwd(d))}>Procurar…</button></div>
+            <div className="row"><input value={cwd} onChange={(e) => setCwd(e.target.value)} /><button onClick={() => void window.messai.pickDirectory?.().then((d) => d && setCwd(d))}>Procurar…</button></div>
           </div>
         ) : tab === "role" ? (
           <div className="form">

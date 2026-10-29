@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { spawn, type ChildProcess } from "node:child_process";
 const cli = (args: string[], env: Record<string, string>) => new Promise<{ code: number; out: string }>((res) => {
-  const p = spawn(join(ROOT, "apps/cli/bin/messy"), args, { env: { ...process.env, ...env } }); let out = "";
+  const p = spawn(join(ROOT, "apps/cli/bin/mess"), args, { env: { ...process.env, ...env } }); let out = "";
   p.stdout.on("data", (d) => (out += d)); p.stderr.on("data", (d) => (out += d)); p.on("exit", (code) => res({ code: code ?? 1, out }));
 });
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -17,10 +17,10 @@ const api = async (method: string, path: string, body?: unknown) => {
   return { status: r.status, json: r.status === 204 ? null : await r.json() };
 };
 beforeAll(async () => {
-  dir = mkdtempSync(join(tmpdir(), "messy-cp-"));
+  dir = mkdtempSync(join(tmpdir(), "mess-cp-"));
   mkdirSync(join(dir, "proj/src/deep"), { recursive: true }); mkdirSync(join(dir, "proj/node_modules/x"), { recursive: true });
   writeFileSync(join(dir, "proj/README.md"), "# x"); writeFileSync(join(dir, "proj/src/deep/main.ts"), ""); writeFileSync(join(dir, "proj/node_modules/x/index.js"), "");
-  rt = spawn("node", [join(ROOT, "apps/runtime/dist/index.js")], { env: { ...process.env, MESSY_DATA_DIR: dir, MESSY_PORT: String(PORT), SHELL: "/bin/sh" }, stdio: "ignore" });
+  rt = spawn("node", [join(ROOT, "apps/runtime/dist/index.js")], { env: { ...process.env, MESS_DATA_DIR: dir, MESS_PORT: String(PORT), SHELL: "/bin/sh" }, stdio: "ignore" });
   for (let i = 0; i < 40; i++) { await new Promise((r) => setTimeout(r, 200)); try { token = readFileSync(join(dir, "runtime.token"), "utf8").trim(); if ((await fetch(`http://127.0.0.1:${PORT}/v1/health`, { headers: H() })).ok) break; } catch { /* subindo */ } }
 }, 30_000);
 afterAll(() => { rt?.kill(); rmSync(dir, { recursive: true, force: true }); });
@@ -47,8 +47,8 @@ describe("compositor: arquivos e anexos", () => {
     expect((await api("POST", `/v1/workspaces/${ws}/attachments`, { name: "x", dataBase64: "" })).status).toBe(400);
   });
 
-  it("chat: cliente posta como usuário, agente responde com messy say, histórico e limpar", async () => {
-    const env = { MESSY_SOCKET: join(dir, "agent.sock"), MESSY_TOKEN: token, MESSY_WORKSPACE_ID: ws, MESSY_NODE_ID: node };
+  it("chat: cliente posta como usuário, agente responde com mess say, histórico e limpar", async () => {
+    const env = { MESS_SOCKET: join(dir, "agent.sock"), MESS_TOKEN: token, MESS_WORKSPACE_ID: ws, MESS_NODE_ID: node };
     const u = await api("POST", `/v1/nodes/${node}/chat`, { text: "oi, tudo bem?" });
     expect(u.status).toBe(201); expect(u.json).toMatchObject({ role: "user", thread: 1 });
     const r = await cli(["say", "**tudo** ótimo", "--thread", "2"], env);

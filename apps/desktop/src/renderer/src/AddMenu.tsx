@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Preset } from "@messyai/contracts";
+import type { Preset } from "@messai/contracts";
 
 export type AddChoice = { kind: "note" } | { kind: "tree" } | { kind: "terminal"; preset?: Preset; command?: string };
 

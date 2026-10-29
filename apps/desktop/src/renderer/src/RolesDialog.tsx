@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Plus, Trash2, FolderSearch, FileDown } from "lucide-react";
-import type { Role } from "@messyai/contracts";
+import type { Role } from "@messai/contracts";
 import type { Api } from "./api.js";
 
 /** Gerenciar responsabilidades: lista, editor (nome, badge, instruções), descobrir no diretório do espaço, exportar role.json. */
@@ -22,7 +22,7 @@ export function RolesDialog({ api, workspaceCwd, onClose, onChanged }: { api: Ap
     } catch (e) { say(String(e)); }
   };
   const del = async () => { if (sel && sel !== "new" && confirm("Apagar este papel? Terminais que o usam ficam sem papel.")) { await api.deleteRole(sel); setSel(null); await load(); onChanged(); } };
-  const discover = async () => { try { const r = await api.discoverRoles(workspaceCwd); await load(); onChanged(); say(r.imported.length ? `${r.imported.length} papel(is) importado(s) de ${workspaceCwd}` : "nenhum role.json em .messyai/roles ou .maestri/roles"); } catch (e) { say(String(e)); } };
+  const discover = async () => { try { const r = await api.discoverRoles(workspaceCwd); await load(); onChanged(); say(r.imported.length ? `${r.imported.length} papel(is) importado(s) de ${workspaceCwd}` : "nenhum role.json em .messai/roles ou .maestri/roles"); } catch (e) { say(String(e)); } };
   const exp = async () => { if (sel && sel !== "new") { try { const r = await api.exportRole(sel, workspaceCwd); say(`gravado em ${r.path}`); } catch (e) { say(String(e)); } } };
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
@@ -33,7 +33,7 @@ export function RolesDialog({ api, workspaceCwd, onClose, onChanged }: { api: Ap
             {roles.map((r) => <div key={r.roleId} className={`mi ${sel === r.roleId ? "on" : ""}`} onClick={() => pick(r)}><span className="role-badge">{r.badge || r.name.slice(0, 2).toUpperCase()}</span><span className="nm">{r.name}</span></div>)}
             <div className={`mi ${sel === "new" ? "on" : ""}`} onClick={() => pick("new")} data-testid="role-new"><Plus size={14} /> Novo papel</div>
             <div className="sp" />
-            <button onClick={() => void discover()} title={`Procura role.json em ${workspaceCwd}/.messyai/roles e .maestri/roles`}><FolderSearch size={14} /> Descobrir no diretório</button>
+            <button onClick={() => void discover()} title={`Procura role.json em ${workspaceCwd}/.messai/roles e .maestri/roles`}><FolderSearch size={14} /> Descobrir no diretório</button>
           </div>
           <div className="roles-edit">
             {sel ? (<>
@@ -41,10 +41,10 @@ export function RolesDialog({ api, workspaceCwd, onClose, onChanged }: { api: Ap
               <textarea className="role-instr" value={instr} onChange={(e) => setInstr(e.target.value)} placeholder="Instruções injetadas na partida do agente (Markdown livre)…" data-testid="role-instr" />
               <div className="actions left">
                 <button className="pri" disabled={!name.trim()} onClick={() => void save()} data-testid="role-save">{sel === "new" ? "Criar" : "Salvar"}</button>
-                {sel !== "new" && <><button onClick={() => void exp()} title="Grava .messyai/roles/<slug>/role.json no diretório do espaço"><FileDown size={14} /> Exportar</button><button className="danger" onClick={() => void del()}><Trash2 size={14} /> Apagar</button></>}
+                {sel !== "new" && <><button onClick={() => void exp()} title="Grava .messai/roles/<slug>/role.json no diretório do espaço"><FileDown size={14} /> Exportar</button><button className="danger" onClick={() => void del()}><Trash2 size={14} /> Apagar</button></>}
                 <span className="mut">{msg}</span>
               </div>
-            </>) : <div className="mut empty-roles">Selecione um papel ou crie um novo. As instruções entram no system prompt do Claude Code e nas variáveis <code>MESSY_ROLE</code> / <code>MESSY_ROLE_INSTRUCTIONS</code> de qualquer CLI.</div>}
+            </>) : <div className="mut empty-roles">Selecione um papel ou crie um novo. As instruções entram no system prompt do Claude Code e nas variáveis <code>MESS_ROLE</code> / <code>MESS_ROLE_INSTRUCTIONS</code> de qualquer CLI.</div>}
           </div>
         </div>
         <div className="actions"><button onClick={onClose}>Fechar</button></div>

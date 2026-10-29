@@ -3,14 +3,14 @@ import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-export const UNIT_NAME = "messyai-runtime.service";
+export const UNIT_NAME = "messai-runtime.service";
 export const unitPath = (home = homedir()): string => join(home, ".config", "systemd", "user", UNIT_NAME);
 
 /** Conteúdo da unidade `systemd --user` que mantém o runtime vivo independente da janela. */
 export function renderUnit(opts: { nodeBin: string; entry: string; dataDir?: string | undefined; port?: number | undefined }): string {
-  const env = [opts.dataDir ? `Environment=MESSY_DATA_DIR=${opts.dataDir}` : "", opts.port ? `Environment=MESSY_PORT=${opts.port}` : ""].filter(Boolean).join("\n");
+  const env = [opts.dataDir ? `Environment=MESS_DATA_DIR=${opts.dataDir}` : "", opts.port ? `Environment=MESS_PORT=${opts.port}` : ""].filter(Boolean).join("\n");
   return `[Unit]
-Description=MessyAI runtime (PTYs, notas, agentes)
+Description=MessAI runtime (PTYs, notas, agentes)
 After=default.target
 
 [Service]

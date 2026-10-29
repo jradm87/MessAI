@@ -226,7 +226,7 @@ export const Session = Type.Object({
 });
 export type Session = Static<typeof Session>;
 
-/** Chat por terminal: camada sobre o PTY; o agente responde com `messy say`, sem parsing de saída. 7 tópicos fixos. */
+/** Chat por terminal: camada sobre o PTY; o agente responde com `mess say`, sem parsing de saída. 7 tópicos fixos. */
 export const ChatRole = Type.Union([Type.Literal("user"), Type.Literal("agent"), Type.Literal("system")]);
 export type ChatRole = Static<typeof ChatRole>;
 export const ChatMessage = Type.Object({ chatId: Id, workspaceId: Id, nodeId: Id, thread: Type.Integer({ minimum: 1, maximum: 7 }), role: ChatRole, text: Type.String(), createdAt: Type.String() });
@@ -358,18 +358,18 @@ export type Preset = Static<typeof Preset>;
 
 // ---------- Variáveis injetadas em terminais (ADR-0008) ----------
 export const AGENT_ENV = {
-  socket: "MESSY_SOCKET",
-  token: "MESSY_TOKEN",
-  workspaceId: "MESSY_WORKSPACE_ID",
-  workspaceName: "MESSY_WORKSPACE_NAME",
-  workspaceDir: "MESSY_WORKSPACE_DIR",
-  nodeId: "MESSY_NODE_ID",
-  floorName: "MESSY_FLOOR_NAME",
-  branchName: "MESSY_BRANCH_NAME",
-  floorPath: "MESSY_FLOOR_PATH",
-  rootPath: "MESSY_ROOT_PATH",
-  projectName: "MESSY_PROJECT_NAME",
-  roleName: "MESSY_ROLE",
-  roleInstructions: "MESSY_ROLE_INSTRUCTIONS",
-  sessionId: "MESSY_SESSION_ID",
+  socket: "MESS_SOCKET",
+  token: "MESS_TOKEN",
+  workspaceId: "MESS_WORKSPACE_ID",
+  workspaceName: "MESS_WORKSPACE_NAME",
+  workspaceDir: "MESS_WORKSPACE_DIR",
+  nodeId: "MESS_NODE_ID",
+  floorName: "MESS_FLOOR_NAME",
+  branchName: "MESS_BRANCH_NAME",
+  floorPath: "MESS_FLOOR_PATH",
+  rootPath: "MESS_ROOT_PATH",
+  projectName: "MESS_PROJECT_NAME",
+  roleName: "MESS_ROLE",
+  roleInstructions: "MESS_ROLE_INSTRUCTIONS",
+  sessionId: "MESS_SESSION_ID",
 } as const;

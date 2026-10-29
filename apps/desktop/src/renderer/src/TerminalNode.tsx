@@ -3,12 +3,12 @@ import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
-import type { Session } from "@messyai/contracts";
+import type { Session } from "@messai/contracts";
 import type { Api, Stream } from "./api.js";
 import { EditableTitle } from "./EditableTitle.js";
 import { Composer, type MentionTarget } from "./Composer.js";
 import { ChatLayer } from "./ChatLayer.js";
-import type { ChatMessage, Role } from "@messyai/contracts";
+import type { ChatMessage, Role } from "@messai/contracts";
 
 export type NodeExtras = { onLink: () => void; linkCount: number; onChat: () => void; onRaise: () => void; attention?: boolean };
 export type ComposerExtras = { composerOpen: boolean; onComposerClose: () => void; onFocus: () => void; workspaceId: string; targets: MentionTarget[]; chatOpen: boolean; onChatClose: () => void; role?: Role; roles: Role[]; onSetRole: (roleId: string | null) => void; onManageRoles: () => void };
@@ -87,7 +87,7 @@ export function TerminalNode({ id, data, selected }: NodeProps & { data: Termina
           </div>
         )}
         <span className={`st ${state}`}>{state}{session?.persistent ? " · tmux" : ""}{session?.pid ? ` · pid ${session.pid}` : ""}{session?.lease ? (mine ? " · você controla" : " · observando") : ""}</span>
-        {data.unread > 0 && <span className="badge" title="mensagens não lidas de outros agentes (messy inbox)">✉ {data.unread}</span>}
+        {data.unread > 0 && <span className="badge" title="mensagens não lidas de outros agentes (mess inbox)">✉ {data.unread}</span>}
         {chatUnread > 0 && <span className="badge chatb" title="respostas no chat (Ctrl+J)">💬 {chatUnread}</span>}
         <span className="sp" />
         {state === "running" && <button title="Parar processo" onClick={() => void api.stop(sessionId)}>■</button>}
@@ -97,8 +97,8 @@ export function TerminalNode({ id, data, selected }: NodeProps & { data: Termina
       {err && <div className="err">{err}</div>}
       <div className="term-wrap">
         <div className="term nodrag nowheel" ref={host} tabIndex={0}
-          onDragOver={(e) => { if (e.dataTransfer.types.includes("text/messy-path") || e.dataTransfer.types.includes("text/plain")) e.preventDefault(); }}
-          onDrop={(e) => { const p = e.dataTransfer.getData("text/messy-path") || e.dataTransfer.getData("text/plain"); if (!p) return; e.preventDefault(); stream.send({ type: "acquireLease", sessionId }); stream.send({ type: "input", sessionId, data: /\s/.test(p) ? `'${p}' ` : `${p} ` }); }} />
+          onDragOver={(e) => { if (e.dataTransfer.types.includes("text/mess-path") || e.dataTransfer.types.includes("text/plain")) e.preventDefault(); }}
+          onDrop={(e) => { const p = e.dataTransfer.getData("text/mess-path") || e.dataTransfer.getData("text/plain"); if (!p) return; e.preventDefault(); stream.send({ type: "acquireLease", sessionId }); stream.send({ type: "input", sessionId, data: /\s/.test(p) ? `'${p}' ` : `${p} ` }); }} />
         {data.chatOpen && <ChatLayer nodeId={id} title={data.title} api={api} thread={thread} setThread={setThread} messages={chat} onClose={data.onChatClose} />}
       </div>
       <Handle type="source" position={Position.Right} /><Handle type="target" position={Position.Left} />

@@ -13,15 +13,15 @@ const api = async (method: string, path: string, body?: unknown) => {
 };
 const wait = async (pred: () => Promise<boolean>, ms = 6000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pred()) return true; await new Promise((r) => setTimeout(r, 120)); } return false; };
 beforeAll(async () => {
-  dir = mkdtempSync(join(tmpdir(), "messy-shell-"));
-  // MESSY_SHELL força o shell padrão (o usuário pode trocar assim)
-  rt = spawn("node", [join(ROOT, "apps/runtime/dist/index.js")], { env: { ...process.env, MESSY_DATA_DIR: dir, MESSY_PORT: String(PORT), MESSY_SHELL: "/bin/sh" }, stdio: "ignore" });
+  dir = mkdtempSync(join(tmpdir(), "mess-shell-"));
+  // MESS_SHELL força o shell padrão (o usuário pode trocar assim)
+  rt = spawn("node", [join(ROOT, "apps/runtime/dist/index.js")], { env: { ...process.env, MESS_DATA_DIR: dir, MESS_PORT: String(PORT), MESS_SHELL: "/bin/sh" }, stdio: "ignore" });
   for (let i = 0; i < 40; i++) { await new Promise((r) => setTimeout(r, 200)); try { token = readFileSync(join(dir, "runtime.token"), "utf8").trim(); if ((await fetch(`http://127.0.0.1:${PORT}/v1/health`, { headers: { authorization: `Bearer ${token}` } })).ok) break; } catch { /* subindo */ } }
 }, 30_000);
 afterAll(() => { rt?.kill(); rmSync(dir, { recursive: true, force: true }); });
 
 describe("shell padrão do PC", () => {
-  it("o preset Shell e o terminal sem comando usam MESSY_SHELL", async () => {
+  it("o preset Shell e o terminal sem comando usam MESS_SHELL", async () => {
     const shell = ((await api("GET", "/v1/presets")).json as { id: string; command: string }[]).find((p) => p.id === "shell")!;
     expect(shell.command).toBe("/bin/sh");
     const ws = ((await api("POST", "/v1/workspaces", { name: "S", cwd: dir })).json as { workspaceId: string }).workspaceId;

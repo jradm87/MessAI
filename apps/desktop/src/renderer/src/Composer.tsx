@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
 import { NodeToolbar, Position } from "@xyflow/react";
 import { Paperclip, SendHorizontal, SquareTerminal, StickyNote, FileText, Folder } from "lucide-react";
-import type { FileEntry } from "@messyai/contracts";
+import type { FileEntry } from "@messai/contracts";
 import type { Api, Stream } from "./api.js";
 
 export type MentionTarget = { id: string; kind: "terminal" | "note"; title: string; connected: boolean };
@@ -16,7 +16,7 @@ const toBase64 = (f: File) => new Promise<string>((res, rej) => { const r = new 
 
 /** Compositor flutuante abaixo do terminal: @ menciona nós, # insere arquivo, clipe/colar anexa, colagem longa vira pill, rascunho por terminal. */
 export function Composer(p: ComposerProps) {
-  const key = `messy.draft.${p.nodeId}`;
+  const key = `mess.draft.${p.nodeId}`;
   const [text, setText] = useState(() => { try { return localStorage.getItem(key) ?? ""; } catch { return ""; } });
   const [pills, setPills] = useState<Pill[]>([]);
   const [pop, setPop] = useState<{ kind: "@" | "#"; at: number; q: string } | null>(null);
@@ -66,7 +66,7 @@ export function Composer(p: ComposerProps) {
   };
   const onDrop = (e: DragEvent) => {
     e.preventDefault();
-    const p = e.dataTransfer.getData("text/messy-path") || (e.dataTransfer.files.length ? "" : e.dataTransfer.getData("text/plain"));
+    const p = e.dataTransfer.getData("text/mess-path") || (e.dataTransfer.files.length ? "" : e.dataTransfer.getData("text/plain"));
     if (p) { setText((t) => `${t}${t && !t.endsWith(" ") ? " " : ""}${p} `); return; }
     for (const f of [...e.dataTransfer.files]) void attach(f);
   };
@@ -74,15 +74,15 @@ export function Composer(p: ComposerProps) {
     let out = t;
     for (const pl of pills) out = out.replace(`[colagem ${pl.n}]`, pl.text);
     const refs: string[] = [];
-    for (const m of p.targets) { const tag = `@${m.title.replace(/\s+/g, "_")}`; if (out.includes(tag)) refs.push(m.kind === "note" ? `${tag} = nota "${m.title}" (ler: messy note read ${m.id.slice(0, 8)})` : `${tag} = terminal "${m.title}" (falar: messy ask ${m.id.slice(0, 8)} "…")`); }
-    return refs.length ? `${out}\n[MessyAI] Referências: ${refs.join("; ")}` : out;
+    for (const m of p.targets) { const tag = `@${m.title.replace(/\s+/g, "_")}`; if (out.includes(tag)) refs.push(m.kind === "note" ? `${tag} = nota "${m.title}" (ler: mess note read ${m.id.slice(0, 8)})` : `${tag} = terminal "${m.title}" (falar: mess ask ${m.id.slice(0, 8)} "…")`); }
+    return refs.length ? `${out}\n[MessAI] Referências: ${refs.join("; ")}` : out;
   };
   const send = () => {
     const t = text.trim(); if (!t) return;
     const body = expand(t);
     if (p.chatThread) void p.api.say(p.nodeId, { text: t, thread: p.chatThread, role: "user" }).catch(() => {});
     p.stream.send({ type: "acquireLease", sessionId: p.sessionId });
-    p.stream.send({ type: "input", sessionId: p.sessionId, data: (p.chatThread ? `[MessyAI chat t${p.chatThread}] ` : "") + body + "\r" });
+    p.stream.send({ type: "input", sessionId: p.sessionId, data: (p.chatThread ? `[MessAI chat t${p.chatThread}] ` : "") + body + "\r" });
     setText(""); setPills([]); setPop(null);
   };
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {

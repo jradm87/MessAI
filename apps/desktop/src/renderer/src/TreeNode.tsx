@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
 import { ArrowLeft, ArrowRight, ArrowUp, Folder, FolderOpen, FileText, File as FileIcon, FileCode2, Image as ImageIcon, LayoutList, LayoutGrid, RefreshCw, FolderPlus, FilePlus, Search, Home } from "lucide-react";
-import type { TreeEntry, SearchHit } from "@messyai/contracts";
+import type { TreeEntry, SearchHit } from "@messai/contracts";
 import type { Api } from "./api.js";
 import type { NodeExtras } from "./TerminalNode.js";
 import { EditableTitle } from "./EditableTitle.js";
@@ -44,7 +44,7 @@ export function TreeNode({ id, data, selected }: NodeProps & { data: TreeData })
   const mk = (kind: "mkdir" | "touch", base: string) => void askText(kind === "mkdir" ? "Nome da pasta" : "Nome do arquivo", "", kind === "touch" ? "ex.: notas.md" : "").then((name) => { if (name) void op({ op: kind, path: base ? `${base}/${name}` : name }); });
   const rename = (e: TreeEntry) => void askText("Novo nome", e.name).then((name) => { if (name && name !== e.name) void op({ op: "rename", path: e.path, to: e.path.includes("/") ? `${e.path.slice(0, e.path.lastIndexOf("/"))}/${name}` : name }); });
   const del = (e: TreeEntry) => { if (confirm(`Excluir ${e.dir ? "a pasta" : "o arquivo"} "${e.path}"?`)) void op({ op: "delete", path: e.path }); };
-  const dragStart = (ev: React.DragEvent, e: TreeEntry) => { ev.dataTransfer.setData("text/plain", e.path); ev.dataTransfer.setData("text/messy-path", e.path); ev.dataTransfer.effectAllowed = "copy"; };
+  const dragStart = (ev: React.DragEvent, e: TreeEntry) => { ev.dataTransfer.setData("text/plain", e.path); ev.dataTransfer.setData("text/mess-path", e.path); ev.dataTransfer.effectAllowed = "copy"; };
   const title = state.root ? state.root.split("/").pop()! : (data.title || "Arquivos");
 
   const rows = (rel: string, depth: number): React.ReactNode[] => (dirs[rel] ?? []).flatMap((e) => [

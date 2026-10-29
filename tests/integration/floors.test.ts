@@ -16,9 +16,9 @@ const api = async (method: string, path: string, body?: unknown) => {
 };
 const wait = async (pred: () => Promise<boolean>, ms = 8000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pred()) return true; await new Promise((r) => setTimeout(r, 150)); } return false; };
 beforeAll(async () => {
-  dir = mkdtempSync(join(tmpdir(), "messy-floors-")); repo = join(dir, "repo"); mkdirSync(repo);
+  dir = mkdtempSync(join(tmpdir(), "mess-floors-")); repo = join(dir, "repo"); mkdirSync(repo);
   git("init", "-q", "-b", "main"); writeFileSync(join(repo, "README.md"), "# projeto\n"); git("add", "."); git("commit", "-q", "-m", "inicial");
-  rt = spawn("node", [join(ROOT, "apps/runtime/dist/index.js")], { env: { ...GIT_ENV, MESSY_DATA_DIR: dir, MESSY_PORT: String(PORT), SHELL: "/bin/sh" }, stdio: "ignore" });
+  rt = spawn("node", [join(ROOT, "apps/runtime/dist/index.js")], { env: { ...GIT_ENV, MESS_DATA_DIR: dir, MESS_PORT: String(PORT), SHELL: "/bin/sh" }, stdio: "ignore" });
   for (let i = 0; i < 40; i++) { await new Promise((r) => setTimeout(r, 200)); try { token = readFileSync(join(dir, "runtime.token"), "utf8").trim(); if ((await fetch(`http://127.0.0.1:${PORT}/v1/health`, { headers: { authorization: `Bearer ${token}` } })).ok) break; } catch { /* subindo */ } }
 }, 30_000);
 afterAll(() => { rt?.kill(); rmSync(dir, { recursive: true, force: true }); });
@@ -40,9 +40,9 @@ describe("andares (floors)", () => {
     expect((await api("POST", `/v1/workspaces/${floor.workspaceId}/floors`, { name: "x" })).status).toBe(400);
     expect((await api("POST", `/v1/workspaces/${ground}/floors`, { name: "Login único" })).status).toBe(409);
   });
-  it("terminal no andar recebe MESSY_FLOOR_NAME/BRANCH/PATH/ROOT_PATH", async () => {
+  it("terminal no andar recebe MESS_FLOOR_NAME/BRANCH/PATH/ROOT_PATH", async () => {
     const out = join(dir, "floor-env.txt");
-    const r = await api("POST", `/v1/workspaces/${floor.workspaceId}/nodes`, { expectedRevision: 0, kind: "terminal", title: "T", command: "sh", args: ["-c", `printf '%s|%s|%s|%s|%s' "$MESSY_FLOOR_NAME" "$MESSY_BRANCH_NAME" "$MESSY_FLOOR_PATH" "$MESSY_ROOT_PATH" "$MESSY_PROJECT_NAME" > ${out}`], geometry: { x: 0, y: 0, w: 300, h: 200 } });
+    const r = await api("POST", `/v1/workspaces/${floor.workspaceId}/nodes`, { expectedRevision: 0, kind: "terminal", title: "T", command: "sh", args: ["-c", `printf '%s|%s|%s|%s|%s' "$MESS_FLOOR_NAME" "$MESS_BRANCH_NAME" "$MESS_FLOOR_PATH" "$MESS_ROOT_PATH" "$MESS_PROJECT_NAME" > ${out}`], geometry: { x: 0, y: 0, w: 300, h: 200 } });
     expect(r.status).toBe(201);
     expect(await wait(async () => existsSync(out))).toBe(true);
     expect(readFileSync(out, "utf8")).toBe(`Login único|login-unico|${floor.cwd}|${repo}|Projeto`);

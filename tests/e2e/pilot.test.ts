@@ -11,10 +11,10 @@ let dataDir: string; let runtime: ChildProcess; let app: ElectronApplication; le
 const api = async (path: string) => (await fetch(`http://127.0.0.1:${PORT}${path}`, { headers: { authorization: `Bearer ${token}` } })).json();
 
 beforeAll(async () => {
-  dataDir = mkdtempSync(join(tmpdir(), "messy-e2e-"));
-  runtime = spawn("node", [join(ROOT, "apps/runtime/dist/index.js")], { env: { ...process.env, MESSY_DATA_DIR: dataDir, MESSY_PORT: String(PORT), SHELL: "/bin/sh" }, stdio: "inherit" });
+  dataDir = mkdtempSync(join(tmpdir(), "mess-e2e-"));
+  runtime = spawn("node", [join(ROOT, "apps/runtime/dist/index.js")], { env: { ...process.env, MESS_DATA_DIR: dataDir, MESS_PORT: String(PORT), SHELL: "/bin/sh" }, stdio: "inherit" });
   for (let i = 0; i < 40; i++) { await new Promise((r) => setTimeout(r, 250)); try { token = readFileSync(join(dataDir, "runtime.token"), "utf8").trim(); if ((await fetch(`http://127.0.0.1:${PORT}/v1/health`, { headers: { authorization: `Bearer ${token}` } })).ok) break; } catch { /* ainda subindo */ } }
-  app = await electron.launch({ args: ["."], cwd: join(ROOT, "apps/desktop"), env: { ...process.env, MESSY_DATA_DIR: dataDir, MESSY_PORT: String(PORT) } });
+  app = await electron.launch({ args: ["."], cwd: join(ROOT, "apps/desktop"), env: { ...process.env, MESS_DATA_DIR: dataDir, MESS_PORT: String(PORT) } });
   page = await app.firstWindow();
   await page.waitForSelector(".side h1");
 }, 60_000);
@@ -81,7 +81,7 @@ describe("piloto local", () => {
     await app.close();
     await new Promise((r) => setTimeout(r, 500));
     expect(() => process.kill(s!.pid, 0)).not.toThrow();
-    app = await electron.launch({ args: ["."], cwd: join(ROOT, "apps/desktop"), env: { ...process.env, MESSY_DATA_DIR: dataDir, MESSY_PORT: String(PORT) } });
+    app = await electron.launch({ args: ["."], cwd: join(ROOT, "apps/desktop"), env: { ...process.env, MESS_DATA_DIR: dataDir, MESS_PORT: String(PORT) } });
     page = await app.firstWindow();
     await page.waitForSelector(".node.terminal .st.running", { timeout: 10_000 });
   });
@@ -205,7 +205,7 @@ describe("ferramentas do canvas", () => {
       const b1 = await last.boundingBox(); await page.waitForTimeout(300); const b2 = await last.boundingBox();
       const info = await page.evaluate(() => ({ vp: (document.querySelector(".react-flow__viewport") as HTMLElement)?.style.transform, active: `${document.activeElement?.tagName}.${(document.activeElement as HTMLElement)?.className?.toString?.().slice(0, 40)}`, ws: document.querySelector(".side li.ws.on")?.textContent, info: document.querySelector(".info-bar")?.textContent, nodes: document.querySelectorAll(".react-flow__node").length, hidden: document.hidden, vis: document.visibilityState, raf: 0 }));
       const rafOk = await page.evaluate(() => new Promise<number>((r) => { const t0 = performance.now(); requestAnimationFrame(() => r(Math.round(performance.now() - t0))); setTimeout(() => r(-1), 1500); }));
-      await page.screenshot({ path: process.env["MESSY_SHOT_DIR"] ? `${process.env["MESSY_SHOT_DIR"]}/notab-falha.png` : "/dev/null" }).catch(() => {});
+      await page.screenshot({ path: process.env["MESS_SHOT_DIR"] ? `${process.env["MESS_SHOT_DIR"]}/notab-falha.png` : "/dev/null" }).catch(() => {});
       throw new Error(`clique na Nota B falhou: box1=${JSON.stringify(b1)} box2=${JSON.stringify(b2)} rafMs=${rafOk} ${JSON.stringify(info)} :: ${String(e).slice(0, 120)}`);
     }
     await page.waitForSelector(".nodebar", { timeout: 5000 });
@@ -265,7 +265,7 @@ describe("ferramentas do canvas", () => {
     await cp.waitFor({ state: "hidden" });
   }, 40_000);
 
-  it("chat: Ctrl+J abre a camada, compositor cria balão do usuário, messy say cria balão do agente em Markdown", async () => {
+  it("chat: Ctrl+J abre a camada, compositor cria balão do usuário, mess say cria balão do agente em Markdown", async () => {
     const wsList = await api("/v1/workspaces") as { workspaceId: string; name: string }[];
     const e2e = wsList.find((w) => w.name === "E2E")!;
     const snap = (await api(`/v1/workspaces/${e2e.workspaceId}`)) as { nodes: { nodeId: string; kind: string }[] };
@@ -278,7 +278,7 @@ describe("ferramentas do canvas", () => {
     await ta.fill("resuma o plano"); await ta.press("Enter");
     await page.waitForSelector(".bubble.user:has-text('resuma o plano')");
     const token = readFileSync(join(dataDir, "runtime.token"), "utf8").trim();
-    const cli = spawn(join(ROOT, "apps/cli/bin/messy"), ["say", "Plano **resumido**: `ok`"], { env: { ...process.env, MESSY_SOCKET: join(dataDir, "agent.sock"), MESSY_TOKEN: token, MESSY_WORKSPACE_ID: e2e.workspaceId, MESSY_NODE_ID: term.nodeId } });
+    const cli = spawn(join(ROOT, "apps/cli/bin/mess"), ["say", "Plano **resumido**: `ok`"], { env: { ...process.env, MESS_SOCKET: join(dataDir, "agent.sock"), MESS_TOKEN: token, MESS_WORKSPACE_ID: e2e.workspaceId, MESS_NODE_ID: term.nodeId } });
     await new Promise((r) => cli.on("exit", r));
     await page.waitForSelector(".bubble.agent strong:has-text('resumido')");
     // trocar de tópico esconde os balões do tópico 1
@@ -362,7 +362,7 @@ describe("ferramentas do canvas", () => {
         return null;
       }); }
       if (!pt) {
-        await page.screenshot({ path: process.env["MESSY_SHOT_DIR"] ? `${process.env["MESSY_SHOT_DIR"]}/cabo-falha.png` : "/dev/null" }).catch(() => {});
+        await page.screenshot({ path: process.env["MESS_SHOT_DIR"] ? `${process.env["MESS_SHOT_DIR"]}/cabo-falha.png` : "/dev/null" }).catch(() => {});
         const info = await page.evaluate(() => ({ edges: document.querySelectorAll(".react-flow__edge").length, vp: (document.querySelector(".react-flow__viewport") as HTMLElement)?.style.transform, sel: [...document.querySelectorAll(".react-flow__node.selected")].map((n) => n.getAttribute("data-id")) }));
         throw new Error(`nenhum ponto visível do cabo: ${JSON.stringify(info)}`);
       }
@@ -419,7 +419,7 @@ describe("ferramentas do canvas", () => {
     await page.keyboard.press("Control+Shift+\\");
     await page.waitForSelector('[data-testid="overview"]');
     expect(await page.locator('[data-testid="ov-floor"]').count()).toBe(1);
-    await page.screenshot({ path: process.env["MESSY_SHOT_DIR"] ? `${process.env["MESSY_SHOT_DIR"]}/overview.png` : "/dev/null" }).catch(() => {});
+    await page.screenshot({ path: process.env["MESS_SHOT_DIR"] ? `${process.env["MESS_SHOT_DIR"]}/overview.png` : "/dev/null" }).catch(() => {});
     await page.click('[data-testid="ov-ground"]');
     await page.waitForSelector('[data-testid="overview"]', { state: "detached" });
     await page.waitForSelector(".side li.ws.on:has-text('Repo')");
@@ -435,7 +435,7 @@ describe("ferramentas do canvas", () => {
     const node = page.locator(".node.tree"); await node.waitFor();
     await node.scrollIntoViewIfNeeded().catch(() => {});
     await node.locator('[data-testid="tree-row"]:has-text("a.txt")').waitFor({ timeout: 15_000 });
-    await page.screenshot({ path: process.env["MESSY_SHOT_DIR"] ? `${process.env["MESSY_SHOT_DIR"]}/tree.png` : "/dev/null" }).catch(() => {});
+    await page.screenshot({ path: process.env["MESS_SHOT_DIR"] ? `${process.env["MESS_SHOT_DIR"]}/tree.png` : "/dev/null" }).catch(() => {});
     await node.locator('[data-testid="tree-grid"]').click();
     await node.locator(".tr-cell:has-text('a.txt')").waitFor();
     await node.locator('[data-testid="tree-search"]').fill(">a");

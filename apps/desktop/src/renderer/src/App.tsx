@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Background, BackgroundVariant, MiniMap, ReactFlow, applyNodeChanges, applyEdgeChanges, type EdgeChange, useReactFlow, ReactFlowProvider, useOnViewportChange, type Connection as FlowConnection, type Edge, type EdgeTypes, type Node as FlowNode, type NodeChange, type NodeTypes } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { Map as MapIcon, Minus, Plus, Activity, Layers } from "lucide-react";
-import { BUILD_VERSION, type Role, type Drawing, type Folder, type Geometry, type Preset, type Sidebar as SidebarData, type Workspace, type WorkspaceSnapshot } from "@messyai/contracts";
+import { BUILD_VERSION, type Role, type Drawing, type Folder, type Geometry, type Preset, type Sidebar as SidebarData, type Workspace, type WorkspaceSnapshot } from "@messai/contracts";
 import { Sidebar } from "./Sidebar.js";
 import { WorkspaceDialog, type WorkspaceInput } from "./WorkspaceDialog.js";
 import { RolesDialog } from "./RolesDialog.js";
@@ -107,7 +107,7 @@ function Canvas({ conn }: { conn: Connection }) {
   const dragging = useRef(false);
   const pendingSnap = useRef<WorkspaceSnapshot | null>(null);
 
-  const LAST = "messy.lastWorkspace";
+  const LAST = "mess.lastWorkspace";
   const applySide = useCallback((d: SidebarData) => {
     setSide(d);
     setCurrent((c) => {
@@ -173,7 +173,7 @@ function Canvas({ conn }: { conn: Connection }) {
           : n.kind === "note" ? { title: n.title, content: n.content ?? "", editSignal: renameSig.id === n.nodeId ? renameSig.n : 0, locked: !!n.locked, ...(n.color ? { color: n.color } : {}), ...(n.filePath ? { filePath: n.filePath } : {}), onChange: change, onDelete: del, onRename: rename, ...extras,
               onLock: (locked: boolean) => void mutate((r) => api.patchNode(n.nodeId, { expectedRevision: r, locked })),
               onColor: (color: string | null) => void mutate((r) => api.patchNode(n.nodeId, { expectedRevision: r, color })),
-              onMove: () => void window.messyai.pickDirectory?.().then((d) => { if (d) void mutate((r) => api.patchNode(n.nodeId, { expectedRevision: r, filePath: `${d}/${n.title.replace(/[\\/:*?"<>|]+/g, " ").trim() || "nota"}.md` })); }) }
+              onMove: () => void window.messai.pickDirectory?.().then((d) => { if (d) void mutate((r) => api.patchNode(n.nodeId, { expectedRevision: r, filePath: `${d}/${n.title.replace(/[\\/:*?"<>|]+/g, " ").trim() || "nota"}.md` })); }) }
           : n.kind === "tree" ? { title: n.title, content: n.content ?? "", editSignal: renameSig.id === n.nodeId ? renameSig.n : 0, workspaceId: snap.workspace.workspaceId, api, onChange: change, onDelete: del, onRename: rename, ...extras,
               onOpenNote: (rel: string) => void mutate((r) => api.createNode(snap.workspace.workspaceId, { expectedRevision: r, kind: "note", geometry: { x: n.geometry.x + n.geometry.w + 40, y: n.geometry.y, w: 360, h: 260 }, filePath: `${snap.workspace.cwd}/${rel}` })),
               onPreview: (rel: string) => setPreview(rel), toast }
@@ -388,7 +388,7 @@ function Canvas({ conn }: { conn: Connection }) {
           if (!e.dataTransfer.files.length || !current) return; e.preventDefault();
           const at = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
           [...e.dataTransfer.files].forEach((f, i) => {
-            const path = window.messyai.pathForFile?.(f);
+            const path = window.messai.pathForFile?.(f);
             if (path && /\.(md|markdown|txt)$/i.test(path)) void mutate((r) => api.createNode(current, { expectedRevision: r, kind: "note", geometry: { x: at.x + i * 30, y: at.y + i * 30, w: 320, h: 220 }, filePath: path }));
             else toast(`${f.name}: só .md/.txt viram nota (outros arquivos: em breve)`);
           });

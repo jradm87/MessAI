@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Folder, Workspace } from "@messyai/contracts";
+import type { Folder, Workspace } from "@messai/contracts";
 import { WS_COLORS, WS_ICONS } from "./wsicons.js";
 
 export type WorkspaceInput = { name: string; cwd: string; icon: string; color: string; folderId?: string };
@@ -33,7 +33,7 @@ export function WorkspaceDialog({ edit, folders, defaultFolderId, defaultCwd = "
           {WS_COLORS.map((c) => <button key={c} type="button" className={`sw lg ${color === c ? "on" : ""}`} style={{ background: c }} title={c} onClick={() => setColor(c)} />)}
         </div>
         <div className="lbl">Diretório de trabalho</div>
-        <div className="row"><input value={cwd} onChange={(e) => setCwd(e.target.value)} placeholder={defaultCwd || "/caminho/do/projeto"} data-testid="ws-cwd" /><button type="button" onClick={() => void window.messyai.pickDirectory?.().then((d) => d && setCwd(d))}>Procurar…</button></div>
+        <div className="row"><input value={cwd} onChange={(e) => setCwd(e.target.value)} placeholder={defaultCwd || "/caminho/do/projeto"} data-testid="ws-cwd" /><button type="button" onClick={() => void window.messai.pickDirectory?.().then((d) => d && setCwd(d))}>Procurar…</button></div>
         {onlyFolders.length > 0 && (
           <><div className="lbl">Pasta</div>
             <select value={folderId} onChange={(e) => setFolderId(e.target.value)}>

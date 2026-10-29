@@ -1,6 +1,6 @@
 <div align="center">
 
-# MessyAI
+# MessAI
 
 ### Many agents. One organized mess.
 
@@ -17,9 +17,9 @@
 
 ---
 
-## What is MessyAI?
+## What is MessAI?
 
-MessyAI turns a swarm of AI agents into something you can actually **see and steer**.
+MessAI turns a swarm of AI agents into something you can actually **see and steer**.
 
 Every agent — Claude Code, Codex, Gemini, OpenCode, or any plain shell — lives on an **infinite canvas** as its own terminal. You drop them where you want, draw cables between them, give each one a role, and let them work in parallel while you keep the whole board in view. Notes, file trees and prompts sit right next to the terminals, so the context an agent needs is always one connection away.
 
@@ -31,7 +31,7 @@ And it stays out of your way: **close the window and nothing stops.** The agents
 
 ## Why
 
-Running agents in separate tabs means you lose the plot: who is doing what, what they can see, how to pass a result from one to the next. MessyAI makes that **spatial**. The layout *is* the plan — a reviewer wired to a builder, a notes card feeding three workers, a floor spun off for a risky refactor. You stop juggling terminals and start conducting them.
+Running agents in separate tabs means you lose the plot: who is doing what, what they can see, how to pass a result from one to the next. MessAI makes that **spatial**. The layout *is* the plan — a reviewer wired to a builder, a notes card feeding three workers, a floor spun off for a risky refactor. You stop juggling terminals and start conducting them.
 
 ---
 
@@ -41,10 +41,10 @@ Running agents in separate tabs means you lose the plot: who is doing what, what
 Real PTYs rendered as nodes you can move, resize, rename and connect. Pan, zoom, minimap, a drawing layer, and the same muscle-memory shortcuts throughout. Drop a Shell, Claude Code, Codex, Gemini or OpenCode — availability is detected from your `PATH`.
 
 ### 🔗 Agents that talk to each other
-Connect two terminals and they can message across the wire: `messy ask`, `messy reply`, `messy inbox`. An agent reads the notes wired to it, writes back, and hands results to its neighbors — no copy-paste.
+Connect two terminals and they can message across the wire: `mess ask`, `mess reply`, `mess inbox`. An agent reads the notes wired to it, writes back, and hands results to its neighbors — no copy-paste.
 
 ### 💬 Chat & prompt composer
-A chat layer over any terminal (threads, Markdown, Mermaid) so you talk to an agent like a messaging app, and it answers with `messy say`. The floating composer adds `@`-mentions of nearby nodes, a `#` file picker scoped to the terminal's directory, pasted-image attachments, and a per-terminal draft.
+A chat layer over any terminal (threads, Markdown, Mermaid) so you talk to an agent like a messaging app, and it answers with `mess say`. The floating composer adds `@`-mentions of nearby nodes, a `#` file picker scoped to the terminal's directory, pasted-image attachments, and a per-terminal draft.
 
 ### 📝 Notes as real files
 Every note is a real `.md` on disk — rendered Markdown and Mermaid, lockable (agents read-only), colorable, and auto-titled. Drag a `.md`/`.txt` onto the canvas to link it in place. Edit it in your editor and the canvas follows.
@@ -56,19 +56,19 @@ A file-tree node confined to the workspace: list or icon-grid view, per-file git
 Spin off a **floor** — a child canvas on its own git branch and worktree — to try something risky in isolation. Track its status, then **land** it back into the trunk with a local merge; conflicts abort cleanly and are listed. A perspective overview (`Ctrl+Shift+\`) stacks your floors above the ground.
 
 ### 🧩 Roles
-Reusable responsibilities (name, badge, instructions) injected at launch — into Claude Code's system prompt and as `MESSY_ROLE` for any CLI. Reassign a role and only that process restarts. Portable as `role.json`.
+Reusable responsibilities (name, badge, instructions) injected at launch — into Claude Code's system prompt and as `MESS_ROLE` for any CLI. Reassign a role and only that process restarts. Portable as `role.json`.
 
 ### ♻️ Sessions that survive
 Terminals run inside their own tmux server by default, so they **survive closing the window and restarting the runtime** — reattached, process and scrollback intact. Optionally install a `systemd --user` unit so the runtime comes back on its own.
 
 ### 🔒 Local-first
-Your data lives in `~/.messyai` (SQLite + notes + attachments). The runtime listens only on loopback behind a token, plus a Unix socket for agents. Nothing leaves your machine.
+Your data lives in `~/.messai` (SQLite + notes + attachments). The runtime listens only on loopback behind a token, plus a Unix socket for agents. Nothing leaves your machine.
 
 ---
 
 ## How it works
 
-MessyAI is split into a thin client and a runtime that outlives it.
+MessAI is split into a thin client and a runtime that outlives it.
 
 ```
 ┌───────────────────────────┐        ┌───────────────────────────────────────┐
@@ -77,7 +77,7 @@ MessyAI is split into a thin client and a runtime that outlives it.
 └───────────────────────────┘loopback└───────────────┬───────────────────────┘
                                                       │ Unix socket + token
                                         ┌─────────────┴──────────────┐
-                                        │ agents use the `messy` CLI  │
+                                        │ agents use the `mess` CLI  │
                                         └────────────────────────────┘
 ```
 
@@ -95,9 +95,9 @@ MessyAI is split into a thin client and a runtime that outlives it.
 ```bash
 npm install
 npm run build                      # contracts · domain · storage · runtime
-npm run build -w @messyai/desktop  # the Electron app
+npm run build -w @messai/desktop  # the Electron app
 
-# run it (the runtime boots itself into ~/.messyai)
+# run it (the runtime boots itself into ~/.messai)
 cd apps/desktop && npx electron-vite preview --skipBuild
 ```
 
@@ -108,28 +108,28 @@ npm test                                          # everything (incl. Electron e
 npx vitest run packages apps tests/integration    # deterministic only (no e2e)
 ```
 
-**Handy env:** `MESSY_DATA_DIR` · `MESSY_PORT` · `MESSY_SHELL` (defaults to your login shell) · `MESSY_TMUX_SOCKET` · `MESSY_NODE`.
+**Handy env:** `MESS_DATA_DIR` · `MESS_PORT` · `MESS_SHELL` (defaults to your login shell) · `MESS_TMUX_SOCKET` · `MESS_NODE`.
 
 ---
 
 ## Agents on the canvas
 
-Every terminal gets the `messy` CLI on its `PATH` and the context it needs via environment (`MESSY_SOCKET`, `MESSY_TOKEN`, `MESSY_WORKSPACE_ID`, `MESSY_NODE_ID`, …). An agent can inspect and shape its own board:
+Every terminal gets the `mess` CLI on its `PATH` and the context it needs via environment (`MESS_SOCKET`, `MESS_TOKEN`, `MESS_WORKSPACE_ID`, `MESS_NODE_ID`, …). An agent can inspect and shape its own board:
 
 ```bash
-messy context                 # your node, the workspace, and connected notes (with content)
-messy nodes                   # list nodes
-messy note read  <id|title>   # read a note
-messy note write <title> …    # create a note wired to you
-messy connect    <id|title>   # wire yourself to another node
+mess context                 # your node, the workspace, and connected notes (with content)
+mess nodes                   # list nodes
+mess note read  <id|title>   # read a note
+mess note write <title> …    # create a note wired to you
+mess connect    <id|title>   # wire yourself to another node
 
-messy peers                   # terminals connected to you
-messy ask   <name> "…"        # message a connected agent
-messy reply <id>   "…"        # reply to a message
-messy inbox                   # your received messages
+mess peers                   # terminals connected to you
+mess ask   <name> "…"        # message a connected agent
+mess reply <id>   "…"        # reply to a message
+mess inbox                   # your received messages
 
-messy say   "…"               # answer in the terminal's chat (Markdown)
-messy floor create|status|land|delete   # manage floors
+mess say   "…"               # answer in the terminal's chat (Markdown)
+mess floor create|status|land|delete   # manage floors
 ```
 
 ---
@@ -160,7 +160,7 @@ packages/domain      pure rules, no I/O
 packages/storage     SQLite + migrations
 apps/runtime         the machine service (PTYs, notes, files, agent API)
 apps/desktop         Electron canvas
-apps/cli             the `messy` CLI for agents
+apps/cli             the `mess` CLI for agents
 ```
 
 ---

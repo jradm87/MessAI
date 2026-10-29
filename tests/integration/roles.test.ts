@@ -13,10 +13,10 @@ const api = async (method: string, path: string, body?: unknown) => {
 };
 const wait = async (pred: () => Promise<boolean>, ms = 8000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pred()) return true; await new Promise((r) => setTimeout(r, 150)); } return false; };
 beforeAll(async () => {
-  dir = mkdtempSync(join(tmpdir(), "messy-roles-"));
+  dir = mkdtempSync(join(tmpdir(), "mess-roles-"));
   mkdirSync(join(dir, "proj/.maestri/roles/revisor"), { recursive: true });
   writeFileSync(join(dir, "proj/.maestri/roles/revisor/role.json"), JSON.stringify({ name: "Revisor", badge: "RV", prompt: "Revise sem alterar código." }));
-  rt = spawn("node", [join(ROOT, "apps/runtime/dist/index.js")], { env: { ...process.env, MESSY_DATA_DIR: dir, MESSY_PORT: String(PORT), SHELL: "/bin/sh" }, stdio: "ignore" });
+  rt = spawn("node", [join(ROOT, "apps/runtime/dist/index.js")], { env: { ...process.env, MESS_DATA_DIR: dir, MESS_PORT: String(PORT), SHELL: "/bin/sh" }, stdio: "ignore" });
   for (let i = 0; i < 40; i++) { await new Promise((r) => setTimeout(r, 200)); try { token = readFileSync(join(dir, "runtime.token"), "utf8").trim(); if ((await fetch(`http://127.0.0.1:${PORT}/v1/health`, { headers: { authorization: `Bearer ${token}` } })).ok) break; } catch { /* subindo */ } }
 }, 30_000);
 afterAll(() => { rt?.kill(); rmSync(dir, { recursive: true, force: true }); });
@@ -30,16 +30,16 @@ describe("papéis (responsabilidades)", () => {
     expect((await api("POST", "/v1/roles", { name: "dev BACKEND", instructions: "" })).status).toBe(409);
     expect((await api("PATCH", `/v1/roles/${role.roleId}`, { badge: "api" })).json).toMatchObject({ badge: "API" });
   });
-  it("descobre role.json do projeto (compatível com .maestri) e exporta como .messyai", async () => {
+  it("descobre role.json do projeto (compatível com .maestri) e exporta como .messai", async () => {
     const d = (await api("POST", "/v1/roles/discover", { dir: join(dir, "proj") })).json as { imported: { name: string; badge: string; instructions: string }[] };
     expect(d.imported).toHaveLength(1); expect(d.imported[0]).toMatchObject({ name: "Revisor", badge: "RV", instructions: "Revise sem alterar código." });
     const e = (await api("POST", `/v1/roles/${role.roleId}/export`, { dir: join(dir, "proj") })).json as { path: string };
-    expect(e.path).toBe(join(dir, "proj/.messyai/roles/dev-backend/role.json")); expect(existsSync(e.path)).toBe(true);
+    expect(e.path).toBe(join(dir, "proj/.messai/roles/dev-backend/role.json")); expect(existsSync(e.path)).toBe(true);
     expect(JSON.parse(readFileSync(e.path, "utf8"))).toEqual({ name: "Dev backend", badge: "API", instructions: "Foque em APIs." });
   });
-  it("injeta MESSY_ROLE e instruções no ambiente do terminal na partida", async () => {
+  it("injeta MESS_ROLE e instruções no ambiente do terminal na partida", async () => {
     const out = join(dir, "env.txt");
-    const r = await api("POST", `/v1/workspaces/${ws}/nodes`, { expectedRevision: 0, kind: "terminal", title: "T", command: "sh", args: ["-c", `printf '%s|%s' "$MESSY_ROLE" "$MESSY_ROLE_INSTRUCTIONS" > ${out}`], geometry: { x: 0, y: 0, w: 400, h: 300 }, roleId: role.roleId });
+    const r = await api("POST", `/v1/workspaces/${ws}/nodes`, { expectedRevision: 0, kind: "terminal", title: "T", command: "sh", args: ["-c", `printf '%s|%s' "$MESS_ROLE" "$MESS_ROLE_INSTRUCTIONS" > ${out}`], geometry: { x: 0, y: 0, w: 400, h: 300 }, roleId: role.roleId });
     expect(r.status).toBe(201); expect((r.json as { node: { roleId: string } }).node.roleId).toBe(role.roleId);
     expect(await wait(async () => existsSync(out))).toBe(true);
     expect(readFileSync(out, "utf8")).toBe("Dev backend|Sua responsabilidade neste terminal: Dev backend.\nFoque em APIs.");

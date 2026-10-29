@@ -5,7 +5,7 @@ import { App } from "./App.js";
 import "./styles.css";
 
 const root = createRoot(document.getElementById("root")!);
-window.messyai.connection().then((conn) => {
+window.messai.connection().then((conn) => {
   if (!conn || !conn.token) { root.render(<div style={{ padding: 24 }}>Runtime indisponível. Veja o log do processo principal.</div>); return; }
   root.render(<App conn={conn} />);
 });

@@ -1,8 +1,8 @@
 {
-  "name": "@messyai/cli",
+  "name": "@messai/cli",
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "bin": { "messy": "bin/messy" },
-  "dependencies": { "@messyai/contracts": "0.0.1" }
+  "bin": { "mess": "bin/mess" },
+  "dependencies": { "@messai/contracts": "0.0.1" }
 }

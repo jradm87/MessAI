@@ -3,12 +3,12 @@ import * as pty from "node-pty";
 import xtermHeadless from "@xterm/headless";
 const HeadlessTerminal = xtermHeadless.Terminal;
 type HeadlessTerminal = InstanceType<typeof HeadlessTerminal>;
-import type { Session } from "@messyai/contracts";
-import { decideLease, trimBuffer, tmuxSessionName, tmuxAttachPlan, type TerminalPlan, type Result, fail, succeed } from "@messyai/domain";
+import type { Session } from "@messai/contracts";
+import { decideLease, trimBuffer, tmuxSessionName, tmuxAttachPlan, type TerminalPlan, type Result, fail, succeed } from "@messai/domain";
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import type { Store } from "@messyai/storage";
+import type { Store } from "@messai/storage";
 import { nowIso } from "./config.js";
 
 type Live = {
@@ -38,8 +38,8 @@ export class SessionManager extends EventEmitter<SessionEvents> {
     }
   }
 
-  /** Socket do servidor tmux do MessyAI (tmux -L). Nunca toca no tmux pessoal do usuário. */
-  tmuxSocket = process.env["MESSY_TMUX_SOCKET"] ?? "messy";
+  /** Socket do servidor tmux do MessAI (tmux -L). Nunca toca no tmux pessoal do usuário. */
+  tmuxSocket = process.env["MESS_TMUX_SOCKET"] ?? "mess";
   /** A sessão tmux correspondente ainda existe? */
   tmuxAlive(sessionId: string): boolean {
     try { execFileSync("tmux", ["-L", this.tmuxSocket, "has-session", "-t", tmuxSessionName(sessionId)], { stdio: "ignore" }); return true; } catch { return false; }
@@ -74,7 +74,7 @@ export class SessionManager extends EventEmitter<SessionEvents> {
     this.live.set(session.sessionId, live);
     this.store.updateSession(session.sessionId, { state: "running", pid: proc.pid });
     if (cwd !== wantedCwd) {
-      const warn = `\x1b[33m[MessyAI] O diretório "${wantedCwd}" não existe; abrindo em ${cwd}.\x1b[0m\r\n`;
+      const warn = `\x1b[33m[MessAI] O diretório "${wantedCwd}" não existe; abrindo em ${cwd}.\x1b[0m\r\n`;
       live.sequence += 1; live.chunks.push(warn); live.totalBytes += Buffer.byteLength(warn); term.write(warn);
       this.emit("output", session.sessionId, live.sequence, warn);
     }

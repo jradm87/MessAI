@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { existsSync, unlinkSync, chmodSync } from "node:fs";
-import { Store } from "@messyai/storage";
+import { Store } from "@messai/storage";
 import { loadConfig } from "./config.js";
 import { SessionManager } from "./sessions.js";
 import { WorkspaceService } from "./service.js";
@@ -20,7 +20,7 @@ if (existsSync(cfg.socketPath)) unlinkSync(cfg.socketPath);
 await http.listen({ host: cfg.host, port: cfg.port });
 await agent.listen({ path: cfg.socketPath });
 chmodSync(cfg.socketPath, 0o600);
-console.log(`messyai-runtime machine=${cfg.machineId} http=http://${cfg.host}:${cfg.port} socket=${cfg.socketPath} data=${cfg.dataDir}`);
+console.log(`messai-runtime machine=${cfg.machineId} http=http://${cfg.host}:${cfg.port} socket=${cfg.socketPath} data=${cfg.dataDir}`);
 
 const shutdown = async () => {
   // Encerrar o runtime encerra os PTYs deste processo: isso é esperado e diferente de fechar o cliente.

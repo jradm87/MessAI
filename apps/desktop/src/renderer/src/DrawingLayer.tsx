@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ViewportPortal, useReactFlow } from "@xyflow/react";
-import type { Drawing } from "@messyai/contracts";
+import type { Drawing } from "@messai/contracts";
 import type { DrawStyle, Tool } from "./Toolbar.js";
 
 type Pt = [number, number];

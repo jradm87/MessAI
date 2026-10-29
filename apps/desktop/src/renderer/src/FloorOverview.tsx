@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Plus, GitBranch, X, PlaneLanding, Trash2, Home } from "lucide-react";
-import type { FloorStatus, LandResult, Workspace } from "@messyai/contracts";
+import type { FloorStatus, LandResult, Workspace } from "@messai/contracts";
 import type { Api } from "./api.js";
 
 export const STATUS_LABEL: Record<FloorStatus, string> = { working: "Trabalhando", blocked: "Bloqueado", review: "Pronto para revisão", done: "Concluído" };
