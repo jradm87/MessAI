@@ -24,7 +24,7 @@ export function TerminalNode({ id, data, selected }: NodeProps & { data: Termina
   const { sessionId, stream, api } = data;
 
   useEffect(() => {
-    const term = new Terminal({ cursorBlink: true, fontSize: 13, fontFamily: "ui-monospace, monospace", theme: { background: "#0a0a0b" }, scrollback: 2000 });
+    const term = new Terminal({ cursorBlink: true, fontSize: 14, fontFamily: "ui-monospace, monospace", theme: { background: "#0a0a0b" }, scrollback: 2000 });
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(host.current!);
