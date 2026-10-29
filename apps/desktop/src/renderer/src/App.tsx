@@ -37,15 +37,16 @@ function freeSpot(nodes: { geometry: Geometry }[], size: { w: number; h: number 
 }
 const isTyping = () => { const el = document.activeElement as HTMLElement | null; return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable || el.classList.contains("xterm-helper-textarea")); };
 
-function ZoomBar({ minimap, setMinimap, onUsage, agents, wsName, wsList, current, onSwitch }: { minimap: boolean; setMinimap: (v: boolean) => void; onUsage: () => void; agents: string[]; wsName?: string; wsList: { id: string; name: string; parentId?: string }[]; current: string | null; onSwitch: (id: string) => void }) {
+function ZoomBar({ minimap, setMinimap, onUsage, agents, wsName, floors, current, onSwitch, onNewFloor }: { minimap: boolean; setMinimap: (v: boolean) => void; onUsage: () => void; agents: string[]; wsName?: string; floors: { id: string; name: string; isGround: boolean }[]; current: string | null; onSwitch: (id: string) => void; onNewFloor: () => void }) {
   const rf = useReactFlow(); const [z, setZ] = useState(100); const [sw, setSw] = useState(false);
   useOnViewportChange({ onChange: (v) => setZ(Math.round(v.zoom * 100)) });
   return (
     <div className="botbar">
       {wsName && <div className="bb-wrap">
-        <button className="bb-pill" title="Trocar de workspace" onClick={() => setSw((v) => !v)}><Layers size={15} /><span className="bb-name">{wsName}</span></button>
-        {sw && <div className="menu-backdrop" onMouseDown={() => setSw(false)}><div className="bb-switch" onMouseDown={(e) => e.stopPropagation()}>
-          {wsList.map((w) => <div key={w.id} className={`mi ${w.id === current ? "on" : ""} ${w.parentId ? "sub" : ""}`} onClick={() => { onSwitch(w.id); setSw(false); }}>{w.parentId ? <GitBranch size={12} /> : <Layers size={13} />}<span className="nm">{w.name}</span></div>)}
+        <button className={`bb-pill ${sw ? "on" : ""}`} title="Andares" onClick={() => setSw((v) => !v)} data-testid="ws-pill"><Layers size={15} /><span className="bb-name">{wsName}</span></button>
+        {sw && <div className="menu-backdrop" onMouseDown={() => setSw(false)}><div className="bb-floors" onMouseDown={(e) => e.stopPropagation()} data-testid="bb-floors">
+          <button className="f-pill-c new" onClick={() => { onNewFloor(); setSw(false); }} data-testid="bb-new-floor">+ New Floor</button>
+          {floors.map((f) => <button key={f.id} className={`f-pill-c ${f.isGround ? "ground" : ""} ${f.id === current ? "on" : ""}`} onClick={() => { onSwitch(f.id); setSw(false); }}>{f.isGround ? "Ground" : <><GitBranch size={12} /><span className="bb-name">{f.name}</span></>}</button>)}
         </div></div>}
       </div>}
       {agents.slice(0, 5).map((a) => <button key={a} className="bb-circle" title={`${a} — Agent Usage`} onClick={onUsage}><AgentIcon id={a} size={20} /></button>)}
@@ -384,7 +385,12 @@ function Canvas({ conn }: { conn: Connection }) {
   const barAgents = (() => { const set = new Set<string>(); for (const n of snap?.nodes ?? []) if (n.kind === "terminal") set.add(agentKind(n.title)); return [...set]; })();
   const curWs = side.workspaces.find((w) => w.workspaceId === current);
   const grd = groundOf(current);
-  const isGround = curWs ? !curWs.parentId : true;
+  const floorList = grd
+    ? [
+        ...side.workspaces.filter((w) => w.parentId === grd.workspaceId).map((w) => ({ id: w.workspaceId, name: w.name, isGround: false })),
+        { id: grd.workspaceId, name: grd.name, isGround: true },
+      ]
+    : [];
 
   return (
     <div className={`app ${sideMini ? "mini" : ""}`}>
@@ -443,13 +449,7 @@ function Canvas({ conn }: { conn: Connection }) {
             onErase={(id) => void mutate((r) => api.deleteDrawing(id, r))}
             onCreateRect={onCreateRect} />
         </ReactFlow>
-        {current && grd && !usage && (
-          <div className="floor-pills-c">
-            <button className="f-pill-c new" onClick={() => setFloorDialog(grd)} data-testid="canvas-new-floor">+ New Floor</button>
-            <button className={`f-pill-c ground ${isGround ? "on" : ""}`} onClick={() => (isGround ? setOverview(grd.workspaceId) : setCurrent(grd.workspaceId))} data-testid="canvas-ground">Ground</button>
-          </div>
-        )}
-        <ZoomBar minimap={minimap} setMinimap={setMinimap} onUsage={() => setUsage(true)} agents={barAgents} {...(curWs ? { wsName: curWs.name } : {})} wsList={side.workspaces.map((w) => ({ id: w.workspaceId, name: w.name, ...(w.parentId ? { parentId: w.parentId } : {}) }))} current={current} onSwitch={setCurrent} />
+        <ZoomBar minimap={minimap} setMinimap={setMinimap} onUsage={() => setUsage(true)} agents={barAgents} {...(curWs ? { wsName: curWs.name } : {})} floors={floorList} current={current} onSwitch={setCurrent} onNewFloor={() => grd && setFloorDialog(grd)} />
         {usage && <AgentUsage api={api} onClose={() => setUsage(false)} />}
       </main>
     </div>
