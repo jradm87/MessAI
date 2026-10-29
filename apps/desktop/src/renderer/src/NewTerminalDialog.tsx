@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { SquareTerminal, Brain, Sparkles, Square, Hexagon, Bot } from "lucide-react";
+import { SquareTerminal } from "lucide-react";
+import { AgentIcon } from "./agentIcons.js";
 import type { Preset, Role } from "@messyai/contracts";
 
 export type NewTerminalInput = { title: string; command?: string; cwd?: string; presetId?: string; roleId?: string; persistent?: boolean };
-const ICON: Record<string, React.ReactNode> = { claude: <Hexagon size={26} />, codex: <Brain size={26} />, antigravity: <Sparkles size={26} />, opencode: <Square size={26} />, shell: <SquareTerminal size={26} />, gemini: <Bot size={26} /> };
+const ICON: Record<string, React.ReactNode> = { claude: <AgentIcon id="claude" size={26} />, codex: <AgentIcon id="codex" size={26} />, antigravity: <AgentIcon id="antigravity" size={26} />, opencode: <AgentIcon id="opencode" size={26} />, gemini: <AgentIcon id="gemini" size={26} />, shell: <SquareTerminal size={26} /> };
 
 /** Diálogo "Novo terminal": Início rápido + Detalhes (nome, comando, diretório). Aparência e Papel ficam para depois. */
 export function NewTerminalDialog({ presets, roles, defaultCwd, onCreate, onClose, onManageRoles, tmux }: { presets: Preset[]; roles: Role[]; defaultCwd: string; onCreate: (i: NewTerminalInput) => void; onClose: () => void; onManageRoles: () => void; tmux: boolean }) {

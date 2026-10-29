@@ -11,6 +11,7 @@ import { FloorDialog } from "./FloorDialog.js";
 import { FloorOverview, STATUS_COLOR, STATUS_LABEL } from "./FloorOverview.js";
 import { NodeActionBar, type NodeAction } from "./NodeActionBar.js";
 import { AgentUsage } from "./AgentUsage.js";
+import { AgentIcon, agentKind } from "./agentIcons.js";
 import { Api, ApiClientError, Stream, type Connection } from "./api.js";
 import { TerminalNode } from "./TerminalNode.js";
 import { NoteNode } from "./NoteNode.js";
@@ -34,17 +35,15 @@ function freeSpot(nodes: { geometry: Geometry }[], size: { w: number; h: number 
   const top = Math.min(...nodes.map((n) => n.geometry.y));
   return { x: right + 40, y: top, ...size };
 }
-const AGENT_COLORS: Record<string, string> = { claude: "#d97757", codex: "#10a37f", gemini: "#4a9eff", opencode: "#a66bff", shell: "#8a8a90" };
-const agentKind = (title: string): string => { const t = title.toLowerCase(); return t.includes("claude") ? "claude" : t.includes("codex") ? "codex" : t.includes("gemini") ? "gemini" : t.includes("opencode") ? "opencode" : "shell"; };
 const isTyping = () => { const el = document.activeElement as HTMLElement | null; return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable || el.classList.contains("xterm-helper-textarea")); };
 
-function ZoomBar({ minimap, setMinimap, onUsage, onOverview, agents }: { minimap: boolean; setMinimap: (v: boolean) => void; onUsage: () => void; onOverview: () => void; agents: { id: string; color: string }[] }) {
+function ZoomBar({ minimap, setMinimap, onUsage, onOverview, agents }: { minimap: boolean; setMinimap: (v: boolean) => void; onUsage: () => void; onOverview: () => void; agents: string[] }) {
   const rf = useReactFlow(); const [z, setZ] = useState(100);
   useOnViewportChange({ onChange: (v) => setZ(Math.round(v.zoom * 100)) });
   return (
     <div className="zoombar">
       <button className="tb" title="Andares (Ctrl+Shift+\\)" onClick={onOverview}><Layers size={15} /></button>
-      <button className="tb agents" title="Agent Usage" onClick={onUsage}>{agents.length ? <span className="agent-cluster">{agents.slice(0, 5).map((a) => <span key={a.id} className="agent-av" style={{ background: a.color }} />)}</span> : <Activity size={14} />}</button>
+      <button className="tb agents" title="Agent Usage" onClick={onUsage}>{agents.length ? <span className="agent-cluster">{agents.slice(0, 5).map((a) => <span key={a} className="agent-ic" title={a}><AgentIcon id={a} size={18} /></span>)}</span> : <Activity size={14} />}</button>
       <button className="tb" title="Minimapa (Ctrl+Shift+M)" onClick={() => setMinimap(!minimap)}><MapIcon size={14} /></button>
       <span className="sep" />
       <button className="tb" title="Reduzir (Ctrl+-)" onClick={() => void rf.zoomOut({ duration: 120 })}><Minus size={14} /></button>
@@ -375,7 +374,7 @@ function Canvas({ conn }: { conn: Connection }) {
   };
   const drawings: Drawing[] = snap?.drawings ?? [];
   const selectMode = tool === "select";
-  const barAgents = (() => { const m = new Map<string, string>(); for (const n of snap?.nodes ?? []) if (n.kind === "terminal") { const k = agentKind(n.title); m.set(k, AGENT_COLORS[k] ?? "#8a8a90"); } return [...m.entries()].map(([id, color]) => ({ id, color })); })();
+  const barAgents = (() => { const set = new Set<string>(); for (const n of snap?.nodes ?? []) if (n.kind === "terminal") set.add(agentKind(n.title)); return [...set]; })();
   const curWs = side.workspaces.find((w) => w.workspaceId === current);
   const grd = groundOf(current);
   const isGround = curWs ? !curWs.parentId : true;

@@ -1,21 +1,12 @@
 import { useEffect, useState } from "react";
 import { X, RefreshCw, Activity } from "lucide-react";
 import type { Api } from "./api.js";
+import { AgentIcon, AGENT_COLORS } from "./agentIcons.js";
 
 type Limit = { label: string; pct: number; resets: string };
 type Agent = { id: string; label: string; available: boolean; note?: string; plan?: string; limits?: Limit[]; metrics: { label: string; value: string }[]; models: { name: string; input: number; output: number }[] };
-const COLOR: Record<string, string> = { claude: "#d97757", codex: "#10a37f", gemini: "#4a9eff", opencode: "#a66bff" };
 const fmt = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n));
 
-/** Ícone de arcos concêntricos no estilo do Claude Code. */
-function Rings({ color }: { color: string }) {
-  return (
-    <svg width="40" height="40" viewBox="0 0 40 40" className="au-rings">
-      <circle cx="20" cy="20" r="4" fill={color} />
-      {[9, 14, 19].map((r, i) => <path key={r} d={`M ${20 + r} 20 A ${r} ${r} 0 1 0 ${20 - r * Math.cos((i + 1) * 0.5)} ${20 - r * Math.sin((i + 1) * 0.5)}`} fill="none" stroke={color} strokeWidth="2.4" strokeLinecap="round" opacity={0.9 - i * 0.18} />)}
-    </svg>
-  );
-}
 /** Barra em tracinhos, como no Maestri. */
 function Ticks({ pct, color }: { pct: number; color: string }) {
   const N = 34, on = Math.round((pct / 100) * N);
@@ -43,12 +34,12 @@ export function AgentUsage({ api, onClose }: { api: Api; onClose: () => void }) 
       <div className="au-body">
         {loading && <div className="mut au-empty">carregando…</div>}
         {!loading && agents.map((a) => {
-          const color = COLOR[a.id] ?? "#888";
+          const color = AGENT_COLORS[a.id] ?? "#888";
           const maxOut = Math.max(1, ...a.models.map((m) => m.output));
           const hasLimits = (a.limits?.length ?? 0) > 0;
           return (
             <div key={a.id} className={`au-agent ${a.available ? "" : "off"}`}>
-              <div className="au-agent-head"><Rings color={color} /><div className="au-id"><div className="au-name">{a.label}</div><div className="au-plan mut">{a.plan ?? (a.available ? "" : a.note)}</div></div></div>
+              <div className="au-agent-head"><span className="au-icon"><AgentIcon id={a.id} size={38} /></span><div className="au-id"><div className="au-name">{a.label}</div><div className="au-plan mut">{a.plan ?? (a.available ? "" : a.note)}</div></div></div>
               {a.available && (<>
                 {hasLimits ? (<div className="au-limits">
                   <div className="au-sec">Plan limits</div>
