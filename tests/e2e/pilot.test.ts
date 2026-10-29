@@ -407,6 +407,8 @@ describe("ferramentas do canvas", () => {
     await page.click(".menu .mi:has-text('Novo andar')");
     await page.waitForSelector('[data-testid="floor-dialog"]');
     await page.fill('[data-testid="floor-name"]', "Login único");
+    await page.click(".adv-toggle");
+    await page.click('.tabs button:has-text("Worktree git")');
     expect(await page.inputValue('[data-testid="floor-branch"]')).toBe("login-unico");
     await page.click('[data-testid="floor-submit"]');
     await page.waitForSelector('[data-testid="side-floor"]:has-text("Login único")');
