@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Background, BackgroundVariant, MiniMap, ReactFlow, applyNodeChanges, applyEdgeChanges, type EdgeChange, useReactFlow, ReactFlowProvider, useOnViewportChange, type Connection as FlowConnection, type Edge, type EdgeTypes, type Node as FlowNode, type NodeChange, type NodeTypes } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Map as MapIcon, Minus, Plus, Activity, Layers, GitBranch } from "lucide-react";
+import { Map as MapIcon, Minus, Plus, Activity, Layers } from "lucide-react";
 import { BUILD_VERSION, type Role, type Drawing, type Folder, type Geometry, type Preset, type Sidebar as SidebarData, type Workspace, type WorkspaceSnapshot } from "@messai/contracts";
 import { Sidebar } from "./Sidebar.js";
 import { WorkspaceDialog, type WorkspaceInput } from "./WorkspaceDialog.js";
@@ -37,18 +37,12 @@ function freeSpot(nodes: { geometry: Geometry }[], size: { w: number; h: number 
 }
 const isTyping = () => { const el = document.activeElement as HTMLElement | null; return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable || el.classList.contains("xterm-helper-textarea")); };
 
-function ZoomBar({ minimap, setMinimap, onUsage, agents, wsName, floors, current, onSwitch, onNewFloor }: { minimap: boolean; setMinimap: (v: boolean) => void; onUsage: () => void; agents: string[]; wsName?: string; floors: { id: string; name: string; isGround: boolean }[]; current: string | null; onSwitch: (id: string) => void; onNewFloor: () => void }) {
-  const rf = useReactFlow(); const [z, setZ] = useState(100); const [sw, setSw] = useState(false);
+function ZoomBar({ minimap, setMinimap, onUsage, agents, wsName, inFloors, onFloors }: { minimap: boolean; setMinimap: (v: boolean) => void; onUsage: () => void; agents: string[]; wsName?: string; inFloors: boolean; onFloors: () => void }) {
+  const rf = useReactFlow(); const [z, setZ] = useState(100);
   useOnViewportChange({ onChange: (v) => setZ(Math.round(v.zoom * 100)) });
   return (
     <div className="botbar">
-      {wsName && <div className="bb-wrap">
-        <button className={`bb-pill ${sw ? "on" : ""}`} title="Andares" onClick={() => setSw((v) => !v)} data-testid="ws-pill"><Layers size={15} /><span className="bb-name">{wsName}</span></button>
-        {sw && <div className="menu-backdrop" onMouseDown={() => setSw(false)}><div className="bb-floors" onMouseDown={(e) => e.stopPropagation()} data-testid="bb-floors">
-          <button className="f-pill-c new" onClick={() => { onNewFloor(); setSw(false); }} data-testid="bb-new-floor">+ New Floor</button>
-          {floors.map((f) => <button key={f.id} className={`f-pill-c ${f.isGround ? "ground" : ""} ${f.id === current ? "on" : ""}`} onClick={() => { onSwitch(f.id); setSw(false); }}>{f.isGround ? "Ground" : <><GitBranch size={12} /><span className="bb-name">{f.name}</span></>}</button>)}
-        </div></div>}
-      </div>}
+      {wsName && <button className={`bb-pill ${inFloors ? "on" : ""}`} title="Andares" onClick={onFloors} data-testid="ws-pill"><Layers size={15} /><span className="bb-name">{inFloors ? "Floors" : wsName}</span></button>}
       {agents.slice(0, 5).map((a) => <button key={a} className="bb-circle" title={`${a} — Agent Usage`} onClick={onUsage}><AgentIcon id={a} size={20} /></button>)}
       {agents.length === 0 && <button className="bb-circle" title="Agent Usage" onClick={onUsage}><Activity size={15} /></button>}
       <button className="bb-circle" title="Minimapa (Ctrl+Shift+M)" onClick={() => setMinimap(!minimap)}><MapIcon size={15} /></button>
@@ -385,12 +379,6 @@ function Canvas({ conn }: { conn: Connection }) {
   const barAgents = (() => { const set = new Set<string>(); for (const n of snap?.nodes ?? []) if (n.kind === "terminal") set.add(agentKind(n.title)); return [...set]; })();
   const curWs = side.workspaces.find((w) => w.workspaceId === current);
   const grd = groundOf(current);
-  const floorList = grd
-    ? [
-        ...side.workspaces.filter((w) => w.parentId === grd.workspaceId).map((w) => ({ id: w.workspaceId, name: w.name, isGround: false })),
-        { id: grd.workspaceId, name: grd.name, isGround: true },
-      ]
-    : [];
 
   return (
     <div className={`app ${sideMini ? "mini" : ""}`}>
@@ -449,7 +437,7 @@ function Canvas({ conn }: { conn: Connection }) {
             onErase={(id) => void mutate((r) => api.deleteDrawing(id, r))}
             onCreateRect={onCreateRect} />
         </ReactFlow>
-        <ZoomBar minimap={minimap} setMinimap={setMinimap} onUsage={() => setUsage(true)} agents={barAgents} {...(curWs ? { wsName: curWs.name } : {})} floors={floorList} current={current} onSwitch={setCurrent} onNewFloor={() => grd && setFloorDialog(grd)} />
+        <ZoomBar minimap={minimap} setMinimap={setMinimap} onUsage={() => setUsage(true)} agents={barAgents} {...(curWs ? { wsName: curWs.name } : {})} inFloors={!!overview} onFloors={() => (overview ? setOverview(null) : grd && setOverview(grd.workspaceId))} />
         {usage && <AgentUsage api={api} onClose={() => setUsage(false)} />}
       </main>
     </div>

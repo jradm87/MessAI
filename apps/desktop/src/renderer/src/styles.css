@@ -247,7 +247,6 @@ button.danger:hover { border-color: #ff6b6b; color: #ffb4a8; }
 .floor-badge { display: inline-block; margin-right: 8px; padding: 0 7px; border: 1px solid; border-radius: 9px; font-size: 11px; color: var(--fg); pointer-events: auto; }
 .floor-modal { width: 520px; }
 .overview { position: absolute; inset: 0; z-index: 25; background: rgba(8,10,14,.86); backdrop-filter: blur(3px); display: flex; flex-direction: column; }
-.ov-head { display: flex; align-items: center; gap: 8px; padding: 12px 18px; color: var(--fg); font-size: 14px; }
 .ov-head .sp { flex: 1; }
 .ov-stage { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; perspective: 900px; padding-bottom: 40px; }
 .ov-card { width: min(600px, 80%); min-height: 64px; background: #1b2130; border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px; margin-top: 0; transform: rotateX(34deg); transform-origin: center bottom; box-shadow: 0 18px 40px rgba(0,0,0,.55); transition: transform .18s ease, box-shadow .18s ease, margin .18s ease; cursor: pointer; color: var(--fg); }
@@ -316,10 +315,11 @@ button.danger:hover { border-color: #ff6b6b; color: #ffb4a8; }
 .f3d-wires { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .f3d-wires line { stroke: #9aa4b8; stroke-width: .6; stroke-dasharray: 2 2; }
 .f3d-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--mut); font-size: 12px; }
-.f3d-pills { position: absolute; right: 18px; bottom: 16px; display: flex; gap: 8px; z-index: 2; }
-.f3d-pill { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 16px; font-size: 12px; background: #1b2130; border: 1px solid var(--line); color: var(--fg); }
+.f3d-pills { position: absolute; right: 14px; bottom: 60px; display: flex; flex-direction: column; align-items: stretch; gap: 8px; z-index: 31; }
+.f3d-pill { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 18px; font-size: 12px; background: #1b2130; border: 1px solid var(--line); color: var(--fg); box-shadow: 0 4px 14px rgba(0,0,0,.4); }
+.f3d-pill:hover { border-color: var(--acc); }
 .f3d-pill.on { background: var(--acc); color: #06111f; border-color: transparent; }
-.f3d-pill.new:hover { border-color: var(--acc); }
+.f3d-pill.new { border-style: dashed; color: var(--acc); }
 /* Agent Usage */
 .au { position: absolute; z-index: 8; right: 14px; bottom: 56px; width: 340px; max-height: 72vh; display: flex; flex-direction: column; background: #16161a; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 16px 50px rgba(0,0,0,.6); overflow: hidden; }
 .au-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); font-size: 13px; }
@@ -355,18 +355,10 @@ button.danger:hover { border-color: #ff6b6b; color: #ffb4a8; }
 .agent-cluster { display: inline-flex; align-items: center; }
 .agent-av { width: 15px; height: 15px; border-radius: 50%; border: 2px solid #1b2130; margin-left: -5px; }
 .agent-av:first-child { margin-left: 0; }
-.f-pill-c { display: inline-flex; align-items: center; gap: 6px; padding: 7px 16px; border-radius: 18px; font-size: 12px; background: #1b2130; border: 1px solid var(--line); color: var(--fg); box-shadow: 0 4px 14px rgba(0,0,0,.4); max-width: 200px; }
-.f-pill-c .bb-name { max-width: 150px; }
-.f-pill-c:hover { border-color: var(--acc); }
-.f-pill-c.new { border-style: dashed; color: var(--mut); }
-.f-pill-c.new:hover { color: var(--fg); border-color: var(--acc); }
-.f-pill-c.on { background: var(--acc); color: #06111f; border-color: transparent; }
-.f-pill-c.ground { gap: 7px; }
-.f-pill-c.ground::before { content: "◆"; font-size: 10px; opacity: .8; }
 .react-flow__minimap { bottom: 150px !important; }
 
 /* barra inferior em containers separados (estilo Maestri) */
-.botbar { position: absolute; z-index: 7; right: 14px; bottom: 14px; display: flex; align-items: center; gap: 8px; }
+.botbar { position: absolute; z-index: 31; right: 14px; bottom: 14px; display: flex; align-items: center; gap: 8px; }
 .bb-pill { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 14px; border-radius: 18px; background: #1b1b1f; border: 1px solid var(--line); color: var(--fg); font-size: 13px; }
 .bb-pill:hover { border-color: var(--acc); }
 .bb-name { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -375,7 +367,4 @@ button.danger:hover { border-color: #ff6b6b; color: #ffb4a8; }
 .bb-zoom { display: inline-flex; align-items: center; gap: 2px; height: 36px; padding: 0 8px; border-radius: 18px; background: #1b1b1f; border: 1px solid var(--line); }
 .bb-zoom .pct { font-size: 12px; min-width: 42px; text-align: center; cursor: pointer; }
 .bb-zoom .tb { width: 24px; height: 24px; }
-/* andares expandidos a partir da pílula inferior (estilo Maestri) */
-.bb-wrap { position: relative; }
-.bb-pill.on { border-color: var(--acc); }
-.bb-floors { position: absolute; bottom: 44px; left: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; max-height: 60vh; overflow: auto; z-index: 60; }
+.bb-pill.on { border-color: var(--acc); background: #22303f; }

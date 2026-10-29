@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus, GitBranch, X, PlaneLanding, Trash2, Home } from "lucide-react";
+import { Plus, GitBranch, PlaneLanding, Trash2, Home } from "lucide-react";
 import type { FloorStatus, LandResult, Workspace } from "@messai/contracts";
 import type { Api } from "./api.js";
 
@@ -79,14 +79,14 @@ export function FloorOverview({ ground, floors, current, terminals, api, onOpen,
 
   return (
     <div className="overview" data-testid="overview" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="ov-head"><GitBranch size={16} /> Andares de <b>{ground.name}</b> <span className="sp" /><button className="tb" title="Fechar (Esc)" onClick={onClose}><X size={16} /></button></div>
       <div className="f3d-stage" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
         {[...floors].reverse().map((f) => <Level key={f.workspaceId} w={f} isGround={false} />)}
         <Level w={ground} isGround />
       </div>
       <div className="f3d-pills">
-        <button className={`f3d-pill ${current === ground.workspaceId ? "on" : ""}`} onClick={() => onOpen(ground.workspaceId)} data-testid="ov-ground-pill"><Home size={13} /> Ground</button>
         <button className="f3d-pill new" onClick={onNew} data-testid="ov-new"><Plus size={13} /> New Floor</button>
+        {[...floors].reverse().map((f) => <button key={f.workspaceId} className={`f3d-pill ${current === f.workspaceId ? "on" : ""}`} onClick={() => onOpen(f.workspaceId)}><GitBranch size={12} /> {f.name}</button>)}
+        <button className={`f3d-pill ground ${current === ground.workspaceId ? "on" : ""}`} onClick={() => onOpen(ground.workspaceId)} data-testid="ov-ground-pill"><Home size={13} /> Ground</button>
       </div>
       {land && (
         <div className="modal-backdrop" onMouseDown={() => !land.busy && setLand(null)}>
