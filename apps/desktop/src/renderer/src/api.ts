@@ -1,7 +1,7 @@
 import type { ApiError, TreeEntry, FileContent, FsOp, SearchHit, CreateFloor, LandFloor, LandResult, PatchConnection, Role, CreateRole, PatchRole, ChatMessage, SendChat, Attachment, CreateAttachment, FileEntry, Connection as WsConnection, CreateDrawing, CreateFolder, CreateNode, CreateWorkspace, Drawing, Folder, PatchFolder, PatchWorkspace, Preset, Node, PatchNode, Session, Sidebar, Workspace, WorkspaceSnapshot, WsClientMessage, WsServerMessage } from "@messyai/contracts";
 
 export type Connection = { baseUrl: string; wsUrl: string; token: string; homeDir?: string };
-declare global { interface Window { messy: { connection(): Promise<Connection | null>; pickDirectory?: () => Promise<string | null>; pathForFile?: (f: File) => string } } }
+declare global { interface Window { messyai: { connection(): Promise<Connection | null>; pickDirectory?: () => Promise<string | null>; pathForFile?: (f: File) => string } } }
 
 export class ApiClientError extends Error { constructor(readonly error: ApiError, readonly status: number) { super(error.message); } }
 
