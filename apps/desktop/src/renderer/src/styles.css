@@ -255,7 +255,10 @@ button.danger:hover { border-color: #ff6b6b; color: #ffb4a8; }
 /* andares */
 .side .tree li.floor { font-size: 12px; }
 .fl-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
-.side .tree li .cnt.floors { display: inline-flex; align-items: center; gap: 3px; background: #2a2447; color: #d9c7ff; cursor: pointer; }
+.side .tree li.ws .cnt { display: inline-flex; align-items: center; gap: 3px; }
+.side .tree li .cnt.floors { background: #2a2447; color: #d9c7ff; cursor: pointer; padding: 0 5px; }
+.side .tree li.ws.floor.ground .gnd-ic { color: var(--mut); flex: none; }
+.side .tree li.ws.floor.ground .nm { color: var(--fg); }
 .floor-badge { display: inline-block; margin-right: 8px; padding: 0 7px; border: 1px solid; border-radius: 9px; font-size: 11px; color: var(--fg); pointer-events: auto; }
 .floor-modal { width: 520px; }
 .overview { position: absolute; inset: 0; z-index: 25; background: rgba(8,10,14,.86); backdrop-filter: blur(3px); display: flex; flex-direction: column; }

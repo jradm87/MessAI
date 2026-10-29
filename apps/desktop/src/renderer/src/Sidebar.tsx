@@ -1,5 +1,5 @@
 import { useMemo, useState, type DragEvent } from "react";
-import { ChevronDown, ChevronRight, Plus, Settings, FolderPlus, Folder as FolderIcon, FolderOpen, Minus, GitBranch, Layers } from "lucide-react";
+import { ChevronDown, ChevronRight, Plus, Settings, FolderPlus, Folder as FolderIcon, FolderOpen, Minus, GitBranch, Layers, Terminal } from "lucide-react";
 import type { Folder, Sidebar as SidebarData, Workspace } from "@messai/contracts";
 import { WsIcon } from "./wsicons.js";
 
@@ -46,19 +46,27 @@ export function Sidebar({ data, current, collapsed, machine, act }: { data: Side
   const wsRow = (w: Workspace, depth: number): React.ReactNode => {
     const n = data.terminals[w.workspaceId] ?? 0;
     const floors = data.workspaces.filter((f) => f.parentId === w.workspaceId && (!q || f.name.toLowerCase().includes(q) || (f.branch ?? "").includes(q)));
+    const hasFloors = floors.length > 0;
     return [
-      <li key={w.workspaceId} className={`ws ${w.workspaceId === current ? "on" : ""}`} style={{ paddingLeft: 8 + depth * 14 }} draggable onDragStart={(e) => onDragStart(e, "ws", w.workspaceId)}
+      <li key={w.workspaceId} className={`ws ${w.workspaceId === current && !hasFloors ? "on" : ""} ${hasFloors ? "parent" : ""}`} style={{ paddingLeft: 8 + depth * 14 }} draggable onDragStart={(e) => onDragStart(e, "ws", w.workspaceId)}
         onClick={() => act.select(w.workspaceId)} onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtx({ x: e.clientX, y: e.clientY, ws: w }); }} title={w.cwd}>
         <WsIcon icon={w.icon} color={w.color} size={13} />
-        {!collapsed && <><span className="nm">{w.name}</span>{floors.length > 0 && <span className="cnt floors" title={`${floors.length} andar(es) — Ctrl+Shift+\\ abre a visão geral`} onClick={(e) => { e.stopPropagation(); act.overview(w); }}><Layers size={11} /> {floors.length}</span>}{n > 0 && <span className="cnt" title={`${n} terminais`}>{n}</span>}</>}
+        {!collapsed && <><span className="nm">{w.name}</span>{hasFloors && <span className="cnt floors" title={`${floors.length} andar(es) — Ctrl+Shift+\\ abre a visão geral`} onClick={(e) => { e.stopPropagation(); act.overview(w); }}><Layers size={11} /></span>}{n > 0 && <span className="cnt" title={`${n} terminais`}><Terminal size={11} /> {n}</span>}</>}
       </li>,
       ...floors.map((f) => (
         <li key={f.workspaceId} className={`ws floor ${f.workspaceId === current ? "on" : ""}`} style={{ paddingLeft: 8 + (depth + 1) * 14 }} data-testid="side-floor"
           onClick={() => act.select(f.workspaceId)} onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtx({ x: e.clientX, y: e.clientY, ws: f }); }} title={`${f.branch ?? ""} · ${f.cwd}`}>
           <span className="fl-dot" style={{ background: STATUS_COLOR[f.status ?? "working"] }} /><GitBranch size={12} className="mut" />
-          {!collapsed && <><span className="nm">{f.name}</span>{(data.terminals[f.workspaceId] ?? 0) > 0 && <span className="cnt">{data.terminals[f.workspaceId]}</span>}</>}
+          {!collapsed && <><span className="nm">{f.name}</span>{(data.terminals[f.workspaceId] ?? 0) > 0 && <span className="cnt"><Terminal size={11} /> {data.terminals[f.workspaceId]}</span>}</>}
         </li>
       )),
+      ...(hasFloors ? [
+        <li key={`${w.workspaceId}:ground`} className={`ws floor ground ${w.workspaceId === current ? "on" : ""}`} style={{ paddingLeft: 8 + (depth + 1) * 14 }} data-testid="side-ground"
+          onClick={() => act.select(w.workspaceId)} onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtx({ x: e.clientX, y: e.clientY, ws: w }); }} title={`Térreo · ${w.cwd}`}>
+          <Layers size={13} className="gnd-ic" />
+          {!collapsed && <span className="nm">Ground</span>}
+        </li>,
+      ] : []),
     ];
   };
   const folderRows = (parent: string | null, depth: number): React.ReactNode[] => children(parent).flatMap((f) => {
