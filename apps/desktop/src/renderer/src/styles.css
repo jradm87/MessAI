@@ -339,3 +339,14 @@ button.danger:hover { border-color: #ff6b6b; color: #ffb4a8; }
 .au-bar span { display: block; height: 100%; background: var(--acc); }
 .au-m-tok { width: 44px; text-align: right; }
 .au-models-cap { font-size: 10px; margin-top: 2px; text-align: right; }
+/* Agent Usage — estilo Maestri (plan limits em tracinhos) */
+.au-rings { flex: none; }
+.au-id { min-width: 0; }
+.au-plan { font-size: 11px; margin-top: 1px; }
+.au-limits { margin-top: 10px; }
+.au-sec { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--mut); margin: 2px 0 6px; }
+.au-limit { margin-bottom: 10px; }
+.au-limit-top { display: flex; font-size: 12px; margin-bottom: 4px; } .au-limit-top .sp { flex: 1; } .au-pct { font-weight: 600; }
+.au-ticks { display: flex; gap: 2px; height: 16px; }
+.au-ticks span { flex: 1; border-radius: 1px; background: #ffffff14; }
+.au-reset { font-size: 10px; margin-top: 3px; }

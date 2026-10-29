@@ -20,7 +20,7 @@ export class Api {
   unread(wsId: string) { return this.req<Record<string, number>>("GET", `/v1/workspaces/${wsId}/unread`); }
   markInboxRead(nodeId: string) { return this.req<unknown>("GET", `/v1/nodes/${nodeId}/inbox?unread=1&mark=1`); }
   health() { return this.req<{ ok: boolean; protocolVersion: number; buildVersion?: number; machineId: string }>("GET", "/v1/health"); }
-  agentUsage() { return this.req<{ agents: { id: string; label: string; available: boolean; note?: string; metrics: { label: string; value: string }[]; models: { name: string; input: number; output: number }[] }[] }>("GET", "/v1/agent-usage"); }
+  agentUsage() { return this.req<{ agents: { id: string; label: string; available: boolean; note?: string; plan?: string; limits?: { label: string; pct: number; resets: string }[]; metrics: { label: string; value: string }[]; models: { name: string; input: number; output: number }[] }[] }>("GET", "/v1/agent-usage"); }
   capabilities() { return this.req<{ features: string[] }>("GET", "/v1/capabilities"); }
   presets() { return this.req<Preset[]>("GET", "/v1/presets"); }
   listWorkspaces() { return this.req<Workspace[]>("GET", "/v1/workspaces"); }

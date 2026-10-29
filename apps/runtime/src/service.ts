@@ -13,6 +13,50 @@ import { SessionManager } from "./sessions.js";
 
 export type ServiceEvents = { workspace: [snapshot: WorkspaceSnapshot]; message: [message: Message]; sidebar: [sidebar: Sidebar]; chat: [message: ChatMessage] };
 
+export type AgentUsageLimit = { label: string; pct: number; resets: string };
+export type AgentUsageItem = { id: string; label: string; available: boolean; note?: string; plan?: string; limits?: AgentUsageLimit[]; metrics: { label: string; value: string }[]; models: { name: string; input: number; output: number }[] };
+
+/** Lê a credencial OAuth do Claude Code e pega os limites unificados (5h = sessão, 7d = semanal) dos cabeçalhos da API. */
+async function fetchClaudeLimits(): Promise<{ plan?: string; limits: AgentUsageLimit[] } | null> {
+  try {
+    const cred = join(homedir(), ".claude", ".credentials.json");
+    if (!existsSync(cred)) return null;
+    const j = JSON.parse(readFileSync(cred, "utf8")) as { claudeAiOauth?: { accessToken?: string; expiresAt?: number; subscriptionType?: string } };
+    const oauth = j.claudeAiOauth;
+    if (!oauth?.accessToken) return null;
+    if (oauth.expiresAt && oauth.expiresAt < Date.now()) return null; // token expirado; o Claude Code renova
+    const plan = oauth.subscriptionType ? oauth.subscriptionType.charAt(0).toUpperCase() + oauth.subscriptionType.slice(1) : undefined;
+    const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 8000);
+    // count_tokens é gratuito e devolve os cabeçalhos de rate limit unificado
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST", signal: ctrl.signal,
+      headers: { "authorization": `Bearer ${oauth.accessToken}`, "anthropic-version": "2023-06-01", "anthropic-beta": "oauth-2025-04-20", "content-type": "application/json" },
+      body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 1, messages: [{ role: "user", content: "." }] }),
+    }).catch(() => null);
+    clearTimeout(t);
+    if (!res) return plan ? { plan, limits: [] } : null;
+    const h = res.headers;
+    const num = (k: string) => { const v = Number(h.get(k)); return Number.isFinite(v) ? v : undefined; };
+    const parse = (prefix: string, label: string): AgentUsageLimit | null => {
+      const base = `anthropic-ratelimit-unified-${prefix}`;
+      const status = h.get(`${base}-status`);
+      const remaining = num(`${base}-remaining`);
+      const limit = num(`${base}-limit`);
+      const used = num(`${base}-used`);
+      const util = num(`${base}-utilization`) ?? num(`${base}-percent`);
+      const reset = h.get(`${base}-reset`);
+      if (!status && limit === undefined && reset === null && used === undefined && util === undefined) return null;
+      let pct = 0;
+      if (util !== undefined) pct = util <= 1 ? util * 100 : util;
+      else if (limit !== undefined && limit > 0 && remaining !== undefined) pct = (1 - remaining / limit) * 100;
+      else if (limit !== undefined && limit > 0 && used !== undefined) pct = (used / limit) * 100;
+      return { label, pct: Math.max(0, Math.min(100, Math.round(pct))), resets: reset ?? "" };
+    };
+    const limits = [parse("5h", "Session"), parse("7d", "Weekly")].filter((x): x is AgentUsageLimit => x !== null);
+    return { ...(plan ? { plan } : {}), limits };
+  } catch { return null; }
+}
+
 export class WorkspaceService extends EventEmitter<ServiceEvents> {
   constructor(private readonly cfg: Config, private readonly store: Store, readonly sessions: SessionManager) { super(); }
 
@@ -156,8 +200,8 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
   }
 
   // ---- uso dos agentes (dados locais reais; cotas de plano não existem localmente) ----
-  agentUsage(): { agents: { id: string; label: string; available: boolean; note?: string; metrics: { label: string; value: string }[]; models: { name: string; input: number; output: number }[] }[] } {
-    const agents: { id: string; label: string; available: boolean; note?: string; metrics: { label: string; value: string }[]; models: { name: string; input: number; output: number }[] }[] = [];
+  async agentUsage(): Promise<{ agents: AgentUsageItem[] }> {
+    const agents: AgentUsageItem[] = [];
     const fmt = (n: number) => n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n);
     const cf = join(homedir(), ".claude", "stats-cache.json");
     if (existsSync(cf)) {
@@ -172,6 +216,9 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
             { label: "Ferramentas", value: fmt(toolCalls) },
             { label: "Desde", value: (d.firstSessionDate ?? "").slice(0, 10) || "—" },
           ], models });
+        const lim = await fetchClaudeLimits();
+        const a0 = agents[agents.length - 1]!;
+        if (lim) { if (lim.plan) a0.plan = lim.plan; a0.limits = lim.limits; if (lim.limits.length) delete a0.note; }
       } catch { agents.push({ id: "claude", label: "Claude Code", available: false, note: "stats-cache.json ilegível.", metrics: [], models: [] }); }
     } else agents.push({ id: "claude", label: "Claude Code", available: false, note: "Sem ~/.claude/stats-cache.json.", metrics: [], models: [] });
     for (const [id, label] of [["codex", "Codex"], ["gemini", "Gemini"], ["opencode", "OpenCode"]] as const)
