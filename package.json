@@ -1,0 +1,27 @@
+{
+  "name": "messyai",
+  "private": true,
+  "version": "0.0.1",
+  "license": "Apache-2.0",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=22 <23"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --noEmit",
+    "test": "vitest run",
+    "runtime": "node apps/runtime/dist/index.js",
+    "desktop": "npm run dev -w @messyai/desktop"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.2",
+    "playwright": "^1.64.1",
+    "typescript": "5.7.2",
+    "vitest": "4.1.12"
+  }
+}
