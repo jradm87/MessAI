@@ -12,6 +12,7 @@ const sessions = new SessionManager(store);
 const svc = new WorkspaceService(cfg, store, sessions);
 const rec = svc.recoverPersistent();
 if (rec.reattached || rec.lost) console.log(`sessões persistentes: ${rec.reattached} reanexada(s), ${rec.lost} perdida(s)`);
+svc.initNoteWatches(); // observa .md das notas: edição externa reflete na hora
 
 const http = buildServer(cfg, svc, { unix: false });
 const agent = buildServer(cfg, svc, { unix: true });

@@ -10,6 +10,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 const CLI_DIR = join(dirname(fileURLToPath(import.meta.url)), "../../cli/bin");
 import { SessionManager } from "./sessions.js";
+import { watch, type FSWatcher } from "chokidar";
 
 export type ServiceEvents = { workspace: [snapshot: WorkspaceSnapshot]; message: [message: Message]; sidebar: [sidebar: Sidebar]; chat: [message: ChatMessage] };
 
@@ -95,6 +96,32 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     this.emit("workspace", s);
     return s;
   }
+
+  // ---- watch de arquivos de nota (editor/agente editou por fora → re-publica) ----
+  private watcher: FSWatcher | null = null;
+  private watchedNote = new Map<string, string>(); // filePath -> workspaceId
+  private ensureWatcher(): FSWatcher {
+    if (this.watcher) return this.watcher;
+    const w = watch([], { ignoreInitial: true, awaitWriteFinish: { stabilityThreshold: 150, pollInterval: 50 } });
+    const onChange = (path: string) => { const ws = this.watchedNote.get(path); if (ws && this.store.getWorkspace(ws)) { try { this.publish(ws); } catch { /* ignorar */ } } };
+    w.on("change", onChange); w.on("unlink", onChange); w.on("error", () => {});
+    this.watcher = w; return w;
+  }
+  private watchNote(filePath: string, workspaceId: string): void {
+    if (this.watchedNote.get(filePath) === workspaceId) return;
+    const fresh = !this.watchedNote.has(filePath);
+    this.watchedNote.set(filePath, workspaceId);
+    if (fresh) this.ensureWatcher().add(filePath);
+  }
+  private unwatchNote(filePath: string): void {
+    if (!this.watchedNote.delete(filePath)) return;
+    this.watcher?.unwatch(filePath);
+  }
+  /** Observa os arquivos de nota existentes (chamado na subida do runtime). */
+  initNoteWatches(): void {
+    for (const w of this.store.listWorkspaces()) for (const n of this.store.listNodes(w.workspaceId)) if (n.kind === "note" && n.filePath) this.watchNote(n.filePath, w.workspaceId);
+  }
+  async closeWatcher(): Promise<void> { await this.watcher?.close().catch(() => {}); this.watcher = null; }
 
   listWorkspaces(): Workspace[] { return this.store.listWorkspaces(); }
   sidebar(): Sidebar { return { folders: this.store.listFolders(), workspaces: this.store.listWorkspaces(), terminals: this.store.terminalCounts() }; }
@@ -541,6 +568,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       this.store.transaction(() => { this.store.insertNode(node, titleAuto); this.store.bumpRevision(workspaceId, rev.value); });
       if (node.kind === "note" && node.filePath && !input.filePath) this.writeNoteFile(node, node.content ?? "");
       else if (node.kind === "note" && node.filePath) { try { this.noteMtime.set(node.nodeId, statSync(node.filePath).mtimeMs); } catch { /* ignorar */ } }
+      if (node.kind === "note" && node.filePath) this.watchNote(node.filePath, workspaceId);
     }
     this.publish(workspaceId);
     return succeed(session ? { node, session, revision: rev.value } : { node, revision: rev.value });
@@ -778,6 +806,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const rev = checkRevision(w, expectedRevision);
     if (!rev.ok) return rev;
     if (node.sessionId) this.sessions.dispose(node.sessionId);
+    if (node.kind === "note" && node.filePath) this.unwatchNote(node.filePath);
     if (node.kind === "note" && node.filePath && node.filePath.startsWith(this.notesDir(node.workspaceId))) { try { unlinkSync(node.filePath); } catch { /* já removido */ } }
     this.noteMtime.delete(nodeId);
     this.store.transaction(() => {
