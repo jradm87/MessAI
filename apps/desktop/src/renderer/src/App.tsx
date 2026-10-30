@@ -147,7 +147,7 @@ function Canvas({ conn }: { conn: Connection }) {
   // falha calada enquanto o snapshot do WS não chega — "funciona 1x e depois não faz nada".
   const mutate = async (fn: (rev: number) => Promise<unknown>) => {
     for (let attempt = 0; ; attempt++) {
-      try { await fn(revision.current); return; }
+      try { await fn(revision.current); revision.current += 1; return; } // toda mutação sobe a revisão em 1; manter local evita 409 na operação seguinte
       catch (e) {
         if (e instanceof ApiClientError && e.error.code === "CONFLICT" && current) {
           if (typeof e.error.revision === "number") revision.current = e.error.revision;
@@ -300,9 +300,9 @@ function Canvas({ conn }: { conn: Connection }) {
     else setDialog({ rect: g });
   };
   const viewCenter = (): { x: number; y: number } => { const m = document.querySelector("main.canvas")!.getBoundingClientRect(); return rf.screenToFlowPosition({ x: m.left + m.width / 2, y: m.top + m.height / 2 }); };
-  const deleteSelected = () => {
+  const deleteSelected = async () => {
     const sel = flowRef.current.filter((n) => n.selected);
-    for (const n of sel) void mutate((r) => api.deleteNode(n.id, r));
+    for (const n of sel) await mutate((r) => api.deleteNode(n.id, r)); // sequencial: cada delete avança a revisão antes do próximo (sem colisão/flicker)
   };
   const duplicateSelected = async () => {
     const sel = flowRef.current.filter((n) => n.selected); if (!sel.length || !current) return;
