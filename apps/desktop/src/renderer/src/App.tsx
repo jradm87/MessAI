@@ -236,15 +236,13 @@ function Canvas({ conn }: { conn: Connection }) {
     // senão um resize/arrasto sobrescreve a lista com uma versão antiga e os outros nós "somem" da tela.
     let next: FlowNode[] = [];
     setFlow((cur) => { next = applyNodeChanges(changes, cur); flowRef.current = next; return next; });
-    let missingOnEnd = false; // arrasto/resize terminou com o nó já fora do snap/flow (ex.: deletado no meio)
+    let missingOnEnd = false; // resize terminou com o nó já fora do snap/flow (ex.: deletado no meio)
+    // Posição NÃO é tratada aqui: no arrasto rápido o React Flow coalesce as mudanças de posição e a
+    // última pode vir atrasada/na origem. Usamos onNodeDragStop (posição final autoritativa). Aqui só o resize.
     for (const c of changes) {
-      if (c.type !== "position" && c.type !== "dimensions") continue;
+      if (c.type !== "dimensions") continue;
       const n = snap?.nodes.find((x) => x.nodeId === c.id); const f = next.find((x) => x.id === c.id);
-      if (c.type === "position") {
-        if (c.dragging) dragging.current = true;
-        else { dragging.current = false; if (n && f) void mutate((r) => api.patchNode(c.id, { expectedRevision: r, geometry: { ...n.geometry, x: f.position.x, y: f.position.y } })); else missingOnEnd = true; } // sempre destrava, mesmo se o nó sumiu — senão o efeito congela
-      }
-      if (c.type === "dimensions") {
+      {
         if (c.resizing) { dragging.current = true; } // mantém o tamanho local durante o arrasto; não deixa o snapshot reverter
         else {
           dragging.current = false; // sempre destrava no fim do resize, mesmo se o nó sumiu
@@ -263,6 +261,21 @@ function Canvas({ conn }: { conn: Connection }) {
     if (missingOnEnd) setSnap((s) => (s ? { ...s } : s));
   }, [snap, api]);
 
+  // Arrasto de nó: estado e posição final vêm dos callbacks dedicados do React Flow (robusto no arrasto rápido).
+  const onNodeDragStart = useCallback(() => { dragging.current = true; }, []);
+  const onNodeDragStop = useCallback((_: unknown, node: FlowNode, nodes: FlowNode[]) => {
+    dragging.current = false;
+    const moved = nodes.length ? nodes : [node]; // multi-seleção: todos os arrastados
+    void (async () => {
+      let missing = false;
+      for (const nd of moved) {
+        const sn = snap?.nodes.find((x) => x.nodeId === nd.id);
+        if (sn) await mutate((r) => api.patchNode(nd.id, { expectedRevision: r, geometry: { ...sn.geometry, x: Math.round(nd.position.x), y: Math.round(nd.position.y) } })); // sequencial: sem colisão de revisão
+        else missing = true;
+      }
+      if (missing) setSnap((s) => (s ? { ...s } : s));
+    })();
+  }, [snap, api]);
   const onConnect = useCallback((c: FlowConnection) => { if (current && c.source && c.target) void mutate((r) => api.createConnectionRev(current, r, c.source, c.target)); }, [current, api]);
   const onEdgesChange = useCallback((changes: EdgeChange[]) => setEdges((es) => applyEdgeChanges(changes, es)), []);
   const onEdgesDelete = useCallback((del: Edge[]) => { for (const e of del) void mutate((r) => api.deleteConnection(e.id, r)); }, [api]);
@@ -477,7 +490,7 @@ function Canvas({ conn }: { conn: Connection }) {
         {overview && groundOf(overview) && <FloorOverview ground={groundOf(overview)!} floors={side.workspaces.filter((w) => w.parentId === overview)} current={current} terminals={side.terminals} api={api}
           onOpen={(id) => { setCurrent(id); setOverview(null); }} onNew={() => { setFloorDialog(groundOf(overview)!); }} onClose={() => setOverview(null)} onChanged={() => void refreshList()} onError={toast} />}
         {rolesDialog && <RolesDialog api={api} workspaceCwd={snap?.workspace.cwd ?? ""} onClose={() => setRolesDialog(false)} onChanged={() => void loadRoles()} />}
-        <ReactFlow nodes={flow} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} onEdgesDelete={onEdgesDelete}
+        <ReactFlow nodes={flow} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onNodeDragStart={onNodeDragStart} onNodeDragStop={onNodeDragStop} onEdgesChange={onEdgesChange} onConnect={onConnect} onEdgesDelete={onEdgesDelete}
           onNodeClick={(_, n) => { if (linkingRef.current) finishLink(n.id); }} onPaneClick={() => { if (linkingRef.current) setLinking(null); }}
           nodesDraggable={selectMode} nodesConnectable={selectMode} elementsSelectable={selectMode} panOnDrag={tool === "pan" ? [0, 1, 2] : selectMode ? [1, 2] : false} selectionOnDrag={selectMode} panOnScroll zoomOnScroll={false} zoomActivationKeyCode="Alt" panActivationKeyCode="Control" multiSelectionKeyCode={null}
           nodesFocusable={false} fitView minZoom={0.1} maxZoom={3} proOptions={{ hideAttribution: true }} colorMode="dark" deleteKeyCode="Delete"
