@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { WebglAddon } from "@xterm/addon-webgl";
+import { Unicode11Addon } from "@xterm/addon-unicode11";
 import "@xterm/xterm/css/xterm.css";
 import type { Session } from "@messai/contracts";
 import type { Api, Stream } from "./api.js";
@@ -24,10 +26,14 @@ export function TerminalNode({ id, data, selected }: NodeProps & { data: Termina
   const { sessionId, stream, api } = data;
 
   useEffect(() => {
-    const term = new Terminal({ cursorBlink: true, fontSize: 14, fontFamily: "ui-monospace, monospace", theme: { background: "#0a0a0b" }, scrollback: 2000 });
+    const term = new Terminal({ cursorBlink: true, fontSize: 14, fontFamily: '"JetBrainsMono Nerd Font", "MesloLGS NF", "FiraCode Nerd Font", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, "DejaVu Sans Mono", ui-monospace, monospace', theme: { background: "#0a0a0b" }, scrollback: 2000, allowProposedApi: true });
     const fit = new FitAddon();
+    term.loadAddon(new Unicode11Addon());
     term.loadAddon(fit);
+    term.unicode.activeVersion = "11"; // largura correta de glyphs (powerline/CJK) — evita a quebra errada do prompt
     term.open(host.current!);
+    // Render em GPU quando houver contexto; se faltar (ex.: --disable-gpu) cai no renderer padrão.
+    try { const webgl = new WebglAddon(); webgl.onContextLoss(() => { try { webgl.dispose(); } catch { /* já descartado */ } }); term.loadAddon(webgl); } catch { /* sem WebGL */ }
     termRef.current = term;
     let lastSeq = 0;
     let mine = false;
