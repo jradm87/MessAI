@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useAtomValue } from "jotai";
-import { Search, Eraser, Lock, Eye } from "lucide-react";
+import { Search, Eraser, Lock, Eye, Folder } from "lucide-react";
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -139,6 +139,7 @@ export function TerminalNode({ id, data, selected }: NodeProps & { data: Termina
           onDrop={(e) => { const p = e.dataTransfer.getData("text/mess-path") || e.dataTransfer.getData("text/plain"); if (!p) return; e.preventDefault(); stream.send({ type: "acquireLease", sessionId }); stream.send({ type: "input", sessionId, data: /\s/.test(p) ? `'${p}' ` : `${p} ` }); }} />
         {data.chatOpen && <ChatLayer nodeId={id} title={data.title} api={api} thread={thread} setThread={setThread} messages={chat} onClose={data.onChatClose} />}
       </div>
+      {session?.cwd && <div className="footbar nodrag" title={session.cwd}><Folder size={11} /><span className="cwd">{session.cwd.replace(/^\/home\/[^/]+/, "~")}</span></div>}
       <Handle type="source" position={Position.Right} /><Handle type="target" position={Position.Left} />
     </div>
   );

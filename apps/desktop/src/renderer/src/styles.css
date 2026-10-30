@@ -34,6 +34,9 @@ input { background: #0c1017; color: var(--fg); border: 1px solid var(--line); bo
 .term-find button { width: 22px; height: 22px; border: 0; background: transparent; color: var(--mut); border-radius: 5px; cursor: pointer; font-size: 12px; padding: 0; }
 .term-find button:hover { background: #28324a; color: var(--fg); }
 .term .xterm { height: 100%; }
+.footbar { display: flex; align-items: center; gap: 5px; padding: 2px 8px; font-size: 10px; color: var(--mut); border-top: 1px solid var(--line); background: #121214; min-height: 18px; }
+.footbar .cwd { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.footbar svg { flex: none; opacity: .7; }
 .err { background: #4b1f1f; color: #ffb4a8; padding: 3px 8px; font-size: 11px; }
 textarea { flex: 1; resize: none; border: 0; outline: 0; background: transparent; color: #f1e7c6; padding: 8px; font: 14px/1.45 system-ui, sans-serif; }
 .react-flow__node { padding: 0 !important; border: 0 !important; background: transparent !important; }
