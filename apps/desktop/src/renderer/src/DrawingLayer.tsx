@@ -59,29 +59,30 @@ export function DrawingLayer({ tool, style, drawings, selected, onSelect, onMove
   };
 
   // ----- seleção / mover desenhos (modo seleção) -----
+  // pointer capture no hit da caixa: o React Flow (que também ouve o ponteiro no pane) não rouba o arrasto.
   const dragRef = useRef<{ startX: number; startY: number; orig: Map<string, Pt[]> } | null>(null);
   const [off, setOff] = useState<Pt>([0, 0]);
-  const dragMove = (e: MouseEvent) => { const d = dragRef.current; if (!d) return; const p = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY }); setOff([p.x - d.startX, p.y - d.startY]); };
-  const dragUp = (e: MouseEvent) => {
-    window.removeEventListener("mousemove", dragMove); window.removeEventListener("mouseup", dragUp);
-    const d = dragRef.current; dragRef.current = null; setOff([0, 0]); if (!d) return;
-    const p = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
-    const dx = p.x - d.startX, dy = p.y - d.startY;
-    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return; // só clique, não moveu
-    for (const [id, pts] of d.orig) onMovePoints(id, pts.map(([x, y]) => [x + dx, y + dy] as Pt));
-  };
-  const strokeDown = (e: React.MouseEvent, id: string) => {
-    if (erasable) { e.stopPropagation(); onErase(id); return; }
+  const hitDown = (e: React.PointerEvent, id: string) => {
     if (!selectMode || e.button !== 0) return;
     e.stopPropagation();
+    try { (e.currentTarget as Element).setPointerCapture(e.pointerId); } catch { /* sem captura */ }
     const additive = e.shiftKey || e.metaKey || e.ctrlKey;
     if (!selected.has(id) || additive) onSelect(id, additive);
     const ids = additive ? [...new Set([...selected, id])] : selected.has(id) ? [...selected] : [id];
     const orig = new Map<string, Pt[]>();
     for (const did of ids) { const dd = drawings.find((x) => x.drawingId === did); if (dd) orig.set(did, dd.points); }
-    const p = toFlow(e); dragRef.current = { startX: p[0], startY: p[1], orig }; setOff([0, 0]);
-    window.addEventListener("mousemove", dragMove); window.addEventListener("mouseup", dragUp);
+    const p = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    dragRef.current = { startX: p.x, startY: p.y, orig }; setOff([0, 0]);
   };
+  const hitMove = (e: React.PointerEvent) => { const d = dragRef.current; if (!d) return; const p = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY }); setOff([p.x - d.startX, p.y - d.startY]); };
+  const hitUp = (e: React.PointerEvent) => {
+    const d = dragRef.current; if (!d) return; dragRef.current = null;
+    const p = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    const dx = p.x - d.startX, dy = p.y - d.startY; setOff([0, 0]);
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return; // só clique, não moveu
+    for (const [id, pts] of d.orig) onMovePoints(id, pts.map(([x, y]) => [x + dx, y + dy] as Pt));
+  };
+  const eraseDown = (e: React.MouseEvent, id: string) => { e.stopPropagation(); onErase(id); };
 
   const bbox = selected.size ? boundingBox(drawings.filter((d) => selected.has(d.drawingId))) : null;
 
@@ -97,8 +98,9 @@ export function DrawingLayer({ tool, style, drawings, selected, onSelect, onMove
             return (
               <g key={d.drawingId} transform={tf}>
                 {sel && <Stroke d={d} highlight />}
-                <Stroke d={d} {...(erasable ? { onDown: (e) => strokeDown(e, d.drawingId), cursor: "cell" } : {})} />
-                {hit && <rect x={hit.x} y={hit.y} width={hit.w} height={hit.h} fill="transparent" style={{ pointerEvents: "all", cursor: "move" }} onMouseDown={(e) => strokeDown(e, d.drawingId)} />}
+                <Stroke d={d} {...(erasable ? { onDown: (e) => eraseDown(e, d.drawingId), cursor: "cell" } : {})} />
+                {hit && <rect x={hit.x} y={hit.y} width={hit.w} height={hit.h} fill="transparent" style={{ pointerEvents: "all", cursor: "move" }}
+                  onPointerDown={(e) => hitDown(e, d.drawingId)} onPointerMove={hitMove} onPointerUp={hitUp} />}
               </g>
             );
           })}
