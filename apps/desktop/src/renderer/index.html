@@ -4,6 +4,17 @@
     <meta charset="UTF-8" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src http://127.0.0.1:* ws://127.0.0.1:*; img-src 'self' data:" />
     <title>MessAI</title>
+    <style>
+      /* Splash estático: pinta imediatamente, enquanto o bundle React compila (~alguns segundos no 1º load). */
+      #splash { position: fixed; inset: 0; z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; background: #0a0a0b; color: #e7e9ee; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; transition: opacity .25s ease; }
+      #splash .logo { font-size: 34px; font-weight: 700; letter-spacing: -.03em; }
+      #splash .spin { width: 22px; height: 22px; border: 2px solid #2a2c31; border-top-color: #5aa9ff; border-radius: 50%; animation: messspin .8s linear infinite; }
+      @keyframes messspin { to { transform: rotate(360deg); } }
+    </style>
   </head>
-  <body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body>
+  <body>
+    <div id="splash"><div class="logo">MessAI</div><div class="spin"></div></div>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>
