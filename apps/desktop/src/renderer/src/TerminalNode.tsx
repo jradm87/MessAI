@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
+import { Search, Eraser } from "lucide-react";
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
+import { SearchAddon } from "@xterm/addon-search";
 import "@xterm/xterm/css/xterm.css";
 import type { Session } from "@messai/contracts";
 import type { Api, Stream } from "./api.js";
@@ -19,6 +21,8 @@ export type TerminalData = { title: string; sessionId: string; unread: number; a
 export function TerminalNode({ id, data, selected }: NodeProps & { data: TerminalData }) {
   const host = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal>(null);
+  const searchRef = useRef<SearchAddon>(null);
+  const [find, setFind] = useState<string | null>(null); // null = fechado; string = busca aberta
   const [session, setSession] = useState<Session | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const resumedRef = useRef(false);
@@ -28,9 +32,14 @@ export function TerminalNode({ id, data, selected }: NodeProps & { data: Termina
   useEffect(() => {
     const term = new Terminal({ cursorBlink: true, fontSize: 14, fontFamily: '"JetBrainsMono Nerd Font", "MesloLGS NF", "FiraCode Nerd Font", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, "DejaVu Sans Mono", ui-monospace, monospace', theme: { background: "#0a0a0b" }, scrollback: 2000, allowProposedApi: true });
     const fit = new FitAddon();
+    const search = new SearchAddon();
     term.loadAddon(new Unicode11Addon());
     term.loadAddon(fit);
+    term.loadAddon(search);
+    searchRef.current = search;
     term.unicode.activeVersion = "11"; // largura correta de glyphs (powerline/CJK) — evita a quebra errada do prompt
+    // Ctrl+F abre a busca sem repassar ao shell (no readline seria forward-char).
+    term.attachCustomKeyEventHandler((e) => { if (e.type === "keydown" && (e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "f") { setFind((v) => v ?? ""); return false; } return true; });
     term.open(host.current!);
     // Render em GPU quando houver contexto; se faltar (ex.: --disable-gpu) cai no renderer padrão.
     try { const webgl = new WebglAddon(); webgl.onContextLoss(() => { try { webgl.dispose(); } catch { /* já descartado */ } }); term.loadAddon(webgl); } catch { /* sem WebGL */ }
@@ -96,12 +105,27 @@ export function TerminalNode({ id, data, selected }: NodeProps & { data: Termina
         {data.unread > 0 && <span className="badge" title="mensagens não lidas de outros agentes (mess inbox)">✉ {data.unread}</span>}
         {chatUnread > 0 && <span className="badge chatb" title="respostas no chat (Ctrl+J)">💬 {chatUnread}</span>}
         <span className="sp" />
+        <button title="Buscar no terminal (Ctrl+F)" className="nodrag" onClick={() => setFind((v) => (v === null ? "" : null))}><Search size={12} /></button>
+        <button title="Limpar a tela" className="nodrag" onClick={() => termRef.current?.clear()}><Eraser size={12} /></button>
         {state === "running" && <button title="Parar processo" onClick={() => void api.stop(sessionId)}>■</button>}
         {(state === "exited" || state === "lost") && <button title="Reiniciar" onClick={() => void api.restart(id)}>↻</button>}
         <button title="Remover nó" onClick={data.onDelete}>✕</button>
       </div>
       {err && <div className="err">{err}</div>}
       <div className="term-wrap">
+        {find !== null && (
+          <div className="term-find nodrag nowheel">
+            <input autoFocus value={find} placeholder="Buscar no terminal…"
+              onChange={(e) => { setFind(e.target.value); searchRef.current?.findNext(e.target.value, { incremental: true }); }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") { e.preventDefault(); const s = searchRef.current; if (s) { if (e.shiftKey) s.findPrevious(find ?? ""); else s.findNext(find ?? ""); } }
+                else if (e.key === "Escape") { e.preventDefault(); setFind(null); searchRef.current?.clearDecorations(); }
+              }} />
+            <button title="Anterior (Shift+Enter)" onClick={() => searchRef.current?.findPrevious(find ?? "")}>↑</button>
+            <button title="Próximo (Enter)" onClick={() => searchRef.current?.findNext(find ?? "")}>↓</button>
+            <button title="Fechar (Esc)" onClick={() => { setFind(null); searchRef.current?.clearDecorations(); }}>✕</button>
+          </div>
+        )}
         <div className="term nodrag nowheel" ref={host} tabIndex={0}
           onDragOver={(e) => { if (e.dataTransfer.types.includes("text/mess-path") || e.dataTransfer.types.includes("text/plain")) e.preventDefault(); }}
           onDrop={(e) => { const p = e.dataTransfer.getData("text/mess-path") || e.dataTransfer.getData("text/plain"); if (!p) return; e.preventDefault(); stream.send({ type: "acquireLease", sessionId }); stream.send({ type: "input", sessionId, data: /\s/.test(p) ? `'${p}' ` : `${p} ` }); }} />
