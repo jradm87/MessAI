@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useAtomValue } from "jotai";
 import { Search, Eraser } from "lucide-react";
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
 import { Terminal } from "@xterm/xterm";
@@ -9,14 +10,15 @@ import { SearchAddon } from "@xterm/addon-search";
 import "@xterm/xterm/css/xterm.css";
 import type { Session } from "@messai/contracts";
 import type { Api, Stream } from "./api.js";
+import { unreadAtom, attentionAtom } from "./atoms.js";
 import { EditableTitle } from "./EditableTitle.js";
 import { Composer, type MentionTarget } from "./Composer.js";
 import { ChatLayer } from "./ChatLayer.js";
 import type { ChatMessage, Role } from "@messai/contracts";
 
-export type NodeExtras = { onLink: () => void; linkCount: number; onChat: () => void; onRaise: () => void; attention?: boolean };
+export type NodeExtras = { onLink: () => void; linkCount: number; onChat: () => void; onRaise: () => void };
 export type ComposerExtras = { composerOpen: boolean; onComposerClose: () => void; onFocus: () => void; workspaceId: string; targets: MentionTarget[]; chatOpen: boolean; onChatClose: () => void; role?: Role; roles: Role[]; onSetRole: (roleId: string | null) => void; onManageRoles: () => void };
-export type TerminalData = { title: string; sessionId: string; unread: number; api: Api; stream: Stream; onDelete: () => void; onRename: (t: string) => void; onResume: () => void; editSignal?: number } & NodeExtras & ComposerExtras;
+export type TerminalData = { title: string; sessionId: string; api: Api; stream: Stream; onDelete: () => void; onRename: (t: string) => void; onResume: () => void; editSignal?: number } & NodeExtras & ComposerExtras;
 
 export function TerminalNode({ id, data, selected }: NodeProps & { data: TerminalData }) {
   const host = useRef<HTMLDivElement>(null);
@@ -28,6 +30,8 @@ export function TerminalNode({ id, data, selected }: NodeProps & { data: Termina
   const resumedRef = useRef(false);
   const stateRef = useRef<string>("");
   const { sessionId, stream, api } = data;
+  const unread = useAtomValue(unreadAtom(id)); // só este nó re-renderiza quando a sua contagem muda
+  const attention = useAtomValue(attentionAtom(id));
 
   useEffect(() => {
     const term = new Terminal({ cursorBlink: true, fontSize: 14, fontFamily: '"JetBrainsMono Nerd Font", "MesloLGS NF", "FiraCode Nerd Font", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, "DejaVu Sans Mono", ui-monospace, monospace', theme: { background: "#0a0a0b" }, scrollback: 2000, allowProposedApi: true });
@@ -85,11 +89,11 @@ export function TerminalNode({ id, data, selected }: NodeProps & { data: Termina
     });
   }, [id, api, stream]);
   return (
-    <div className={`node terminal ${selected ? "sel" : ""} ${data.attention ? "att" : ""}`}>
+    <div className={`node terminal ${selected ? "sel" : ""} ${attention ? "att" : ""}`}>
       <NodeResizer minWidth={240} minHeight={160} isVisible={selected} />
       <Composer open={data.composerOpen} nodeId={id} workspaceId={data.workspaceId} sessionId={sessionId} title={data.title} targets={data.targets} api={api} stream={stream} onClose={data.onComposerClose} {...(data.chatOpen ? { chatThread: thread } : {})} />
       <div className="bar nodrag-off">
-        {data.attention && <span className="dot" title="precisa de atenção (Ctrl+Shift+A)" />}
+        {attention && <span className="dot" title="precisa de atenção (Ctrl+Shift+A)" />}
         <EditableTitle value={data.title} onSave={data.onRename} editSignal={data.editSignal ?? 0} />
         <span className={`role-pill nodrag ${data.role ? "" : "none"}`} title={data.role ? `Papel: ${data.role.name}\n${data.role.instructions.slice(0, 200)}` : "Sem papel (clique para atribuir)"} data-testid="role-pill" onClick={(e) => { e.stopPropagation(); setRoleMenu((v) => !v); }}>
           {data.role ? <><span className="role-badge">{data.role.badge || data.role.name.slice(0, 2).toUpperCase()}</span>{data.role.name}</> : "papel"}
@@ -102,7 +106,7 @@ export function TerminalNode({ id, data, selected }: NodeProps & { data: Termina
           </div>
         )}
         <span className={`st ${state}`}>{state}{session?.persistent ? " · tmux" : ""}{session?.pid ? ` · pid ${session.pid}` : ""}{session?.lease ? (mine ? " · você controla" : " · observando") : ""}</span>
-        {data.unread > 0 && <span className="badge" title="mensagens não lidas de outros agentes (mess inbox)">✉ {data.unread}</span>}
+        {unread > 0 && <span className="badge" title="mensagens não lidas de outros agentes (mess inbox)">✉ {unread}</span>}
         {chatUnread > 0 && <span className="badge chatb" title="respostas no chat (Ctrl+J)">💬 {chatUnread}</span>}
         <span className="sp" />
         <button title="Buscar no terminal (Ctrl+F)" className="nodrag" onClick={() => setFind((v) => (v === null ? "" : null))}><Search size={12} /></button>

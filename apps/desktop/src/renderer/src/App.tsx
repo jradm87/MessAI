@@ -14,6 +14,7 @@ import { NodeActionBar, type NodeAction } from "./NodeActionBar.js";
 import { AgentUsage } from "./AgentUsage.js";
 import { AgentIcon, agentKind } from "./agentIcons.js";
 import { Api, ApiClientError, Stream, type Connection } from "./api.js";
+import { store, sessStateMapAtom, unreadMapAtom, attentionAtom } from "./atoms.js";
 import { TerminalNode } from "./TerminalNode.js";
 import { NoteNode } from "./NoteNode.js";
 import { TextNode } from "./TextNode.js";
@@ -76,8 +77,10 @@ function Canvas({ conn }: { conn: Connection }) {
   const [minimap, setMinimap] = useState(true);
   const [msg, setMsg] = useState("");
   const [stale, setStale] = useState(false);
-  const [unread, setUnread] = useState<Record<string, number>>({});
-  const [sessState, setSessState] = useState<Record<string, string>>({});
+  // Sessão e não-lidas vivem em átomos Jotai (atoms.ts): cada nó assina o seu, então
+  // evento de PTY/mensagem não reconstrói o canvas. Estes setters escrevem no store.
+  const setUnread = (u: Record<string, number>) => store.set(unreadMapAtom, u);
+  const setSessState = (u: Record<string, string> | ((p: Record<string, string>) => Record<string, string>)) => store.set(sessStateMapAtom, u);
   const [linking, setLinking] = useState<string | null>(null);
   const linkingRef = useRef<string | null>(null); useEffect(() => { linkingRef.current = linking; }, [linking]);
   const edgesRef = useRef<Edge[]>([]); useEffect(() => { edgesRef.current = edges; }, [edges]);
@@ -168,14 +171,14 @@ function Canvas({ conn }: { conn: Connection }) {
       const rename = (title: string) => void mutate((r) => api.patchNode(n.nodeId, { expectedRevision: r, title }));
       const change = (content: string) => void mutate((r) => api.patchNode(n.nodeId, { expectedRevision: r, content }));
       const linkCount = (snap.connections ?? []).filter((c) => c.sourceNodeId === n.nodeId || c.targetNodeId === n.nodeId).length;
-      const st = sessState[n.nodeId];
-      const extras = { onLink: () => startLink(n.nodeId), linkCount, onChat: () => (chatFor === n.nodeId ? setChatFor(null) : openChat(n.nodeId)), onRaise: () => toast("Elevar/acoplar: em breve"), attention: (unread[n.nodeId] ?? 0) > 0 || st === "exited" || st === "lost" };
+      // atenção/não-lidas: o nó lê dos átomos (atoms.ts), não entram no rebuild.
+      const extras = { onLink: () => startLink(n.nodeId), linkCount, onChat: () => (chatFor === n.nodeId ? setChatFor(null) : openChat(n.nodeId)), onRaise: () => toast("Elevar/acoplar: em breve") };
       return {
         id: n.nodeId, type: n.kind,
         position: keepLocal ? old.position : { x: n.geometry.x, y: n.geometry.y },
         style: keepLocal && old.style ? old.style : { width: n.geometry.w, height: n.geometry.h },
         ...(old?.selected ? { selected: true } : {}),
-        data: n.kind === "terminal" ? { title: n.title, sessionId: n.sessionId!, unread: unread[n.nodeId] ?? 0, api, stream, onDelete: del, onRename: rename, editSignal: renameSig.id === n.nodeId ? renameSig.n : 0, ...extras,
+        data: n.kind === "terminal" ? { title: n.title, sessionId: n.sessionId!, api, stream, onDelete: del, onRename: rename, editSignal: renameSig.id === n.nodeId ? renameSig.n : 0, ...extras,
             composerOpen: composerFor === n.nodeId, onComposerClose: () => setComposerFor(null), workspaceId: snap.workspace.workspaceId,
             chatOpen: chatFor === n.nodeId, onChatClose: () => setChatFor(null),
             ...(n.roleId && roles.find((r) => r.roleId === n.roleId) ? { role: roles.find((r) => r.roleId === n.roleId)! } : {}), roles,
@@ -204,7 +207,7 @@ function Canvas({ conn }: { conn: Connection }) {
       };
       return { id: c.connectionId, type: style, source: c.sourceNodeId, target: c.targetNodeId, deletable: true, data, ...(wasSelected ? { selected: true } : {}) };
     }));
-  }, [snap, unread, sessState, composerFor, chatFor, roles, renameSig]);
+  }, [snap, composerFor, chatFor, roles, renameSig]);
 
   /** Seleciona um nó e o traz para a vista. */
   const selectNode = (id: string) => {
@@ -345,11 +348,11 @@ function Canvas({ conn }: { conn: Connection }) {
         wireIdx.current = (wireIdx.current + (e.key === "ArrowRight" ? 1 : -1) + nb.length) % nb.length; selectNode(nb[wireIdx.current]!); return;
       }
       if (ctrl && e.shiftKey && e.key.toLowerCase() === "a") {
-        e.preventDefault(); const att = flowRef.current.filter((n) => (n.data as { attention?: boolean }).attention);
+        e.preventDefault(); const att = flowRef.current.filter((n) => store.get(attentionAtom(n.id)));
         if (!att.length) { toast("Nenhum terminal precisa de atenção"); return; }
         const i = att.findIndex((n) => n.selected); selectNode(att[(i + 1) % att.length]!.id); return;
       }
-      if (ctrl && e.altKey && e.key.toLowerCase() === "a") { e.preventDefault(); const att = flowRef.current.filter((n) => (n.data as { attention?: boolean }).attention); toast(att.length ? `Esperando: ${att.map((n) => String((n.data as { title?: string }).title ?? "texto")).join(", ")}` : "Nenhum terminal precisa de atenção"); return; }
+      if (ctrl && e.altKey && e.key.toLowerCase() === "a") { e.preventDefault(); const att = flowRef.current.filter((n) => store.get(attentionAtom(n.id))); toast(att.length ? `Esperando: ${att.map((n) => String((n.data as { title?: string }).title ?? "texto")).join(", ")}` : "Nenhum terminal precisa de atenção"); return; }
       if (ctrl && !e.shiftKey && (e.key === "ArrowUp" || e.key === "ArrowDown" || ((e.key === "[" || e.key === "]") && !isTyping()))) { // Ctrl+[ no terminal é Esc
         e.preventDefault(); const ws = sideRef.current.workspaces; if (ws.length < 2) return;
         const i = ws.findIndex((w) => w.workspaceId === current); const d = e.key === "ArrowUp" || e.key === "[" ? -1 : 1;
