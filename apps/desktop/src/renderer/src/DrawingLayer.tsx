@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ViewportPortal, useReactFlow } from "@xyflow/react";
+import { ViewportPortal, useReactFlow, useStore } from "@xyflow/react";
 import type { Drawing } from "@messai/contracts";
 import type { DrawStyle, Tool } from "./Toolbar.js";
 
@@ -91,7 +91,33 @@ export function DrawingLayer({ tool, style, drawings, selected, onSelect, onMove
   const eraseDown = (e: React.MouseEvent, id: string) => { e.stopPropagation(); onErase(id); };
 
   const eff = (d: Drawing): Drawing => { const p = override?.get(d.drawingId); return p ? { ...d, points: p } : d; };
-  const bbox = selected.size ? boundingBox(drawings.filter((d) => selected.has(d.drawingId)).map(eff)) : null;
+  const box = selected.size ? boundingBox(drawings.filter((d) => selected.has(d.drawingId)).map(eff)) : null;
+
+  // redimensionar por alças: escala os pontos dos selecionados dentro da caixa.
+  const zoom = useStore((s) => s.transform[2]);
+  const resizeRef = useRef<{ h: string; box: { x: number; y: number; w: number; h: number }; orig: Map<string, Pt[]> } | null>(null);
+  const handleDown = (e: React.PointerEvent, h: string) => {
+    if (!box) return; e.stopPropagation();
+    try { (e.currentTarget as Element).setPointerCapture(e.pointerId); } catch { /* sem captura */ }
+    const orig = new Map<string, Pt[]>();
+    for (const d of drawings) if (selected.has(d.drawingId)) orig.set(d.drawingId, eff(d).points);
+    resizeRef.current = { h, box, orig };
+  };
+  const handleMove = (e: React.PointerEvent) => { const r = resizeRef.current; if (!r) return; setOverride(scalePoints(r.box, r.h, rf.screenToFlowPosition({ x: e.clientX, y: e.clientY }), r.orig)); };
+  const handleUp = (e: React.PointerEvent) => {
+    const r = resizeRef.current; if (!r) return; resizeRef.current = null;
+    const scaled = scalePoints(r.box, r.h, rf.screenToFlowPosition({ x: e.clientX, y: e.clientY }), r.orig);
+    setOverride(scaled);
+    for (const [id, pts] of scaled) onMovePoints(id, pts);
+  };
+  // alças (8): cantos + bordas, com tamanho constante na tela (hs) e cursor por direção.
+  const hs = 9 / zoom;
+  const handleDefs = box ? [
+    ["nw", box.x, box.y, "nwse-resize"], ["n", box.x + box.w / 2, box.y, "ns-resize"], ["ne", box.x + box.w, box.y, "nesw-resize"],
+    ["e", box.x + box.w, box.y + box.h / 2, "ew-resize"], ["se", box.x + box.w, box.y + box.h, "nwse-resize"],
+    ["s", box.x + box.w / 2, box.y + box.h, "ns-resize"], ["sw", box.x, box.y + box.h, "nesw-resize"], ["w", box.x, box.y + box.h / 2, "ew-resize"],
+  ] as const : [];
+  const showHandles = selectMode && box && off[0] === 0 && off[1] === 0; // esconde durante o arrasto de mover
 
   return (
     <>
@@ -112,7 +138,11 @@ export function DrawingLayer({ tool, style, drawings, selected, onSelect, onMove
               </g>
             );
           })}
-          {bbox && <rect x={bbox.x + off[0]} y={bbox.y + off[1]} width={bbox.w} height={bbox.h} fill="none" stroke="#5aa9ff" strokeDasharray="5 4" strokeWidth={1} vectorEffect="non-scaling-stroke" pointerEvents="none" />}
+          {box && <rect x={box.x + off[0]} y={box.y + off[1]} width={box.w} height={box.h} fill="none" stroke="#5aa9ff" strokeDasharray="5 4" strokeWidth={1} vectorEffect="non-scaling-stroke" pointerEvents="none" />}
+          {showHandles && handleDefs.map(([h, cx, cy, cur]) => (
+            <rect key={h} x={cx - hs / 2} y={cy - hs / 2} width={hs} height={hs} fill="#0a0a0b" stroke="#5aa9ff" strokeWidth={1} vectorEffect="non-scaling-stroke"
+              style={{ pointerEvents: "all", cursor: cur }} onPointerDown={(e) => handleDown(e, h)} onPointerMove={handleMove} onPointerUp={handleUp} />
+          ))}
           {live && <Stroke d={{ drawingId: "live", workspaceId: "", kind: style.kind === "erase" ? "pen" : style.kind, points: live, color: style.color, width: style.width, createdAt: "" }} />}
           {rect && <rect x={rect.x} y={rect.y} width={rect.w} height={rect.h} fill="rgba(90,169,255,.08)" stroke="#5aa9ff" strokeDasharray="6 4" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />}
         </svg>
@@ -137,6 +167,20 @@ function Stroke({ d, highlight, onDown, cursor }: { d: Drawing; highlight?: bool
   if (d.kind === "rect") return <rect x={Math.min(a[0], b[0])} y={Math.min(a[1], b[1])} width={Math.abs(b[0] - a[0])} height={Math.abs(b[1] - a[1])} rx={d.width} {...common} />;
   if (d.kind === "line" || d.kind === "arrow") return <line x1={a[0]} y1={a[1]} x2={b[0]} y2={b[1]} markerEnd={d.kind === "arrow" && !highlight ? "url(#arrowhead)" : undefined} {...common} />;
   return <path d={smooth(d.points)} {...common} />;
+}
+
+/** Escala os pontos dos desenhos conforme a alça arrastada, ancorando no lado oposto. */
+function scalePoints(box: { x: number; y: number; w: number; h: number }, handle: string, p: { x: number; y: number }, orig: Map<string, Pt[]>): Map<string, Pt[]> {
+  const { x, w, y, h } = box; const minX = x, minY = y, maxX = x + w, maxY = y + h;
+  let sx = 1, sy = 1, ax = minX, ay = minY;
+  if (handle.includes("e")) { ax = minX; sx = w > 0 ? (p.x - minX) / w : 1; }
+  else if (handle.includes("w")) { ax = maxX; sx = w > 0 ? (maxX - p.x) / w : 1; }
+  if (handle.includes("s")) { ay = minY; sy = h > 0 ? (p.y - minY) / h : 1; }
+  else if (handle.includes("n")) { ay = maxY; sy = h > 0 ? (maxY - p.y) / h : 1; }
+  sx = Math.max(sx, 0.02); sy = Math.max(sy, 0.02); // não inverter nem sumir
+  const out = new Map<string, Pt[]>();
+  for (const [id, pts] of orig) out.set(id, pts.map(([px, py]) => [ax + (px - ax) * sx, ay + (py - ay) * sy] as Pt));
+  return out;
 }
 
 function boundingBox(ds: Drawing[]): { x: number; y: number; w: number; h: number } | null {
