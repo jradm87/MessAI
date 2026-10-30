@@ -62,6 +62,9 @@ export function DrawingLayer({ tool, style, drawings, selected, onSelect, onMove
   // pointer capture no hit da caixa: o React Flow (que também ouve o ponteiro no pane) não rouba o arrasto.
   const dragRef = useRef<{ startX: number; startY: number; orig: Map<string, Pt[]> } | null>(null);
   const [off, setOff] = useState<Pt>([0, 0]);
+  // override otimista: ao soltar, mostra os pontos novos na hora; some quando o snapshot chega (sem piscar).
+  const [override, setOverride] = useState<Map<string, Pt[]> | null>(null);
+  useEffect(() => { setOverride(null); }, [drawings]);
   const hitDown = (e: React.PointerEvent, id: string) => {
     if (!selectMode || e.button !== 0) return;
     e.stopPropagation();
@@ -70,7 +73,7 @@ export function DrawingLayer({ tool, style, drawings, selected, onSelect, onMove
     if (!selected.has(id) || additive) onSelect(id, additive);
     const ids = additive ? [...new Set([...selected, id])] : selected.has(id) ? [...selected] : [id];
     const orig = new Map<string, Pt[]>();
-    for (const did of ids) { const dd = drawings.find((x) => x.drawingId === did); if (dd) orig.set(did, dd.points); }
+    for (const did of ids) { const dd = drawings.find((x) => x.drawingId === did); if (dd) orig.set(did, override?.get(did) ?? dd.points); }
     const p = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
     dragRef.current = { startX: p.x, startY: p.y, orig }; setOff([0, 0]);
   };
@@ -78,20 +81,25 @@ export function DrawingLayer({ tool, style, drawings, selected, onSelect, onMove
   const hitUp = (e: React.PointerEvent) => {
     const d = dragRef.current; if (!d) return; dragRef.current = null;
     const p = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
-    const dx = p.x - d.startX, dy = p.y - d.startY; setOff([0, 0]);
-    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return; // só clique, não moveu
-    for (const [id, pts] of d.orig) onMovePoints(id, pts.map(([x, y]) => [x + dx, y + dy] as Pt));
+    const dx = p.x - d.startX, dy = p.y - d.startY;
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) { setOff([0, 0]); return; } // só clique, não moveu
+    const moved = new Map<string, Pt[]>();
+    for (const [id, pts] of d.orig) moved.set(id, pts.map(([x, y]) => [x + dx, y + dy] as Pt));
+    setOverride(moved); setOff([0, 0]); // pontos novos já na tela; o patch confirma e o snapshot limpa o override
+    for (const [id, pts] of moved) onMovePoints(id, pts);
   };
   const eraseDown = (e: React.MouseEvent, id: string) => { e.stopPropagation(); onErase(id); };
 
-  const bbox = selected.size ? boundingBox(drawings.filter((d) => selected.has(d.drawingId))) : null;
+  const eff = (d: Drawing): Drawing => { const p = override?.get(d.drawingId); return p ? { ...d, points: p } : d; };
+  const bbox = selected.size ? boundingBox(drawings.filter((d) => selected.has(d.drawingId)).map(eff)) : null;
 
   return (
     <>
       <ViewportPortal>
         <svg className="drawings" style={{ overflow: "visible", position: "absolute", left: 0, top: 0, width: 1, height: 1, pointerEvents: "none" }}>
           <defs><marker id="arrowhead" markerWidth="4" markerHeight="4" refX="3" refY="2" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L4,2 L0,4 z" fill="context-stroke" /></marker></defs>
-          {drawings.map((d) => {
+          {drawings.map((d0) => {
+            const d = eff(d0);
             const sel = selected.has(d.drawingId);
             const tf = sel && (off[0] !== 0 || off[1] !== 0) ? `translate(${off[0]} ${off[1]})` : undefined;
             const hit = selectMode ? boundingBox([d]) : null; // área clicável = a caixa inteira do objeto
