@@ -74,6 +74,8 @@ function Canvas({ conn }: { conn: Connection }) {
   const [dialog, setDialog] = useState<{ rect: Geometry } | null>(null);
   const [tool, setTool] = useState<Tool>("select");
   const [style, setStyle] = useState<DrawStyle>({ kind: "pen", color: "#e0453a", width: 3 });
+  const [selDrawings, setSelDrawings] = useState<Set<string>>(new Set());
+  const selDrawingsRef = useRef(selDrawings); useEffect(() => { selDrawingsRef.current = selDrawings; }, [selDrawings]);
   const [minimap, setMinimap] = useState(true);
   const [msg, setMsg] = useState("");
   const [stale, setStale] = useState(false);
@@ -134,7 +136,7 @@ function Canvas({ conn }: { conn: Connection }) {
       if (m.type === "message" && m.message.workspaceId === current) void api.unread(current).then(setUnread).catch(() => {});
       if (m.type === "session" && m.session.workspaceId === current) setSessState((st) => st[m.session.nodeId] === m.session.state ? st : { ...st, [m.session.nodeId]: m.session.state });
     });
-    setSessState({}); setLinking(null); fittedFor.current = null;
+    setSessState({}); setLinking(null); setSelDrawings(new Set()); fittedFor.current = null;
     void api.snapshot(current).then(setSnap).catch(() => setCurrent(null));
     void api.unread(current).then(setUnread).catch(() => {});
     return () => { off(); stream.unsubscribe(current); };
@@ -321,7 +323,15 @@ function Canvas({ conn }: { conn: Connection }) {
   const deleteSelected = async () => {
     const sel = flowRef.current.filter((n) => n.selected);
     for (const n of sel) await mutate((r) => api.deleteNode(n.id, r)); // sequencial: cada delete avança a revisão antes do próximo (sem colisão/flicker)
+    const drw = [...selDrawingsRef.current];
+    for (const id of drw) await mutate((r) => api.deleteDrawing(id, r));
+    if (drw.length) setSelDrawings(new Set());
   };
+  const selectDrawing = (id: string, additive: boolean) => setSelDrawings((prev) => {
+    if (!additive) return new Set([id]);
+    const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next;
+  });
+  const moveDrawing = (id: string, points: [number, number][]) => void mutate((r) => api.patchDrawing(id, { expectedRevision: r, points }));
   const duplicateSelected = async () => {
     const sel = flowRef.current.filter((n) => n.selected); if (!sel.length || !current) return;
     for (const n of sel) {
@@ -385,7 +395,7 @@ function Canvas({ conn }: { conn: Connection }) {
       if (ctrl && !e.shiftKey && e.key.toLowerCase() === "d" && !isTyping()) { e.preventDefault(); void duplicateSelected(); return; }
       if (ctrl && e.shiftKey && e.key.toLowerCase() === "t") { e.preventDefault(); arrangeGrid(); return; } // Ctrl+Shift+T não é entrada de terminal; vale mesmo com o xterm focado
       if (ctrl && e.key.toLowerCase() === "w" && !isTyping()) { e.preventDefault(); deleteSelected(); return; }
-      if ((e.key === "Delete" || e.key === "Backspace") && !isTyping() && flowRef.current.some((n) => n.selected)) { e.preventDefault(); deleteSelected(); return; }
+      if ((e.key === "Delete" || e.key === "Backspace") && !isTyping() && (flowRef.current.some((n) => n.selected) || selDrawingsRef.current.size > 0)) { e.preventDefault(); void deleteSelected(); return; }
       if (e.key === "Escape" && linkingRef.current) { setLinking(null); return; }
       if (e.key === "Escape" && overview) { setOverview(null); return; }
       if (isTyping() || ctrl || e.altKey) return;
@@ -494,13 +504,14 @@ function Canvas({ conn }: { conn: Connection }) {
           onOpen={(id) => { setCurrent(id); setOverview(null); }} onNew={() => { setFloorDialog(groundOf(overview)!); }} onClose={() => setOverview(null)} onChanged={() => void refreshList()} onError={toast} />}
         {rolesDialog && <RolesDialog api={api} workspaceCwd={snap?.workspace.cwd ?? ""} onClose={() => setRolesDialog(false)} onChanged={() => void loadRoles()} />}
         <ReactFlow nodes={flow} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onNodeDragStart={onNodeDragStart} onNodeDragStop={onNodeDragStop} onEdgesChange={onEdgesChange} onConnect={onConnect} onEdgesDelete={onEdgesDelete}
-          onNodeClick={(_, n) => { if (linkingRef.current) finishLink(n.id); }} onPaneClick={() => { if (linkingRef.current) setLinking(null); }}
+          onNodeClick={(_, n) => { if (linkingRef.current) finishLink(n.id); }} onPaneClick={() => { if (linkingRef.current) setLinking(null); if (selDrawingsRef.current.size) setSelDrawings(new Set()); }}
           nodesDraggable={selectMode} nodesConnectable={selectMode} elementsSelectable={selectMode} panOnDrag={tool === "pan" ? [0, 1, 2] : selectMode ? [1, 2] : false} selectionOnDrag={selectMode} panOnScroll zoomOnScroll={false} zoomActivationKeyCode="Alt" panActivationKeyCode="Control" multiSelectionKeyCode={null}
           nodesFocusable={false} fitView minZoom={0.1} maxZoom={3} proOptions={{ hideAttribution: true }} colorMode="dark" deleteKeyCode="Delete"
           onNodesDelete={() => {}} onBeforeDelete={async ({ nodes: ns, edges: es }) => ({ nodes: [], edges: ns.length ? [] : es })}>
           <Background variant={BackgroundVariant.Lines} gap={48} size={1} color="#2c2c30" />
           {minimap && <MiniMap pannable zoomable />}
           <DrawingLayer tool={tool} style={style} drawings={drawings}
+            selected={selDrawings} onSelect={selectDrawing} onMovePoints={moveDrawing}
             onDraw={(d) => current && void mutate((r) => api.createDrawing(current, { expectedRevision: r, ...d }))}
             onErase={(id) => void mutate((r) => api.deleteDrawing(id, r))}
             onCreateRect={onCreateRect} />
