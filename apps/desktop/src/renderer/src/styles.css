@@ -79,8 +79,8 @@ textarea { flex: 1; resize: none; border: 0; outline: 0; background: transparent
 .toolbar { display: none; }
 /* camada de captura das ferramentas */
 .capture { position: absolute; inset: 0; z-index: 4; }
-.capture.draw.pen, .capture.draw.line, .capture.draw.arrow, .capture.draw.rect { cursor: crosshair; }
-.capture.draw.erase { cursor: cell; pointer-events: none; }
+.capture.draw.pen, .capture.draw.line, .capture.draw.arrow, .capture.draw.rect { cursor: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='22'%20height='22'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%23ffffff'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M12%2020h9'/%3E%3Cpath%20d='M16.5%203.5a2.12%202.12%200%200%201%203%203L7%2019l-4%201%201-4Z'/%3E%3C/svg%3E") 3 19, crosshair; }
+.capture.draw.erase { cursor: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='22'%20height='22'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%23ffffff'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='m7%2021-4.3-4.3c-1-1-1-2.5%200-3.4l9.6-9.6c1-1%202.5-1%203.4%200l5.6%205.6c1%201%201%202.5%200%203.4L13%2021'/%3E%3Cpath%20d='M22%2021H7'/%3E%3Cpath%20d='m5%2011%209%209'/%3E%3C/svg%3E") 6 18, cell; pointer-events: none; }
 .capture.terminal, .capture.note, .capture.text, .capture.tree { cursor: crosshair; }
 .react-flow .drawings { z-index: 3; }
 .tool-draw .react-flow__pane { cursor: crosshair; } .tool-pan .react-flow__pane { cursor: grab; }
