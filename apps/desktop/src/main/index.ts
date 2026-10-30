@@ -50,6 +50,7 @@ async function ensureRuntime(): Promise<void> {
 }
 
 let mainWin: BrowserWindow | null = null;
+let runtimeReady: Promise<void> | null = null; // garantia do runtime, iniciada em paralelo à janela
 function createWindow(): void {
   const win = new BrowserWindow({
     width: 1400, height: 900, title: "MessAI",
@@ -67,9 +68,11 @@ function createWindow(): void {
   else void win.loadFile(join(here, "../renderer/index.html"));
 }
 
-ipcMain.handle("mess:connection", (event) => {
+ipcMain.handle("mess:connection", async (event) => {
   // Só o renderer da nossa janela recebe a conexão.
   if (event.senderFrame?.url && !event.senderFrame.url.startsWith("file://") && !event.senderFrame.url.startsWith("http://localhost")) return null;
+  // A janela já apareceu; aqui esperamos o runtime ficar pronto (token disponível) antes de conectar.
+  if (runtimeReady) await runtimeReady;
   return { baseUrl: BASE, wsUrl: `ws://127.0.0.1:${PORT}/v1/ws`, token: readToken() ?? "", homeDir: homedir() };
 });
 
@@ -81,8 +84,9 @@ ipcMain.handle("mess:pickDirectory", async () => {
 app.commandLine.appendSwitch("disable-renderer-backgrounding");
 app.commandLine.appendSwitch("disable-background-timer-throttling");
 
-app.whenReady().then(async () => {
-  try { await ensureRuntime(); } catch (e) { console.error(e); }
+app.whenReady().then(() => {
+  // Janela primeiro (aparece na hora); runtime garantido em paralelo. O mess:connection aguarda runtimeReady.
+  runtimeReady = ensureRuntime().catch((e) => { console.error(e); });
   createWindow();
 });
 app.on("window-all-closed", () => app.quit()); // o runtime continua vivo
