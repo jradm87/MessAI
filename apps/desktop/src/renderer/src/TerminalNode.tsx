@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useAtomValue } from "jotai";
-import { Search, Eraser } from "lucide-react";
+import { Search, Eraser, Lock, Eye } from "lucide-react";
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -105,7 +105,11 @@ export function TerminalNode({ id, data, selected }: NodeProps & { data: Termina
             <hr /><div className="mi" onClick={() => { setRoleMenu(false); data.onManageRoles(); }}>Gerenciar…</div>
           </div>
         )}
-        <span className={`st ${state}`}>{state}{session?.persistent ? " · tmux" : ""}{session?.pid ? ` · pid ${session.pid}` : ""}{session?.lease ? (mine ? " · você controla" : " · observando") : ""}</span>
+        <span className={`st ${state}`} title={`${state}${session?.pid ? ` · pid ${session.pid}` : ""}${session?.lease ? (mine ? " · você controla" : " · observando") : ""}`}>
+          {state}
+          {session?.persistent && <span className="tag">tmux</span>}
+          {session?.lease && (mine ? <Lock size={10} /> : <Eye size={10} />)}
+        </span>
         {unread > 0 && <span className="badge" title="mensagens não lidas de outros agentes (mess inbox)">✉ {unread}</span>}
         {chatUnread > 0 && <span className="badge chatb" title="respostas no chat (Ctrl+J)">💬 {chatUnread}</span>}
         <span className="sp" />

@@ -23,7 +23,9 @@ input { background: #0c1017; color: var(--fg); border: 1px solid var(--line); bo
 .bar { display: flex; gap: 8px; align-items: center; padding: 6px 10px; background: #161618; border-bottom: 1px solid var(--line); cursor: grab; font-size: 12px; }
 .note .bar { background: #2a2618; }
 .bar .title { font-weight: 600; } .bar .sp { flex: 1; } .bar button { padding: 1px 6px; font-size: 11px; }
-.bar .st { color: var(--mut); font-size: 11px; } .st.running { color: #6fd38a; } .st.exited, .st.lost { color: #ff8b6b; }
+.bar .st { color: var(--mut); font-size: 11px; display: inline-flex; align-items: center; gap: 4px; } .st.running { color: #6fd38a; } .st.exited, .st.lost { color: #ff8b6b; }
+.bar .st .tag { font-size: 9px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; color: var(--mut); background: #26262b; border-radius: 4px; padding: 0 4px; line-height: 14px; }
+.bar .st svg { opacity: .8; }
 .term { flex: 1; min-height: 0; padding: 6px; }
 .term-wrap { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
 .term-find { position: absolute; top: 6px; right: 10px; z-index: 4; display: flex; align-items: center; gap: 2px; background: #161618; border: 1px solid var(--line); border-radius: 8px; padding: 3px 4px; box-shadow: 0 6px 18px rgba(0,0,0,.5); }
