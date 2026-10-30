@@ -74,4 +74,17 @@ describe("polir canvas: duplicar e organizar", () => {
     expect((await api("PATCH", `/v1/drawings/${drw.drawingId}`, { expectedRevision: 0, points: [[1, 1], [2, 2]] })).status).toBe(409);
     expect((await api("PATCH", `/v1/drawings/deadbeefdeadbeef`, { expectedRevision: (await snap()).workspace.revision, points: [[1, 1], [2, 2]] })).status).toBe(404);
   });
+  it("agrupa e desagrupa desenhos (groupId compartilhado)", async () => {
+    const mk = async () => ((await api("POST", `/v1/workspaces/${ws}/drawings`, { expectedRevision: (await snap()).workspace.revision, kind: "pen", points: [[0, 0], [5, 5]], color: "#fff", width: 2 })).json as { drawingId: string }).drawingId;
+    const a = await mk(); const b = await mk();
+    const drw = async () => (await api("GET", `/v1/workspaces/${ws}`)).json as { drawings: { drawingId: string; groupId?: string }[] };
+    const g = await api("POST", `/v1/workspaces/${ws}/drawings/group`, { expectedRevision: (await snap()).workspace.revision, drawingIds: [a, b], grouped: true });
+    expect(g.status).toBe(200);
+    let ds = (await drw()).drawings;
+    const ga = ds.find((d) => d.drawingId === a)!.groupId, gb = ds.find((d) => d.drawingId === b)!.groupId;
+    expect(ga).toBeTruthy(); expect(ga).toBe(gb);
+    await api("POST", `/v1/workspaces/${ws}/drawings/group`, { expectedRevision: (await snap()).workspace.revision, drawingIds: [a, b], grouped: false });
+    ds = (await drw()).drawings;
+    expect(ds.find((d) => d.drawingId === a)!.groupId).toBeUndefined();
+  });
 });

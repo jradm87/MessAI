@@ -156,6 +156,7 @@ export const Drawing = Type.Object({
   color: Type.String(),
   width: Type.Number({ minimum: 1, maximum: 40 }),
   createdAt: Type.String(),
+  groupId: Type.Optional(Type.String()),
 });
 export type Drawing = Static<typeof Drawing>;
 export const CreateDrawing = Type.Object({
@@ -171,6 +172,12 @@ export const PatchDrawing = Type.Object({
   points: Type.Array(Point, { minItems: 2, maxItems: 5000 }), // novos pontos (ex.: mover = transladar todos)
 });
 export type PatchDrawing = Static<typeof PatchDrawing>;
+export const GroupDrawings = Type.Object({
+  expectedRevision: Type.Integer(),
+  drawingIds: Type.Array(Id, { minItems: 1 }),
+  grouped: Type.Boolean(), // true = agrupa (id compartilhado novo); false = desagrupa
+});
+export type GroupDrawings = Static<typeof GroupDrawings>;
 
 export const WorkspaceSnapshot = Type.Object({
   workspace: Workspace,

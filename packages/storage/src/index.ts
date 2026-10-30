@@ -57,9 +57,10 @@ const MIGRATIONS: string[] = [
    ALTER TABLE workspaces ADD COLUMN floor_type TEXT;
    ALTER TABLE workspaces ADD COLUMN status TEXT;
    ALTER TABLE workspaces ADD COLUMN status_text TEXT;`,
+  `ALTER TABLE drawings ADD COLUMN group_id TEXT;`,
 ];
-type DrwRow = { drawing_id: string; workspace_id: string; kind: Drawing["kind"]; points: string; color: string; width: number; created_at: string };
-const drwFrom = (r: DrwRow): Drawing => ({ drawingId: r.drawing_id, workspaceId: r.workspace_id, kind: r.kind, points: JSON.parse(r.points) as Drawing["points"], color: r.color, width: r.width, createdAt: r.created_at });
+type DrwRow = { drawing_id: string; workspace_id: string; kind: Drawing["kind"]; points: string; color: string; width: number; created_at: string; group_id: string | null };
+const drwFrom = (r: DrwRow): Drawing => ({ drawingId: r.drawing_id, workspaceId: r.workspace_id, kind: r.kind, points: JSON.parse(r.points) as Drawing["points"], color: r.color, width: r.width, createdAt: r.created_at, ...(r.group_id ? { groupId: r.group_id } : {}) });
 type MsgRow = { message_id: string; workspace_id: string; from_node_id: string; to_node_id: string; text: string; reply_to: string | null; created_at: string; read_at: string | null; delivered: number };
 const msgFrom = (r: MsgRow): Message => ({ messageId: r.message_id, workspaceId: r.workspace_id, fromNodeId: r.from_node_id, toNodeId: r.to_node_id, text: r.text, createdAt: r.created_at, delivered: r.delivered === 1, ...(r.reply_to ? { replyTo: r.reply_to } : {}), ...(r.read_at ? { readAt: r.read_at } : {}) });
 type ConnRow = { connection_id: string; workspace_id: string; source_node_id: string; target_node_id: string; label: string | null; created_at: string; style: Connection["style"] | null };
@@ -238,8 +239,9 @@ export class Store {
   // drawings
   listDrawings(workspaceId: string): Drawing[] { return (this.db.prepare("SELECT * FROM drawings WHERE workspace_id=? ORDER BY created_at").all(workspaceId) as DrwRow[]).map(drwFrom); }
   getDrawing(id: string): Drawing | undefined { const r = this.db.prepare("SELECT * FROM drawings WHERE drawing_id=?").get(id) as DrwRow | undefined; return r ? drwFrom(r) : undefined; }
-  insertDrawing(d: Drawing): void { this.db.prepare("INSERT INTO drawings VALUES(?,?,?,?,?,?,?)").run(d.drawingId, d.workspaceId, d.kind, JSON.stringify(d.points), d.color, d.width, d.createdAt); }
+  insertDrawing(d: Drawing): void { this.db.prepare("INSERT INTO drawings VALUES(?,?,?,?,?,?,?,?)").run(d.drawingId, d.workspaceId, d.kind, JSON.stringify(d.points), d.color, d.width, d.createdAt, d.groupId ?? null); }
   updateDrawingPoints(id: string, points: Drawing["points"]): void { this.db.prepare("UPDATE drawings SET points=? WHERE drawing_id=?").run(JSON.stringify(points), id); }
+  setDrawingGroup(ids: string[], groupId: string | null): void { const stmt = this.db.prepare("UPDATE drawings SET group_id=? WHERE drawing_id=?"); const tx = this.db.transaction(() => { for (const id of ids) stmt.run(groupId, id); }); tx(); }
   deleteDrawing(id: string): void { this.db.prepare("DELETE FROM drawings WHERE drawing_id=?").run(id); }
 
   // messages

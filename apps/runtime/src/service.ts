@@ -1,4 +1,4 @@
-import { AGENT_ENV, type TreeEntry, type FileContent, type FsOp, type SearchHit, type CreateFloor, type LandFloor, type LandResult, type Role, type CreateRole, type PatchRole, type ChatMessage, type SendChat, type Attachment, type CreateAttachment, type FileEntry, type Connection, type CreateConnection, type PatchConnection, type CreateDrawing, type PatchDrawing, type CreateFolder, type CreateNode, type Drawing, type Folder, type Message, type PatchFolder, type SendMessage, type Sidebar, type CreateWorkspace, type Node, type PatchNode, type PatchWorkspace, type Session, type Workspace, type WorkspaceSnapshot } from "@messai/contracts";
+import { AGENT_ENV, type TreeEntry, type FileContent, type FsOp, type SearchHit, type CreateFloor, type LandFloor, type LandResult, type Role, type CreateRole, type PatchRole, type ChatMessage, type SendChat, type Attachment, type CreateAttachment, type FileEntry, type Connection, type CreateConnection, type PatchConnection, type CreateDrawing, type PatchDrawing, type GroupDrawings, type CreateFolder, type CreateNode, type Drawing, type Folder, type Message, type PatchFolder, type SendMessage, type Sidebar, type CreateWorkspace, type Node, type PatchNode, type PatchWorkspace, type Session, type Workspace, type WorkspaceSnapshot } from "@messai/contracts";
 import { applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, canMessage, checkRevision, formatDelivery, normalizeGeometry, planLocalTerminal, resolveNodeRef, validateNewNode, fail, succeed, type Result } from "@messai/domain";
 import type { Store } from "@messai/storage";
 import { EventEmitter } from "node:events";
@@ -682,6 +682,18 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     this.store.transaction(() => { this.store.updateDrawingPoints(drawingId, points); this.store.bumpRevision(d.workspaceId, rev.value); });
     this.publish(d.workspaceId);
     return succeed({ ...d, points });
+  }
+
+  groupDrawings(workspaceId: string, input: GroupDrawings): Result<{ revision: number }> {
+    const w = this.store.getWorkspace(workspaceId);
+    if (!w) return fail("NOT_FOUND", "espaço não encontrado");
+    const rev = checkRevision(w, input.expectedRevision);
+    if (!rev.ok) return rev;
+    const ids = input.drawingIds.filter((id) => { const d = this.store.getDrawing(id); return !!d && d.workspaceId === workspaceId; });
+    const groupId = input.grouped ? newId() : null;
+    this.store.transaction(() => { this.store.setDrawingGroup(ids, groupId); this.store.bumpRevision(workspaceId, rev.value); });
+    this.publish(workspaceId);
+    return succeed({ revision: rev.value });
   }
 
   patchConnection(id: string, input: PatchConnection): Result<Connection> {

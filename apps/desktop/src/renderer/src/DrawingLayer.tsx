@@ -70,8 +70,10 @@ export function DrawingLayer({ tool, style, drawings, selected, onSelect, onMove
     e.stopPropagation();
     try { (e.currentTarget as Element).setPointerCapture(e.pointerId); } catch { /* sem captura */ }
     const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+    const dd = drawings.find((x) => x.drawingId === id); // grupo inteiro move junto
+    const grp = dd?.groupId ? drawings.filter((x) => x.groupId === dd.groupId).map((x) => x.drawingId) : [id];
     if (!selected.has(id) || additive) onSelect(id, additive);
-    const ids = additive ? [...new Set([...selected, id])] : selected.has(id) ? [...selected] : [id];
+    const ids = additive ? [...new Set([...selected, ...grp])] : selected.has(id) ? [...selected] : grp;
     const orig = new Map<string, Pt[]>();
     for (const did of ids) { const dd = drawings.find((x) => x.drawingId === did); if (dd) orig.set(did, override?.get(did) ?? dd.points); }
     const p = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });

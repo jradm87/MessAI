@@ -327,9 +327,11 @@ function Canvas({ conn }: { conn: Connection }) {
     for (const id of drw) await mutate((r) => api.deleteDrawing(id, r));
     if (drw.length) setSelDrawings(new Set());
   };
+  const groupMembers = (id: string): string[] => { const all = snap?.drawings ?? []; const d = all.find((x) => x.drawingId === id); return d?.groupId ? all.filter((x) => x.groupId === d.groupId).map((x) => x.drawingId) : [id]; };
   const selectDrawing = (id: string, additive: boolean) => setSelDrawings((prev) => {
-    if (!additive) return new Set([id]);
-    const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next;
+    const grp = groupMembers(id); // selecionar um membro do grupo seleciona o grupo inteiro
+    if (!additive) return new Set(grp);
+    const next = new Set(prev); const allIn = grp.every((g) => next.has(g)); grp.forEach((g) => (allIn ? next.delete(g) : next.add(g))); return next;
   });
   const moveDrawing = (id: string, points: [number, number][]) => void mutate((r) => api.patchDrawing(id, { expectedRevision: r, points }));
   const duplicateSelected = async () => {
@@ -394,6 +396,13 @@ function Canvas({ conn }: { conn: Connection }) {
       if (ctrl && e.key === "\\") { e.preventDefault(); const sel = flowRef.current.filter((n) => n.selected); void rf.fitView(sel.length ? { nodes: sel, padding: 0.3, duration: 250 } : { padding: 0.15, duration: 250 }); return; }
       if (ctrl && !e.shiftKey && e.key.toLowerCase() === "d" && !isTyping()) { e.preventDefault(); void duplicateSelected(); return; }
       if (ctrl && e.shiftKey && e.key.toLowerCase() === "t") { e.preventDefault(); arrangeGrid(); return; } // Ctrl+Shift+T não é entrada de terminal; vale mesmo com o xterm focado
+      if (ctrl && e.key.toLowerCase() === "g" && !isTyping()) { // agrupar / desagrupar desenhos
+        e.preventDefault(); const ids = [...selDrawingsRef.current]; if (!current || !ids.length) return;
+        if (e.shiftKey) void mutate((r) => api.groupDrawings(current, { expectedRevision: r, drawingIds: ids, grouped: false }));
+        else if (ids.length >= 2) void mutate((r) => api.groupDrawings(current, { expectedRevision: r, drawingIds: ids, grouped: true }));
+        else toast("Selecione 2+ desenhos para agrupar");
+        return;
+      }
       if (ctrl && e.key.toLowerCase() === "w" && !isTyping()) { e.preventDefault(); deleteSelected(); return; }
       if ((e.key === "Delete" || e.key === "Backspace") && !isTyping() && (flowRef.current.some((n) => n.selected) || selDrawingsRef.current.size > 0)) { e.preventDefault(); void deleteSelected(); return; }
       if (e.key === "Escape" && linkingRef.current) { setLinking(null); return; }
