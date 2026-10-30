@@ -252,7 +252,10 @@ function Canvas({ conn }: { conn: Connection }) {
             const fw = f as FlowNode & { width?: number; height?: number; style?: { width?: number; height?: number } };
             const w = Math.round(Number(dim?.width ?? fw.width ?? f.measured?.width ?? fw.style?.width ?? n.geometry.w));
             const h = Math.round(Number(dim?.height ?? fw.height ?? f.measured?.height ?? fw.style?.height ?? n.geometry.h));
-            if (w >= 40 && h >= 40 && (w !== n.geometry.w || h !== n.geometry.h)) void mutate((r) => api.patchNode(c.id, { expectedRevision: r, geometry: { ...n.geometry, w, h } }));
+            // Redimensionar pela borda de cima/esquerda também move o x/y (a âncora sobe/vai pra esquerda).
+            // Persistimos posição E tamanho juntos; senão o nó volta pro x/y antigo e "cresce pro lado errado".
+            const x = Math.round(f.position.x), y = Math.round(f.position.y);
+            if (w >= 40 && h >= 40 && (w !== n.geometry.w || h !== n.geometry.h || x !== n.geometry.x || y !== n.geometry.y)) void mutate((r) => api.patchNode(c.id, { expectedRevision: r, geometry: { x, y, w, h } }));
           } else missingOnEnd = true;
         }
       }
