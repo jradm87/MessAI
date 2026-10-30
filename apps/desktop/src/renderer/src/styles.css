@@ -39,7 +39,8 @@ input { background: #0c1017; color: var(--fg); border: 1px solid var(--line); bo
 .footbar svg { flex: none; opacity: .7; }
 .err { background: #4b1f1f; color: #ffb4a8; padding: 3px 8px; font-size: 11px; }
 /* animações (entrada suave) */
-@keyframes nodeIn { from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: scale(1); } }
+/* só opacidade: escalar o nó quebra a medição do xterm (fit) e crasha o renderer WebGL */
+@keyframes nodeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes popIn { from { opacity: 0; transform: translateY(-4px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 .node { animation: nodeIn .16s ease-out; }
