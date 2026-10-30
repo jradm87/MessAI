@@ -83,7 +83,6 @@ export function DrawingLayer({ tool, style, drawings, selected, onSelect, onMove
     window.addEventListener("mousemove", dragMove); window.addEventListener("mouseup", dragUp);
   };
 
-  const interactive = selectMode || erasable;
   const bbox = selected.size ? boundingBox(drawings.filter((d) => selected.has(d.drawingId))) : null;
 
   return (
@@ -94,10 +93,12 @@ export function DrawingLayer({ tool, style, drawings, selected, onSelect, onMove
           {drawings.map((d) => {
             const sel = selected.has(d.drawingId);
             const tf = sel && (off[0] !== 0 || off[1] !== 0) ? `translate(${off[0]} ${off[1]})` : undefined;
+            const hit = selectMode ? boundingBox([d]) : null; // área clicável = a caixa inteira do objeto
             return (
               <g key={d.drawingId} transform={tf}>
                 {sel && <Stroke d={d} highlight />}
-                <Stroke d={d} {...(interactive ? { onDown: (e) => strokeDown(e, d.drawingId), cursor: erasable ? "cell" : "move" } : {})} />
+                <Stroke d={d} {...(erasable ? { onDown: (e) => strokeDown(e, d.drawingId), cursor: "cell" } : {})} />
+                {hit && <rect x={hit.x} y={hit.y} width={hit.w} height={hit.h} fill="transparent" style={{ pointerEvents: "all", cursor: "move" }} onMouseDown={(e) => strokeDown(e, d.drawingId)} />}
               </g>
             );
           })}
