@@ -236,26 +236,31 @@ function Canvas({ conn }: { conn: Connection }) {
     // senão um resize/arrasto sobrescreve a lista com uma versão antiga e os outros nós "somem" da tela.
     let next: FlowNode[] = [];
     setFlow((cur) => { next = applyNodeChanges(changes, cur); flowRef.current = next; return next; });
+    let missingOnEnd = false; // arrasto/resize terminou com o nó já fora do snap/flow (ex.: deletado no meio)
     for (const c of changes) {
       if (c.type !== "position" && c.type !== "dimensions") continue;
       const n = snap?.nodes.find((x) => x.nodeId === c.id); const f = next.find((x) => x.id === c.id);
       if (c.type === "position") {
         if (c.dragging) dragging.current = true;
-        else if (n && f) { dragging.current = false; void mutate((r) => api.patchNode(c.id, { expectedRevision: r, geometry: { ...n.geometry, x: f.position.x, y: f.position.y } })); }
+        else { dragging.current = false; if (n && f) void mutate((r) => api.patchNode(c.id, { expectedRevision: r, geometry: { ...n.geometry, x: f.position.x, y: f.position.y } })); else missingOnEnd = true; } // sempre destrava, mesmo se o nó sumiu — senão o efeito congela
       }
       if (c.type === "dimensions") {
         if (c.resizing) { dragging.current = true; } // mantém o tamanho local durante o arrasto; não deixa o snapshot reverter
-        else if (n && f) {
-          dragging.current = false;
-          // Dimensões reais: a própria mudança traz {width,height}; depois caímos para width/measured/style/antigo.
-          const dim = (c as { dimensions?: { width?: number; height?: number } }).dimensions;
-          const fw = f as FlowNode & { width?: number; height?: number; style?: { width?: number; height?: number } };
-          const w = Math.round(Number(dim?.width ?? fw.width ?? f.measured?.width ?? fw.style?.width ?? n.geometry.w));
-          const h = Math.round(Number(dim?.height ?? fw.height ?? f.measured?.height ?? fw.style?.height ?? n.geometry.h));
-          if (w >= 40 && h >= 40 && (w !== n.geometry.w || h !== n.geometry.h)) void mutate((r) => api.patchNode(c.id, { expectedRevision: r, geometry: { ...n.geometry, w, h } }));
+        else {
+          dragging.current = false; // sempre destrava no fim do resize, mesmo se o nó sumiu
+          if (n && f) {
+            // Dimensões reais: a própria mudança traz {width,height}; depois caímos para width/measured/style/antigo.
+            const dim = (c as { dimensions?: { width?: number; height?: number } }).dimensions;
+            const fw = f as FlowNode & { width?: number; height?: number; style?: { width?: number; height?: number } };
+            const w = Math.round(Number(dim?.width ?? fw.width ?? f.measured?.width ?? fw.style?.width ?? n.geometry.w));
+            const h = Math.round(Number(dim?.height ?? fw.height ?? f.measured?.height ?? fw.style?.height ?? n.geometry.h));
+            if (w >= 40 && h >= 40 && (w !== n.geometry.w || h !== n.geometry.h)) void mutate((r) => api.patchNode(c.id, { expectedRevision: r, geometry: { ...n.geometry, w, h } }));
+          } else missingOnEnd = true;
         }
       }
     }
+    // Destravou sem patch (nó sumiu): o efeito pode ter pulado snapshots durante o arrasto; resincroniza do snap atual.
+    if (missingOnEnd) setSnap((s) => (s ? { ...s } : s));
   }, [snap, api]);
 
   const onConnect = useCallback((c: FlowConnection) => { if (current && c.source && c.target) void mutate((r) => api.createConnectionRev(current, r, c.source, c.target)); }, [current, api]);
