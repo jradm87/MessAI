@@ -111,7 +111,6 @@ function Canvas({ conn }: { conn: Connection }) {
   const openChat = (id: string) => { setChatFor(id); setComposerFor(id); };
   const revision = useRef(0);
   const dragging = useRef(false);
-  const pendingSnap = useRef<WorkspaceSnapshot | null>(null);
 
   const LAST = "mess.lastWorkspace";
   const applySide = useCallback((d: SidebarData) => {
@@ -163,7 +162,7 @@ function Canvas({ conn }: { conn: Connection }) {
   useEffect(() => {
     if (!snap) { setFlow([]); setEdges([]); return; }
     revision.current = snap.workspace.revision;
-    if (dragging.current) { pendingSnap.current = snap; return; } // não reconstruir durante arrasto/resize
+    if (dragging.current) return; // não reconstruir durante arrasto/resize; o snapshot do patch do drop reconstrói logo em seguida
     const prev = new Map(flowRef.current.map((n) => [n.id, n]));
     setFlow(snap.nodes.map((n) => {
       const old = prev.get(n.nodeId); const keepLocal = dragging.current && old;
@@ -257,8 +256,6 @@ function Canvas({ conn }: { conn: Connection }) {
         }
       }
     }
-    // terminou o arrasto/resize e havia um snapshot represado: aplica-o agora
-    if (!dragging.current && pendingSnap.current) { const ps = pendingSnap.current; pendingSnap.current = null; setSnap((cur) => (cur === snap ? { ...ps } : cur)); }
   }, [snap, api]);
 
   const onConnect = useCallback((c: FlowConnection) => { if (current && c.source && c.target) void mutate((r) => api.createConnectionRev(current, r, c.source, c.target)); }, [current, api]);
