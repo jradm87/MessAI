@@ -139,11 +139,21 @@ function Canvas({ conn }: { conn: Connection }) {
   }, [current, stream, api]);
 
   const toast = (t: string) => { setMsg(t); setTimeout(() => setMsg(""), 3000); };
+  // Aplica uma mutação; em CONFLICT (409 = nada foi escrito) recarrega a revisão fresca e tenta UMA vez.
+  // Sem isso, mexer numa janela bumpa a revisão no servidor e a operação seguinte (alinhar/grade/arrastar)
+  // falha calada enquanto o snapshot do WS não chega — "funciona 1x e depois não faz nada".
   const mutate = async (fn: (rev: number) => Promise<unknown>) => {
-    try { await fn(revision.current); }
-    catch (e) {
-      if (e instanceof ApiClientError && e.error.code === "CONFLICT" && current) { setSnap(await api.snapshot(current)); toast("Conflito de revisão; estado recarregado."); }
-      else toast(e instanceof ApiClientError ? `${e.error.code}: ${e.message}` : String(e));
+    for (let attempt = 0; ; attempt++) {
+      try { await fn(revision.current); return; }
+      catch (e) {
+        if (e instanceof ApiClientError && e.error.code === "CONFLICT" && current) {
+          if (typeof e.error.revision === "number") revision.current = e.error.revision;
+          else { const s = await api.snapshot(current); setSnap(s); revision.current = s.workspace.revision; }
+          if (attempt === 0) continue;
+          setSnap(await api.snapshot(current)); toast("Conflito de revisão; estado recarregado.");
+        } else toast(e instanceof ApiClientError ? `${e.error.code}: ${e.message}` : String(e));
+        return;
+      }
     }
   };
 
@@ -304,9 +314,10 @@ function Canvas({ conn }: { conn: Connection }) {
     if (!current) return;
     const all = flowRef.current; const sel = all.filter((n) => n.selected);
     const pool = sel.length >= 2 ? sel : wantAll ? all : [];
+    if (pool.length < 2) { toast("Selecione 2+ nós"); return; }
     const items = pool.map((n) => ({ id: n.id, geometry: geoOf(n) }));
-    const moves = fn(items); if (!moves.length) { toast("Selecione 2+ nós"); return; }
-    void mutate((r) => api.applyLayout(current, r, moves));
+    const moves = fn(items); if (!moves.length) { toast("Os nós já estão alinhados"); return; }
+    void mutate((r) => api.applyLayout(current, r, moves.map((m) => ({ nodeId: m.id, geometry: m.geometry }))));
   };
   const arrangeGrid = () => layoutSelected((items) => gridLayout(items, 40), true);
   const alignSelected = (mode: AlignMode) => layoutSelected((items) => alignGeometries(items, mode), false);
@@ -344,14 +355,14 @@ function Canvas({ conn }: { conn: Connection }) {
         const i = ws.findIndex((w) => w.workspaceId === current); const d = e.key === "ArrowUp" || e.key === "[" ? -1 : 1;
         setCurrent(ws[(i + d + ws.length) % ws.length]!.workspaceId); return;
       }
-      if (ctrl && e.key.toLowerCase() === "t") { e.preventDefault(); if (current) { const c = viewCenter(); setDialog({ rect: { x: c.x - 320, y: c.y - 190, ...SIZE.terminal } }); } return; }
+      if (ctrl && !e.shiftKey && e.key.toLowerCase() === "t") { e.preventDefault(); if (current) { const c = viewCenter(); setDialog({ rect: { x: c.x - 320, y: c.y - 190, ...SIZE.terminal } }); } return; }
       if (ctrl && e.shiftKey && e.key.toLowerCase() === "d") { e.preventDefault(); if (current) { const c = viewCenter(); createSimple("note", { x: c.x - 130, y: c.y - 80, ...SIZE.note }); } return; }
       if (ctrl && e.shiftKey && e.key.toLowerCase() === "m") { e.preventDefault(); setMinimap((v) => !v); return; }
       if (ctrl && (e.key === "=" || e.key === "+")) { e.preventDefault(); void rf.zoomIn({ duration: 120 }); return; }
       if (ctrl && e.key === "-") { e.preventDefault(); void rf.zoomOut({ duration: 120 }); return; }
       if (ctrl && e.key === "\\") { e.preventDefault(); const sel = flowRef.current.filter((n) => n.selected); void rf.fitView(sel.length ? { nodes: sel, padding: 0.3, duration: 250 } : { padding: 0.15, duration: 250 }); return; }
       if (ctrl && !e.shiftKey && e.key.toLowerCase() === "d" && !isTyping()) { e.preventDefault(); void duplicateSelected(); return; }
-      if (ctrl && e.shiftKey && e.key.toLowerCase() === "t" && !isTyping()) { e.preventDefault(); arrangeGrid(); return; }
+      if (ctrl && e.shiftKey && e.key.toLowerCase() === "t") { e.preventDefault(); arrangeGrid(); return; } // Ctrl+Shift+T não é entrada de terminal; vale mesmo com o xterm focado
       if (ctrl && e.key.toLowerCase() === "w" && !isTyping()) { e.preventDefault(); deleteSelected(); return; }
       if ((e.key === "Delete" || e.key === "Backspace") && !isTyping() && flowRef.current.some((n) => n.selected)) { e.preventDefault(); deleteSelected(); return; }
       if (e.key === "Escape" && linkingRef.current) { setLinking(null); return; }
