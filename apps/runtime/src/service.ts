@@ -1,4 +1,4 @@
-import { AGENT_ENV, type TreeEntry, type FileContent, type FsOp, type SearchHit, type CreateFloor, type LandFloor, type LandResult, type Role, type CreateRole, type PatchRole, type ChatMessage, type SendChat, type Attachment, type CreateAttachment, type FileEntry, type Connection, type CreateConnection, type PatchConnection, type CreateDrawing, type CreateFolder, type CreateNode, type Drawing, type Folder, type Message, type PatchFolder, type SendMessage, type Sidebar, type CreateWorkspace, type Node, type PatchNode, type PatchWorkspace, type Session, type Workspace, type WorkspaceSnapshot } from "@messai/contracts";
+import { AGENT_ENV, type TreeEntry, type FileContent, type FsOp, type SearchHit, type CreateFloor, type LandFloor, type LandResult, type Role, type CreateRole, type PatchRole, type ChatMessage, type SendChat, type Attachment, type CreateAttachment, type FileEntry, type Connection, type CreateConnection, type PatchConnection, type CreateDrawing, type PatchDrawing, type CreateFolder, type CreateNode, type Drawing, type Folder, type Message, type PatchFolder, type SendMessage, type Sidebar, type CreateWorkspace, type Node, type PatchNode, type PatchWorkspace, type Session, type Workspace, type WorkspaceSnapshot } from "@messai/contracts";
 import { applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, canMessage, checkRevision, formatDelivery, normalizeGeometry, planLocalTerminal, resolveNodeRef, validateNewNode, fail, succeed, type Result } from "@messai/domain";
 import type { Store } from "@messai/storage";
 import { EventEmitter } from "node:events";
@@ -642,6 +642,18 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     this.store.transaction(() => { this.store.deleteDrawing(drawingId); this.store.bumpRevision(d.workspaceId, rev.value); });
     this.publish(d.workspaceId);
     return succeed(undefined);
+  }
+
+  patchDrawing(drawingId: string, input: PatchDrawing): Result<Drawing> {
+    const d = this.store.getDrawing(drawingId);
+    if (!d) return fail("NOT_FOUND", "desenho não encontrado");
+    const w = this.store.getWorkspace(d.workspaceId)!;
+    const rev = checkRevision(w, input.expectedRevision);
+    if (!rev.ok) return rev;
+    const points = input.points.map(([x, y]) => [Math.round(x * 10) / 10, Math.round(y * 10) / 10] as [number, number]);
+    this.store.transaction(() => { this.store.updateDrawingPoints(drawingId, points); this.store.bumpRevision(d.workspaceId, rev.value); });
+    this.publish(d.workspaceId);
+    return succeed({ ...d, points });
   }
 
   patchConnection(id: string, input: PatchConnection): Result<Connection> {

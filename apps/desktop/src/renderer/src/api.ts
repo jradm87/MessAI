@@ -1,4 +1,4 @@
-import type { ApiError, TreeEntry, FileContent, FsOp, SearchHit, CreateFloor, LandFloor, LandResult, PatchConnection, Role, CreateRole, PatchRole, ChatMessage, SendChat, Attachment, CreateAttachment, FileEntry, Connection as WsConnection, CreateDrawing, CreateFolder, CreateNode, CreateWorkspace, Drawing, Folder, Geometry, PatchFolder, PatchWorkspace, Preset, Node, PatchNode, Session, Sidebar, Workspace, WorkspaceSnapshot, WsClientMessage, WsServerMessage } from "@messai/contracts";
+import type { ApiError, TreeEntry, FileContent, FsOp, SearchHit, CreateFloor, LandFloor, LandResult, PatchConnection, Role, CreateRole, PatchRole, ChatMessage, SendChat, Attachment, CreateAttachment, FileEntry, Connection as WsConnection, CreateDrawing, PatchDrawing, CreateFolder, CreateNode, CreateWorkspace, Drawing, Folder, Geometry, PatchFolder, PatchWorkspace, Preset, Node, PatchNode, Session, Sidebar, Workspace, WorkspaceSnapshot, WsClientMessage, WsServerMessage } from "@messai/contracts";
 
 export type Connection = { baseUrl: string; wsUrl: string; token: string; homeDir?: string };
 declare global { interface Window { messai: { connection(): Promise<Connection | null>; pickDirectory?: () => Promise<string | null>; pathForFile?: (f: File) => string } } }
@@ -49,6 +49,7 @@ export class Api {
   patchConnection(id: string, input: PatchConnection) { return this.req<WsConnection>("PATCH", `/v1/connections/${id}`, input); }
   deleteConnection(id: string, expectedRevision: number) { return this.req<void>("DELETE", `/v1/connections/${id}`, { expectedRevision }); }
   createDrawing(wsId: string, input: CreateDrawing) { return this.req<Drawing>("POST", `/v1/workspaces/${wsId}/drawings`, input); }
+  patchDrawing(id: string, input: PatchDrawing) { return this.req<Drawing>("PATCH", `/v1/drawings/${id}`, input); }
   deleteDrawing(id: string, expectedRevision: number) { return this.req<void>("DELETE", `/v1/drawings/${id}`, { expectedRevision }); }
   roles() { return this.req<Role[]>("GET", "/v1/roles"); }
   createRole(input: CreateRole) { return this.req<Role>("POST", "/v1/roles", input); }

@@ -64,4 +64,14 @@ describe("polir canvas: duplicar e organizar", () => {
     const ok = await api("POST", `/v1/workspaces/${ws}/layout`, { expectedRevision: rev2, moves: [{ nodeId: "deadbeefdeadbeef", geometry: { x: 1, y: 1, w: 50, h: 50 } }] });
     expect(ok.status).toBe(200); // id inexistente é ignorado, mas a revisão avança
   });
+  it("move um desenho via patchDrawing (novos pontos) e recusa revisão errada / id inexistente", async () => {
+    const rev0 = (await snap()).workspace.revision;
+    const drw = (await api("POST", `/v1/workspaces/${ws}/drawings`, { expectedRevision: rev0, kind: "pen", points: [[0, 0], [10, 10]], color: "#e0453a", width: 3 })).json as { drawingId: string };
+    const rev1 = (await snap()).workspace.revision;
+    const moved = await api("PATCH", `/v1/drawings/${drw.drawingId}`, { expectedRevision: rev1, points: [[50, 50], [60, 60]] });
+    expect(moved.status).toBe(200);
+    expect((moved.json as { points: [number, number][] }).points).toEqual([[50, 50], [60, 60]]);
+    expect((await api("PATCH", `/v1/drawings/${drw.drawingId}`, { expectedRevision: 0, points: [[1, 1], [2, 2]] })).status).toBe(409);
+    expect((await api("PATCH", `/v1/drawings/deadbeefdeadbeef`, { expectedRevision: (await snap()).workspace.revision, points: [[1, 1], [2, 2]] })).status).toBe(404);
+  });
 });

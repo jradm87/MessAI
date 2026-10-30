@@ -166,6 +166,11 @@ export const CreateDrawing = Type.Object({
   width: Type.Number({ minimum: 1, maximum: 40 }),
 });
 export type CreateDrawing = Static<typeof CreateDrawing>;
+export const PatchDrawing = Type.Object({
+  expectedRevision: Type.Integer(),
+  points: Type.Array(Point, { minItems: 2, maxItems: 5000 }), // novos pontos (ex.: mover = transladar todos)
+});
+export type PatchDrawing = Static<typeof PatchDrawing>;
 
 export const WorkspaceSnapshot = Type.Object({
   workspace: Workspace,

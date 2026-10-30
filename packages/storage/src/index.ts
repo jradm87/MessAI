@@ -239,6 +239,7 @@ export class Store {
   listDrawings(workspaceId: string): Drawing[] { return (this.db.prepare("SELECT * FROM drawings WHERE workspace_id=? ORDER BY created_at").all(workspaceId) as DrwRow[]).map(drwFrom); }
   getDrawing(id: string): Drawing | undefined { const r = this.db.prepare("SELECT * FROM drawings WHERE drawing_id=?").get(id) as DrwRow | undefined; return r ? drwFrom(r) : undefined; }
   insertDrawing(d: Drawing): void { this.db.prepare("INSERT INTO drawings VALUES(?,?,?,?,?,?,?)").run(d.drawingId, d.workspaceId, d.kind, JSON.stringify(d.points), d.color, d.width, d.createdAt); }
+  updateDrawingPoints(id: string, points: Drawing["points"]): void { this.db.prepare("UPDATE drawings SET points=? WHERE drawing_id=?").run(JSON.stringify(points), id); }
   deleteDrawing(id: string): void { this.db.prepare("DELETE FROM drawings WHERE drawing_id=?").run(id); }
 
   // messages

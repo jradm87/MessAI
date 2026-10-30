@@ -5,7 +5,7 @@ import type { WebSocket } from "ws";
 import {
   BUILD_VERSION, PROTOCOL_VERSION, SendMessage, CreateConnection, CreateDrawing, CreateNode, CreateWorkspace, DeleteNode, PatchNode, PatchWorkspace, ApplyLayout, WsClientMessage,
   type Capabilities, type WsServerMessage, type ApiError,
- CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, CreateFloor, LandFloor, FsOp } from "@messai/contracts";
+ CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, CreateFloor, LandFloor, FsOp } from "@messai/contracts";
 import type { Result } from "@messai/domain";
 import { newId, type Config } from "./config.js";
 import { accessSync, constants } from "node:fs";
@@ -164,6 +164,10 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
   app.post<{ Params: { id: string } }>("/v1/workspaces/:id/drawings", async (req, reply) => {
     const b = body<CreateDrawing>(CreateDrawing, req.body); if ("code" in b) return invalid(reply, b);
     return send(reply, svc.createDrawing(req.params.id, b), 201);
+  });
+  app.patch<{ Params: { id: string } }>("/v1/drawings/:id", async (req, reply) => {
+    const b = body<PatchDrawing>(PatchDrawing, req.body); if ("code" in b) return invalid(reply, b);
+    return send(reply, svc.patchDrawing(req.params.id, b));
   });
   app.delete<{ Params: { id: string } }>("/v1/drawings/:id", async (req, reply) => {
     const b = body<DeleteNode>(DeleteNode, req.body ?? {}); if ("code" in b) return invalid(reply, b);
