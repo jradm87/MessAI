@@ -173,7 +173,11 @@ export class SessionManager extends EventEmitter<SessionEvents> {
     const l = this.live.get(sessionId); const s = this.get(sessionId);
     if (!l || !s) return fail("NOT_FOUND", "sessão não encontrada");
     if (s.state !== "running") return fail("SESSION_NOT_RUNNING", `sessão está ${s.state}`);
-    l.proc.write(data);
+    // Separa o Enter final: TUIs com detecção de paste (Claude Code etc.) tratam o \r do mesmo bloco
+    // como quebra de linha do paste, não como submit. Mandando o Enter sozinho depois, ele submete.
+    const submit = /[\r\n]$/.test(data);
+    l.proc.write(submit ? data.replace(/[\r\n]+$/, "") : data);
+    if (submit) setTimeout(() => { try { this.live.get(sessionId)?.proc.write("\r"); } catch { /* sessão encerrou */ } }, 120);
     return succeed(undefined);
   }
 
