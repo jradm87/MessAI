@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
 import { NodeToolbar, Position } from "@xyflow/react";
-import { Paperclip, SendHorizontal, SquareTerminal, StickyNote, FileText, Folder } from "lucide-react";
+import { Paperclip, SendHorizontal, SquareTerminal, StickyNote, FileText, Folder, Bookmark, Plus, X } from "lucide-react";
 import type { FileEntry } from "@messai/contracts";
 import type { Api, Stream } from "./api.js";
 
@@ -23,6 +23,12 @@ export function Composer(p: ComposerProps) {
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [sel, setSel] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);
+  // prompts salvos (conveniência pessoal, localStorage)
+  const [prompts, setPrompts] = useState<{ title: string; text: string }[]>(() => { try { return JSON.parse(localStorage.getItem("mess.prompts") ?? "[]") as { title: string; text: string }[]; } catch { return []; } });
+  const [promptMenu, setPromptMenu] = useState(false);
+  const savePrompts = (list: { title: string; text: string }[]) => { setPrompts(list); try { localStorage.setItem("mess.prompts", JSON.stringify(list)); } catch { /* sem storage */ } };
+  const saveCurrent = () => { const t = text.trim(); if (!t) return; const title = (t.split("\n")[0] ?? t).slice(0, 48); savePrompts([{ title, text: t }, ...prompts.filter((x) => x.text !== t)].slice(0, 30)); };
+  const insertPrompt = (txt: string) => { setText((x) => `${x}${x && !/\s$/.test(x) ? " " : ""}${txt}`); setPromptMenu(false); ta.current?.focus(); };
   const ta = useRef<HTMLTextAreaElement>(null);
   const fileIn = useRef<HTMLInputElement>(null);
   useEffect(() => { try { if (text) localStorage.setItem(key, text); else localStorage.removeItem(key); } catch { /* sem storage */ } }, [text, key]);
@@ -104,12 +110,22 @@ export function Composer(p: ComposerProps) {
             {items.map((it, i) => <div key={it.label} className={`mi ${i === sel ? "on" : ""}`} onMouseDown={(e) => { e.preventDefault(); pick(i); }}>{it.icon}<span>{it.label}</span></div>)}
           </div>
         )}
+        {promptMenu && (
+          <div className="cp-pop prompts" onMouseDown={(e) => e.preventDefault()}>
+            <div className="mi save" onClick={saveCurrent}><Plus size={14} /><span>Salvar prompt atual</span></div>
+            {prompts.length === 0 && <div className="mi mut">Nenhum prompt salvo ainda</div>}
+            {prompts.map((pr, i) => (
+              <div key={i} className="mi" title={pr.text} onClick={() => insertPrompt(pr.text)}><Bookmark size={13} /><span className="pnm">{pr.title}</span><X size={13} className="pdel" onClick={(e) => { e.stopPropagation(); savePrompts(prompts.filter((_, j) => j !== i)); }} /></div>
+            ))}
+          </div>
+        )}
         <textarea ref={ta} value={text} rows={Math.min(6, Math.max(1, text.split("\n").length))} placeholder={`Mensagem para ${p.title}. @ menciona · # arquivo · Esc fecha`}
           onChange={(e) => change(e.target.value, e.target.selectionStart)} onKeyDown={onKey} onPaste={onPaste} />
         <div className="cp-row">
           {pills.length > 0 && <span className="mut">{pills.length} colagem(ns)</span>}
           {busy && <span className="mut">{busy}</span>}
           <span className="sp" />
+          <button className="tb" title="Prompts salvos" onClick={() => setPromptMenu((v) => !v)}><Bookmark size={15} /></button>
           <button className="tb" title="Anexar arquivo" onClick={() => fileIn.current?.click()}><Paperclip size={15} /></button>
           <input ref={fileIn} type="file" multiple hidden onChange={(e) => { for (const f of [...(e.target.files ?? [])]) void attach(f); e.target.value = ""; }} />
           <button className="tb pri" title="Enviar (Enter)" data-testid="cp-send" onClick={send}><SendHorizontal size={15} /></button>

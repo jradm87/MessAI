@@ -25,6 +25,11 @@ const ext = NATIVE.map((m) => `--external:${m}`).join(" ");
 const banner = "import { createRequire as __cr } from 'module'; const require = __cr(import.meta.url);";
 run(`"${bin("esbuild")}" apps/runtime/dist/index.js --bundle --platform=node --format=esm ${ext} --banner:js="${banner}" --outfile="${res}/runtime.mjs"`);
 
+// 2b) CLI `mess` no pacote: bundle + launcher que roda com o Node do Electron (sem Node do sistema)
+mkdirSync(join(res, "cli"), { recursive: true });
+run(`"${bin("esbuild")}" apps/cli/dist/index.js --bundle --platform=node --format=esm --banner:js="${banner}" --outfile="${res}/cli/cli.mjs"`);
+writeFileSync(join(res, "cli", "mess"), '#!/bin/sh\nexec env ELECTRON_RUN_AS_NODE=1 "${MESS_ELECTRON:-node}" "$(dirname "$0")/cli.mjs" "$@"\n', { mode: 0o755 });
+
 // 3) addons nativos → resources, recompilados para o Electron (ELECTRON_RUN_AS_NODE usa a ABI do Electron)
 for (const m of NATIVE) {
   const src = join(root, "node_modules", m);
@@ -36,7 +41,9 @@ writeFileSync(join(res, "package.json"), JSON.stringify({ name: "messai-runtime-
 run(`"${bin("electron-rebuild")}" -v ${ELECTRON} -m "${res}" -w ${NATIVE.join(",")} -f`);
 
 // 4) electron-builder (lê a config em apps/desktop/package.json "build")
-const targets = process.argv.slice(2).join(" ") || "AppImage deb";
-run(`"${bin("electron-builder")}" --linux ${targets} --projectDir apps/desktop`);
+const args = process.argv.slice(2);
+const publish = args.includes("--publish"); // sobe pro GitHub release + gera latest-linux.yml (auto-update)
+const targets = args.filter((a) => !a.startsWith("--")).join(" ") || "AppImage deb";
+run(`"${bin("electron-builder")}" --linux ${targets} ${publish ? "--publish always" : ""} --projectDir apps/desktop`);
 
 console.log("\n\x1b[32mPronto. Artefatos em apps/desktop/release/\x1b[0m");

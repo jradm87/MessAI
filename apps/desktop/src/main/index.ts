@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import electronUpdater from "electron-updater";
 import { spawn, execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, openSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -39,7 +40,7 @@ async function ensureRuntime(): Promise<void> {
   const entry = packaged ? join(process.resourcesPath, "runtime.mjs") : join(here, "../../../runtime/dist/index.js");
   const nodeBin = packaged ? process.execPath : (process.env["MESS_NODE"] ?? "node");
   const env: NodeJS.ProcessEnv = { ...process.env, MESS_DATA_DIR: DATA_DIR, MESS_PORT: String(PORT) };
-  if (packaged) env["ELECTRON_RUN_AS_NODE"] = "1";
+  if (packaged) { env["ELECTRON_RUN_AS_NODE"] = "1"; env["MESS_RESOURCES"] = process.resourcesPath; }
   mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
   const log = openSync(join(DATA_DIR, "runtime.log"), "a");
   const child = spawn(nodeBin, [entry], { detached: true, stdio: ["ignore", log, log], env });
@@ -90,6 +91,8 @@ app.whenReady().then(() => {
   // Janela primeiro (aparece na hora); runtime garantido em paralelo. O mess:connection aguarda runtimeReady.
   runtimeReady = ensureRuntime().catch((e) => { console.error(e); });
   createWindow();
+  // Auto-update (só no app empacotado): checa o GitHub releases e baixa em segundo plano.
+  if (app.isPackaged) { try { void electronUpdater.autoUpdater.checkForUpdatesAndNotify(); } catch { /* sem update */ } }
 });
 app.on("window-all-closed", () => app.quit()); // o runtime continua vivo
 // Ajuda de desenvolvimento: `kill -USR2 <pid>` traz a janela para frente.

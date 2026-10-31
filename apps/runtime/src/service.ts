@@ -8,7 +8,8 @@ import { closeSync, existsSync, mkdirSync, openSync, readSync, readdirSync, read
 import { homedir } from "node:os";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-const CLI_DIR = join(dirname(fileURLToPath(import.meta.url)), "../../cli/bin");
+// Dev: CLI em apps/cli/bin. Empacotado: resources/cli (MESS_RESOURCES vem do main).
+const CLI_DIR = process.env["MESS_RESOURCES"] ? join(process.env["MESS_RESOURCES"], "cli") : join(dirname(fileURLToPath(import.meta.url)), "../../cli/bin");
 import { SessionManager } from "./sessions.js";
 import { watch, type FSWatcher } from "chokidar";
 
@@ -630,6 +631,8 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       [AGENT_ENV.workspaceId]: w.workspaceId, [AGENT_ENV.workspaceName]: w.name, [AGENT_ENV.workspaceDir]: w.cwd,
       [AGENT_ENV.nodeId]: node.nodeId, [AGENT_ENV.sessionId]: s.sessionId,
       SHELL: this.cfg.defaultShell,
+      // Empacotado: o launcher `mess` roda o CLI com o Node do Electron (sem Node do sistema).
+      ...(process.env["MESS_RESOURCES"] ? { MESS_ELECTRON: process.execPath } : {}),
     };
     const plan = planLocalTerminal({ command: s.command, args: applyRole(s.command, s.args, role), cwd: s.cwd, defaultShell: this.cfg.defaultShell, baseEnv, inject });
     return s.persistent ? wrapInTmux(plan, tmuxSessionName(s.sessionId), { ...inject, PATH: baseEnv["PATH"]! }, this.cfg.tmuxSocket) : plan;

@@ -14,7 +14,7 @@
     "@messai/domain": "0.0.1",
     "@messai/storage": "0.0.1",
     "@sinclair/typebox": "0.34.11",
-    "@xterm/headless": "5.5.0",
+    "@xterm/headless": "^6.0.0",
     "chokidar": "^4.0.3",
     "fastify": "5.12.7",
     "node-pty": "1.0.0"

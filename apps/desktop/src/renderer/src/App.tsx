@@ -77,7 +77,7 @@ function Canvas({ conn }: { conn: Connection }) {
   const [selDrawings, setSelDrawings] = useState<Set<string>>(new Set());
   const selDrawingsRef = useRef(selDrawings); useEffect(() => { selDrawingsRef.current = selDrawings; }, [selDrawings]);
   const [minimap, setMinimap] = useState(true);
-  const [msg, setMsg] = useState("");
+  const [toasts, setToasts] = useState<{ id: number; text: string; kind: "info" | "err" | "ok" }[]>([]);
   const [stale, setStale] = useState(false);
   // Sessão e não-lidas vivem em átomos Jotai (atoms.ts): cada nó assina o seu, então
   // evento de PTY/mensagem não reconstrói o canvas. Estes setters escrevem no store.
@@ -142,7 +142,11 @@ function Canvas({ conn }: { conn: Connection }) {
     return () => { off(); stream.unsubscribe(current); };
   }, [current, stream, api]);
 
-  const toast = (t: string) => { setMsg(t); setTimeout(() => setMsg(""), 3000); };
+  const toast = (text: string, kind: "info" | "err" | "ok" = "info") => {
+    const id = Date.now() + Math.random();
+    setToasts((ts) => [...ts, { id, text, kind }]);
+    setTimeout(() => setToasts((ts) => ts.filter((x) => x.id !== id)), 4000);
+  };
   // Aplica uma mutação; em CONFLICT (409 = nada foi escrito) recarrega a revisão fresca e tenta UMA vez.
   // Sem isso, mexer numa janela bumpa a revisão no servidor e a operação seguinte (alinhar/grade/arrastar)
   // falha calada enquanto o snapshot do WS não chega — "funciona 1x e depois não faz nada".
@@ -500,7 +504,10 @@ function Canvas({ conn }: { conn: Connection }) {
             <button className="tb" title="Organizar em grade (Ctrl+Shift+T)" onClick={arrangeGrid}><LayoutGrid size={15} /></button>
           </div>
         )}
-        <div className="info-bar">{snap?.workspace.parentId && <span className="floor-badge" style={{ borderColor: STATUS_COLOR[snap.workspace.status ?? "working"] }} title={STATUS_LABEL[snap.workspace.status ?? "working"]}>andar · {snap.workspace.branch}</span>}{snap ? `${snap.workspace.name} · rev ${snap.workspace.revision} · ${snap.nodes.length} nós` : "sem espaço"}{linking ? " — conectar: clique no destino (Esc cancela)" : ""}{msg ? ` — ${msg}` : ""}</div>
+        <div className="info-bar">{snap?.workspace.parentId && <span className="floor-badge" style={{ borderColor: STATUS_COLOR[snap.workspace.status ?? "working"] }} title={STATUS_LABEL[snap.workspace.status ?? "working"]}>andar · {snap.workspace.branch}</span>}{snap ? `${snap.workspace.name} · rev ${snap.workspace.revision} · ${snap.nodes.length} nós` : "sem espaço"}{linking ? " — conectar: clique no destino (Esc cancela)" : ""}</div>
+        <div className="toasts">{toasts.map((t) => (
+          <div key={t.id} className={`toast ${t.kind}`} onClick={() => setToasts((ts) => ts.filter((x) => x.id !== t.id))}>{t.text}</div>
+        ))}</div>
         <button className="pri add-btn" data-testid="add" disabled={!current} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); const p = e.currentTarget.closest("main")!.getBoundingClientRect(); setMenu({ x: r.left - p.left, y: r.bottom - p.top + 4 }); }}>+ Adicionar</button>
         {stale && <div className="banner">O runtime em execução é de uma versão anterior ao app. Reinicie o runtime para usar os recursos novos (isso encerra os shells dele; eles ficam como "lost" e podem ser reiniciados).</div>}
         {!current && <div className="empty">Crie um espaço com o botão + da barra lateral ou Ctrl+Shift+N.</div>}
