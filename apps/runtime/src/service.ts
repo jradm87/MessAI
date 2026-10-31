@@ -140,6 +140,14 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     return succeed(w);
   }
 
+  /** Primeira vez (nenhum espaço): cria um padrão para o canvas não nascer vazio. */
+  ensureDefaultWorkspace(): void {
+    if (this.store.listWorkspaces().length > 0) return;
+    const home = homedir();
+    const r = this.createWorkspace({ name: basename(home) || "Pessoal", cwd: home });
+    if (r.ok) console.log(`espaço padrão criado na primeira execução: ${r.value.name}`);
+  }
+
   patchWorkspace(id: string, input: PatchWorkspace): Result<Workspace> {
     const w = this.store.getWorkspace(id);
     if (!w) return fail("NOT_FOUND", "espaço não encontrado");
