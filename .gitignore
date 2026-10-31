@@ -6,3 +6,6 @@ out/
 *.tsbuildinfo
 tests/e2e/last.png
 *.sh
+
+apps/desktop/resources/
+apps/desktop/release/

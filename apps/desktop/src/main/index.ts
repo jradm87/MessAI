@@ -32,15 +32,17 @@ async function ensureRuntime(): Promise<void> {
     try { execFileSync("systemctl", ["--user", "start", "messai-runtime.service"], { stdio: "ignore" }); } catch { /* cai para o spawn */ }
     for (let i = 0; i < 20; i++) { if (await healthy()) return; await new Promise((r) => setTimeout(r, 250)); }
   }
-  const entry = join(here, "../../../runtime/dist/index.js");
-  // Runtime roda no Node do sistema: addons nativos (node-pty, better-sqlite3) são da ABI do Node, não do Electron.
-  const nodeBin = process.env["MESS_NODE"] ?? "node";
+  // Empacotado: runtime é o bundle (resources/runtime.mjs) rodado com o Node do próprio Electron
+  // (ELECTRON_RUN_AS_NODE) — os addons nativos ficam em resources/node_modules recompilados p/ a ABI do Electron.
+  // Dev: runtime do dist, com o Node do sistema.
+  const packaged = app.isPackaged;
+  const entry = packaged ? join(process.resourcesPath, "runtime.mjs") : join(here, "../../../runtime/dist/index.js");
+  const nodeBin = packaged ? process.execPath : (process.env["MESS_NODE"] ?? "node");
+  const env: NodeJS.ProcessEnv = { ...process.env, MESS_DATA_DIR: DATA_DIR, MESS_PORT: String(PORT) };
+  if (packaged) env["ELECTRON_RUN_AS_NODE"] = "1";
   mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
   const log = openSync(join(DATA_DIR, "runtime.log"), "a");
-  const child = spawn(nodeBin, [entry], {
-    detached: true, stdio: ["ignore", log, log],
-    env: { ...process.env, MESS_DATA_DIR: DATA_DIR, MESS_PORT: String(PORT) },
-  });
+  const child = spawn(nodeBin, [entry], { detached: true, stdio: ["ignore", log, log], env });
   child.unref();
   for (let i = 0; i < 40; i++) {
     if (await healthy()) return;

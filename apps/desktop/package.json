@@ -3,11 +3,29 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
+  "description": "Many agents. One organized mess.",
+  "author": "jradm87 <jradm87@gmail.com>",
+  "homepage": "https://github.com/jradm87/MessAI",
   "main": "out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview"
+  },
+  "build": {
+    "appId": "app.messai.desktop",
+    "productName": "MessAI",
+    "directories": { "output": "release", "buildResources": "build" },
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
+    "files": ["out/**/*", "package.json"],
+    "extraResources": [{ "from": "resources", "to": "." }],
+    "npmRebuild": false,
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "category": "Development",
+      "maintainer": "jradm87 <jradm87@gmail.com>",
+      "synopsis": "Many agents. One organized mess."
+    }
   },
   "dependencies": {
     "@messai/contracts": "0.0.1",
@@ -27,12 +45,15 @@
     "react-dom": "19.3.1"
   },
   "devDependencies": {
+    "@electron/rebuild": "^3.7.1",
     "@types/dompurify": "^3.0.5",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.1.2",
     "electron": "45.1.0",
+    "electron-builder": "^25.1.8",
     "electron-vite": "6.0.0",
+    "esbuild": "^0.28.2",
     "vite": "8.3.5"
   }
 }

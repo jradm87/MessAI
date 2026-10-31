@@ -16,7 +16,8 @@
     "typecheck": "tsc -b --noEmit",
     "test": "vitest run",
     "runtime": "node apps/runtime/dist/index.js",
-    "desktop": "npm run dev -w @messai/desktop"
+    "desktop": "npm run dev -w @messai/desktop",
+    "package": "node scripts/package.mjs"
   },
   "devDependencies": {
     "@types/node": "22.10.2",
