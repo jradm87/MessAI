@@ -22,7 +22,8 @@ beforeAll(async () => {
   // Agente falso: espera uma linha, "trabalha" (várias saídas em ~0,8 s), responde e fica ocioso.
   writeFileSync(join(dir, "claude"), `#!/bin/sh\nread line\nsleep 0.2\ni=1\nwhile [ $i -le 6 ]; do echo "trabalhando passo $i no pedido: $line"; sleep 0.1; i=$((i+1)); done\necho "pronto: resultado-final-42"\nsleep 120\n`);
   chmodSync(join(dir, "claude"), 0o755);
-  rt = spawn("node", [join(ROOT, "apps/runtime/dist/index.js")], { env: { ...process.env, MESS_DATA_DIR: dir, MESS_PORT: String(PORT), SHELL: "/bin/sh" }, stdio: "ignore" });
+  // Ollama apontado para uma porta morta: esta suíte valida a DEGRADAÇÃO (#66) — sem modelo, nada quebra e nenhum resumo sai.
+  rt = spawn("node", [join(ROOT, "apps/runtime/dist/index.js")], { env: { ...process.env, MESS_DATA_DIR: dir, MESS_PORT: String(PORT), SHELL: "/bin/sh", MESS_OLLAMA_URL: "http://127.0.0.1:1" }, stdio: "ignore" });
   let up = false;
   for (let i = 0; i < 100 && !up; i++) { await sleep(200); try { token = readFileSync(join(dir, "runtime.token"), "utf8").trim(); up = (await fetch(`http://127.0.0.1:${PORT}/v1/health`, { headers: H() })).ok; } catch { /* subindo */ } }
   if (!up) throw new Error(`runtime de teste não subiu na porta ${PORT} (porta ocupada? veja ${dir}/runtime.log)`);
@@ -65,6 +66,12 @@ describe("companheiro: detectar tarefa concluída (#65)", () => {
       expect(got[0]!.event!.screen).toContain("resultado-final-42"); // última tela vem no evento
       await sleep(2000); // ocioso de novo: NÃO repete (um evento por turno)
       expect(finishedFor(c.events, r.node.nodeId)).toHaveLength(1);
+      // #66 degradação: Ollama indisponível → nenhum taskSummary, runtime segue saudável, status diz available=false
+      expect(c.events.filter((e) => e.type === "taskSummary")).toHaveLength(0);
+      const st = (await api("GET", "/v1/companion")).json as { enabled: boolean; available: boolean; url: string };
+      expect(st).toMatchObject({ enabled: true, available: false, url: "http://127.0.0.1:1" });
+      expect((await api("POST", "/v1/companion/summarize", { nodeId: r.node.nodeId })).status).toBe(501); // sem modelo: UNSUPPORTED (501 na convenção da API), não erro interno
+      expect((await fetch(`http://127.0.0.1:${PORT}/v1/health`, { headers: H() })).ok).toBe(true);
     } finally { c.close(); }
   }, 30_000);
 

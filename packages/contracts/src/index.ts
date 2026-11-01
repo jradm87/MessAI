@@ -213,6 +213,18 @@ export const TaskFinished = Type.Object({
 });
 export type TaskFinished = Static<typeof TaskFinished>;
 
+// Companheiro (#66): resumo + próximo passo gerados por modelo LOCAL (Ollama) a partir de um taskFinished.
+export const TaskSummary = Type.Object({
+  sessionId: Id, nodeId: Id, workspaceId: Id, at: Type.String(), model: Type.String(),
+  summary: Type.String(), nextStep: Type.String(),
+});
+export type TaskSummary = Static<typeof TaskSummary>;
+export const CompanionConfig = Type.Object({
+  enabled: Type.Boolean(), available: Type.Boolean(), url: Type.String(),
+  model: Type.Union([Type.String(), Type.Null()]), models: Type.Array(Type.String()),
+});
+export type CompanionConfig = Static<typeof CompanionConfig>;
+
 export const SendMessage = Type.Object({
   to: Type.String({ minLength: 1 }), // nodeId, prefixo de id ou título
   text: Type.String({ minLength: 1, maxLength: 20000 }),
@@ -377,6 +389,7 @@ export const WsServerMessage = Type.Union([
   Type.Object({ type: Type.Literal("chat"), message: ChatMessage }),
   Type.Object({ type: Type.Literal("message"), message: Message }),
   Type.Object({ type: Type.Literal("taskFinished"), event: TaskFinished }),
+  Type.Object({ type: Type.Literal("taskSummary"), summary: TaskSummary }),
   Type.Object({ type: Type.Literal("error"), error: ApiError, sessionId: Type.Optional(Id) }),
 ]);
 export type WsServerMessage = Static<typeof WsServerMessage>;

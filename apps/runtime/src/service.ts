@@ -1,6 +1,7 @@
-import { AGENT_ENV, type TreeEntry, type FileContent, type FsOp, type SearchHit, type CreateFloor, type LandFloor, type LandResult, type Role, type CreateRole, type PatchRole, type ChatMessage, type SendChat, type Attachment, type CreateAttachment, type FileEntry, type Connection, type CreateConnection, type PatchConnection, type CreateDrawing, type PatchDrawing, type GroupDrawings, type CreateFolder, type CreateNode, type Drawing, type Folder, type Message, type PatchFolder, type SendMessage, type Sidebar, type CreateWorkspace, type Node, type PatchNode, type PatchWorkspace, type Session, type Workspace, type WorkspaceSnapshot } from "@messai/contracts";
+import { AGENT_ENV, type TreeEntry, type FileContent, type FsOp, type SearchHit, type CreateFloor, type LandFloor, type LandResult, type Role, type CreateRole, type PatchRole, type ChatMessage, type SendChat, type Attachment, type CreateAttachment, type FileEntry, type Connection, type CreateConnection, type PatchConnection, type CreateDrawing, type PatchDrawing, type GroupDrawings, type CreateFolder, type CreateNode, type Drawing, type Folder, type Message, type PatchFolder, type SendMessage, type Sidebar, type CreateWorkspace, type Node, type PatchNode, type PatchWorkspace, type Session, type Workspace, type WorkspaceSnapshot, type TaskFinished, type TaskSummary } from "@messai/contracts";
 import { applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, canMessage, checkRevision, formatDelivery, normalizeGeometry, planLocalTerminal, resolveNodeRef, validateNewNode, agentKind, agentResume, stripAnsi, fail, succeed, type Result } from "@messai/domain";
 import { randomUUID } from "node:crypto";
+import { Companion } from "./companion.js";
 import type { Store } from "@messai/storage";
 import { EventEmitter } from "node:events";
 import { newId, nowIso, type Config } from "./config.js";
@@ -15,7 +16,7 @@ const CLI_DIR = process.env["MESS_RESOURCES"] ? join(process.env["MESS_RESOURCES
 import { SessionManager } from "./sessions.js";
 import { watch, type FSWatcher } from "chokidar";
 
-export type ServiceEvents = { workspace: [snapshot: WorkspaceSnapshot]; message: [message: Message]; sidebar: [sidebar: Sidebar]; chat: [message: ChatMessage] };
+export type ServiceEvents = { workspace: [snapshot: WorkspaceSnapshot]; message: [message: Message]; sidebar: [sidebar: Sidebar]; chat: [message: ChatMessage]; taskSummary: [summary: TaskSummary] };
 
 export type AgentUsageLimit = { label: string; pct: number; resets: string };
 export type AgentUsageItem = { id: string; label: string; available: boolean; note?: string; plan?: string; limits?: AgentUsageLimit[]; metrics: { label: string; value: string }[]; models: { name: string; input: number; output: number }[] };
@@ -79,7 +80,27 @@ async function runCmd(cmd: string, args: string[], opts: { cwd?: string; timeout
 const GIT_SYNC_TIMEOUT_MS = 15_000;
 
 export class WorkspaceService extends EventEmitter<ServiceEvents> {
-  constructor(private readonly cfg: Config, private readonly store: Store, readonly sessions: SessionManager) { super(); }
+  /** Companheiro (#66): resume turnos concluídos com modelo local; sem Ollama, fica quieto. */
+  readonly companion: Companion;
+  constructor(private readonly cfg: Config, private readonly store: Store, readonly sessions: SessionManager) {
+    super();
+    this.companion = new Companion({ enabled: cfg.companionEnabled, ollamaUrl: cfg.ollamaUrl, ollamaModel: cfg.ollamaModel });
+    // #65 → #66: cada turno concluído de agente vira (quando há modelo) um resumo + próximo passo, fora do caminho de requisição.
+    this.sessions.on("taskFinished", (ev) => { void this.companion.summarize(ev).then((s) => { if (s) this.emit("taskSummary", s); }); });
+  }
+
+  /** Resumo sob demanda do estado atual de um nó-terminal (mesmo caminho do automático). */
+  async summarizeNode(nodeId: string): Promise<Result<TaskSummary>> {
+    const node = this.store.getNode(nodeId);
+    if (!node || node.kind !== "terminal" || !node.sessionId) return fail("NOT_FOUND", "terminal não encontrado");
+    const s = this.store.getSession(node.sessionId);
+    if (!s || s.state !== "running") return fail("SESSION_NOT_RUNNING", "o terminal não está rodando");
+    const ev: TaskFinished = { sessionId: s.sessionId, nodeId, workspaceId: node.workspaceId, agentType: agentKind(s.command, s.args).agentType, at: nowIso(), screen: this.sessions.screen(s.sessionId) ?? "" };
+    const sum = await this.companion.summarize(ev);
+    if (!sum) return fail("UNSUPPORTED", "companheiro indisponível: sem modelo local (Ollama) respondendo");
+    this.emit("taskSummary", sum);
+    return succeed(sum);
+  }
 
   snapshot(workspaceId: string): WorkspaceSnapshot | undefined {
     const workspace = this.store.getWorkspace(workspaceId);

@@ -9,7 +9,7 @@ import { SearchAddon } from "@xterm/addon-search";
 import "@xterm/xterm/css/xterm.css";
 import type { Session } from "@messai/contracts";
 import type { Api, Stream } from "./api.js";
-import { unreadAtom, attentionAtom, finishedAtom, finishedMapAtom, store } from "./atoms.js";
+import { unreadAtom, attentionAtom, finishedAtom, finishedMapAtom, summaryAtom, summaryMapAtom, store } from "./atoms.js";
 import { onTheme, cssVar } from "./theme.js";
 import { EditableTitle } from "./EditableTitle.js";
 import { Composer, type MentionTarget } from "./Composer.js";
@@ -33,6 +33,7 @@ export function TerminalNode({ id, data, selected }: NodeProps & { data: Termina
   const unread = useAtomValue(unreadAtom(id)); // só este nó re-renderiza quando a sua contagem muda
   const attention = useAtomValue(attentionAtom(id));
   const finishedAt = useAtomValue(finishedAtom(id)); // #65: agente concluiu um turno e espera você
+  const summary = useAtomValue(summaryAtom(id)); // #66: resumo do turno pelo modelo local (quando houver)
 
   useEffect(() => {
     // Tema do xterm vem dos tokens do app (#54): acompanha claro/escuro; re-aplicado quando o tema muda.
@@ -86,6 +87,7 @@ export function TerminalNode({ id, data, selected }: NodeProps & { data: Termina
       if (stateRef.current === "running") stream.send({ type: "acquireLease", sessionId });
       // Olhou o terminal: o "concluiu, precisa de você" (#65) deste nó foi atendido.
       store.set(finishedMapAtom, (p) => { if (!(id in p)) return p; const n = { ...p }; delete n[id]; return n; });
+      store.set(summaryMapAtom, (p) => { if (!(id in p)) return p; const n = { ...p }; delete n[id]; return n; });
       data.onFocus();
     };
     el.addEventListener("focusin", focus);
@@ -114,7 +116,7 @@ export function TerminalNode({ id, data, selected }: NodeProps & { data: Termina
       <NodeResizer minWidth={240} minHeight={160} isVisible={selected} />
       <Composer open={data.composerOpen} nodeId={id} workspaceId={data.workspaceId} sessionId={sessionId} title={data.title} targets={data.targets} api={api} stream={stream} onClose={data.onComposerClose} {...(data.chatOpen ? { chatThread: thread } : {})} />
       <div className="bar nodrag-off">
-        {attention && <span className="dot" title={finishedAt ? `concluiu e espera você (${new Date(finishedAt).toLocaleTimeString()}) — Ctrl+Shift+A` : "precisa de atenção (Ctrl+Shift+A)"} />}
+        {attention && <span className="dot" title={finishedAt ? `concluiu e espera você (${new Date(finishedAt).toLocaleTimeString()})${summary ? `\n${summary.summary}\nPróximo passo: ${summary.nextStep}` : ""} — Ctrl+Shift+A` : "precisa de atenção (Ctrl+Shift+A)"} />}
         <EditableTitle value={data.title} onSave={data.onRename} editSignal={data.editSignal ?? 0} />
         <span className={`role-pill nodrag ${data.role ? "" : "none"}`} title={data.role ? `Papel: ${data.role.name}\n${data.role.instructions.slice(0, 200)}` : "Sem papel (clique para atribuir)"} data-testid="role-pill" onClick={(e) => { e.stopPropagation(); setRoleMenu((v) => !v); }}>
           {data.role ? <><span className="role-badge">{data.role.badge || data.role.name.slice(0, 2).toUpperCase()}</span>{data.role.name}</> : "papel"}

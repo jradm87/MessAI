@@ -15,6 +15,10 @@ export const sessStateMapAtom = atom<Record<string, string>>({});
 export const unreadMapAtom = atom<Record<string, number>>({});
 /** #65: nós cujo agente concluiu um turno e ainda não foram olhados (nodeId → ISO de quando assentou). */
 export const finishedMapAtom = atom<Record<string, string>>({});
+/** #66: resumo + próximo passo (modelo local) do último turno concluído, por nó. */
+export type NodeSummary = { summary: string; nextStep: string; at: string; model: string };
+export const summaryMapAtom = atom<Record<string, NodeSummary>>({});
+export const summaryAtom = atomFamily((id: string) => selectAtom(summaryMapAtom, (m) => m[id]));
 
 export const sessStateAtom = atomFamily((id: string) => selectAtom(sessStateMapAtom, (m) => m[id]));
 export const unreadAtom = atomFamily((id: string) => selectAtom(unreadMapAtom, (m) => m[id] ?? 0));

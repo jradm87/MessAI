@@ -17,6 +17,10 @@ export type Config = {
   defaultShell: string;
   /** Servidor tmux próprio (tmux -L <socket>): isola as sessões do MessAI do tmux pessoal do usuário. */
   tmuxSocket: string;
+  /** Companheiro (#66): modelo local via Ollama. MESS_COMPANION=0 desliga; MESS_OLLAMA_URL / MESS_OLLAMA_MODEL configuram. */
+  companionEnabled: boolean;
+  ollamaUrl: string;
+  ollamaModel: string | undefined;
 };
 
 /** Shell padrão do PC: override MESS_SHELL, senão o shell de login do usuário (/etc/passwd), senão $SHELL, senão bash. */
@@ -54,6 +58,9 @@ export function loadConfig(): Config {
     token: readFileSync(tokenPath, "utf8").trim(),
     machineId: readFileSync(idPath, "utf8").trim(),
     tmuxSocket: process.env["MESS_TMUX_SOCKET"] ?? "mess",
+    companionEnabled: (process.env["MESS_COMPANION"] ?? "1") !== "0",
+    ollamaUrl: (process.env["MESS_OLLAMA_URL"] ?? "http://127.0.0.1:11434").replace(/\/+$/, ""),
+    ollamaModel: process.env["MESS_OLLAMA_MODEL"]?.trim() || undefined,
     machineName: hostname(),
     platform: platform(),
     defaultShell: resolveDefaultShell(),

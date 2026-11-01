@@ -17,7 +17,7 @@ import { NodeActionBar, type NodeAction } from "./NodeActionBar.js";
 import { AgentUsage } from "./AgentUsage.js";
 import { AgentIcon, agentKind } from "./agentIcons.js";
 import { Api, ApiClientError, Stream, type Connection } from "./api.js";
-import { store, sessStateMapAtom, unreadMapAtom, attentionAtom, finishedMapAtom } from "./atoms.js";
+import { store, sessStateMapAtom, unreadMapAtom, attentionAtom, finishedMapAtom, summaryMapAtom } from "./atoms.js";
 import { TerminalNode } from "./TerminalNode.js";
 import { NoteNode } from "./NoteNode.js";
 import { TextNode } from "./TextNode.js";
@@ -143,6 +143,7 @@ function Canvas({ conn }: { conn: Connection }) {
       if (m.type === "workspace" && m.snapshot.workspace.workspaceId === current) { setSnap(m.snapshot); void api.unread(current).then(setUnread).catch(() => {}); }
       if (m.type === "message" && m.message.workspaceId === current) void api.unread(current).then(setUnread).catch(() => {});
       if (m.type === "taskFinished" && m.event.workspaceId === current) store.set(finishedMapAtom, (p) => ({ ...p, [m.event.nodeId]: m.event.at })); // #65: acende atenção no nó
+      if (m.type === "taskSummary" && m.summary.workspaceId === current) store.set(summaryMapAtom, (p) => ({ ...p, [m.summary.nodeId]: { summary: m.summary.summary, nextStep: m.summary.nextStep, at: m.summary.at, model: m.summary.model } })); // #66
       if (m.type === "session" && m.session.workspaceId === current) setSessState((st) => st[m.session.nodeId] === m.session.state ? st : { ...st, [m.session.nodeId]: m.session.state });
     });
     setSessState({}); setLinking(null); setSelDrawings(new Set()); fittedFor.current = null;

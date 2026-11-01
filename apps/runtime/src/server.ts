@@ -41,6 +41,12 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
   app.get("/v1/health", async () => ({ ok: true, protocolVersion: PROTOCOL_VERSION, buildVersion: BUILD_VERSION, machineId: cfg.machineId }));
   // Tela de encerramento do app: o que está rodando agora (terminais/agentes).
   app.get("/v1/running", async () => ({ sessions: svc.sessions.runningList() }));
+  // Companheiro (#66): status do modelo local e resumo sob demanda de um nó.
+  app.get("/v1/companion", async () => svc.companion.probe());
+  app.post<{ Body?: { nodeId?: string } }>("/v1/companion/summarize", async (req, reply) => {
+    const nodeId = req.body?.nodeId; if (!nodeId) return reply.status(400).send({ error: { code: "INVALID", message: "nodeId obrigatório" } });
+    return send(reply, await svc.summarizeNode(nodeId));
+  });
   // Encerrar o runtime. killAgents=true mata também as sessões tmux (agentes); false mantém (reanexa no próximo boot).
   app.post<{ Body?: { killAgents?: boolean } }>("/v1/shutdown", async (req, reply) => {
     if (!opts.onShutdown) return reply.status(400).send({ error: { code: "INVALID", message: "shutdown indisponível neste servidor" } });
@@ -246,6 +252,8 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
         svc.on("message", onMessage);
         const onTaskFinished = (event: import("@messai/contracts").TaskFinished) => { if (workspaces.has(event.workspaceId)) push({ type: "taskFinished", event }); };
         svc.sessions.on("taskFinished", onTaskFinished);
+        const onTaskSummary = (summary: import("@messai/contracts").TaskSummary) => { if (workspaces.has(summary.workspaceId)) push({ type: "taskSummary", summary }); };
+        svc.on("taskSummary", onTaskSummary);
         svc.sessions.on("output", onOutput);
         svc.sessions.on("session", onSession);
         svc.on("workspace", onWorkspace);
@@ -288,7 +296,7 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
         });
         socket.on("close", () => {
           for (const id of attached) svc.sessions.releaseLease(id, clientId);
-          svc.sessions.off("output", onOutput); svc.sessions.off("session", onSession); svc.off("workspace", onWorkspace); svc.off("message", onMessage); svc.sessions.off("taskFinished", onTaskFinished); svc.off("sidebar", onSidebar); svc.off("chat", onChat);
+          svc.sessions.off("output", onOutput); svc.sessions.off("session", onSession); svc.off("workspace", onWorkspace); svc.off("message", onMessage); svc.sessions.off("taskFinished", onTaskFinished); svc.off("taskSummary", onTaskSummary); svc.off("sidebar", onSidebar); svc.off("chat", onChat);
         });
       });
     });
