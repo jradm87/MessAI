@@ -349,6 +349,15 @@ export class Store {
     this.db.transaction(() => { for (const id of ids) st.run(at, id); })();
   }
   markDelivered(id: string): void { this.db.prepare("UPDATE messages SET delivered=1 WHERE message_id=?").run(id); }
+  /** #69 não-lidas de todos os espaços (nó → contagem). */
+  unreadAll(): { nodeId: string; workspaceId: string; count: number }[] {
+    return (this.db.prepare("SELECT to_node_id n, workspace_id w, COUNT(*) c FROM messages WHERE read_at IS NULL GROUP BY to_node_id, workspace_id").all() as { n: string; w: string; c: number }[]).map((r) => ({ nodeId: r.n, workspaceId: r.w, count: r.c }));
+  }
+  /** #69 nós por título (todos os espaços), case-insensitive. */
+  searchNodeTitles(q: string, limit = 30): Node[] {
+    const like = `%${q.toLowerCase().replace(/[%_]/g, (c) => "\\" + c)}%`;
+    return (this.db.prepare("SELECT * FROM nodes WHERE lower(title) LIKE ? ESCAPE '\\' ORDER BY created_at DESC LIMIT ?").all(like, Math.max(1, Math.min(200, limit))) as NodeRow[]).map(nodeFrom);
+  }
   unreadCounts(workspaceId: string): Record<string, number> {
     const rows = this.db.prepare("SELECT to_node_id, COUNT(*) n FROM messages WHERE workspace_id=? AND read_at IS NULL GROUP BY to_node_id").all(workspaceId) as { to_node_id: string; n: number }[];
     return Object.fromEntries(rows.map((r) => [r.to_node_id, r.n]));

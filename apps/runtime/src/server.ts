@@ -107,9 +107,12 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
   // papéis (responsabilidades)
   // #41 — busca de texto FTS5 (notas/textos e chats); kinds=note,chat; limit ≤ 200
   app.get<{ Querystring: { q?: string; workspaceId?: string; kinds?: string; limit?: string } }>("/v1/find", async (req) => {
-    const kinds = (req.query.kinds ?? "").split(",").filter((k): k is "note" | "chat" => k === "note" || k === "chat");
+    const kinds = (req.query.kinds ?? "").split(",").filter((k): k is "note" | "chat" | "node" => k === "note" || k === "chat" || k === "node");
     return svc.findText(req.query.q ?? "", { workspaceId: req.query.workspaceId || undefined, kinds: kinds.length ? kinds : undefined, limit: req.query.limit ? Number(req.query.limit) : undefined });
   });
+  // #69 — atenção global (quem espera você) e "já vi"
+  app.get("/v1/attention", async () => svc.attention());
+  app.post<{ Params: { id: string } }>("/v1/nodes/:id/seen", async (req, reply) => send(reply, svc.markSeen(req.params.id)));
   // #62 — dados: estatísticas, backups, restauração/reset/mover (estas três respondem 202 e o runtime sai; o app sobe outro)
   app.get("/v1/data", async () => svc.dataInfo());
   app.post("/v1/data/backup", async (req, reply) => { const b = body<BackupInput>(BackupInput, req.body ?? {}); if ("code" in b) return invalid(reply, b); return send(reply, svc.createBackup(b.dir), 201); });

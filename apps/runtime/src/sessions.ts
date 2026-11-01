@@ -38,6 +38,10 @@ export type SessionEvents = {
 /** Dono dos PTYs. Nunca depende do cliente estar conectado. */
 export class SessionManager extends EventEmitter<SessionEvents> {
   private live = new Map<string, Live>();
+  /** #69 sessões de agente que concluíram um turno e ainda não foram vistas (sessionId → quando). */
+  private readonly awaiting = new Map<string, string>();
+  markSeen(sessionId: string): boolean { return this.awaiting.delete(sessionId); }
+  awaitingList(): { sessionId: string; at: string }[] { return [...this.awaiting.entries()].map(([sessionId, at]) => ({ sessionId, at })); }
 
   constructor(private readonly store: Store) {
     super();
@@ -112,7 +116,8 @@ export class SessionManager extends EventEmitter<SessionEvents> {
           live.turnBytes = 0;
           const s = this.store.getSession(session.sessionId);
           if (!s || s.state !== "running") return;
-          this.emit("taskFinished", { sessionId: s.sessionId, nodeId: s.nodeId, workspaceId: s.workspaceId, agentType: live.agent.agentType, at: nowIso(), screen: this.screen(s.sessionId) ?? "" });
+          const at = nowIso(); this.awaiting.set(s.sessionId, at); // #69 atenção global: fica até o usuário olhar (seen) ou digitar
+          this.emit("taskFinished", { sessionId: s.sessionId, nodeId: s.nodeId, workspaceId: s.workspaceId, agentType: live.agent.agentType, at, screen: this.screen(s.sessionId) ?? "" });
         }, TURN_IDLE_MS);
       }
     });
@@ -165,6 +170,7 @@ export class SessionManager extends EventEmitter<SessionEvents> {
     const ok = this.ensureLease(l, s, clientId);
     if (!ok.ok) return ok;
     l.turnOpen = true; l.turnBytes = 0; // input do usuário abre um turno (#65)
+    this.awaiting.delete(sessionId); // o usuário respondeu: não espera mais (#69)
     l.proc.write(data);
     return succeed(undefined);
   }
@@ -266,6 +272,7 @@ export class SessionManager extends EventEmitter<SessionEvents> {
 
   /** Encerra o PTY local; por padrão também mata a sessão tmux. `keepTmux` é usado no desligamento do runtime. */
   dispose(sessionId: string, keepTmux = false): void {
+    this.awaiting.delete(sessionId);
     const l = this.live.get(sessionId);
     if (!keepTmux && this.store.getSession(sessionId)?.persistent) this.tmuxKill(sessionId);
     if (l) {

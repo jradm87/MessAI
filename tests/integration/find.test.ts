@@ -29,7 +29,7 @@ describe("busca de texto (#41)", () => {
     const t = (await api("POST", `/v1/workspaces/${ws}/nodes`, { expectedRevision: n.revision, kind: "terminal", title: "Agente", command: "/bin/sh", geometry: { x: 0, y: 0, w: 200, h: 100 } })).json as { node: { nodeId: string }; revision: number };
     await api("POST", `/v1/nodes/${t.node.nodeId}/chat`, { text: "o deploy quebrou na migração da tabela users" });
     const all = (await api("GET", "/v1/find?q=migra")).json as { kind: string; nodeId: string; nodeTitle: string; snippet: string }[];
-    expect(all.map((h) => h.kind).sort()).toEqual(["chat", "note"]);
+    expect(all.map((h) => h.kind).sort()).toEqual(["chat", "node", "note"]); // sem kinds: conteúdo (FTS5) + título de nó (#69)
     const note = all.find((h) => h.kind === "note")!; expect(note.nodeTitle).toBe("Plano de migração"); expect(note.snippet).toMatch(/\[migra/i);
     const chat = all.find((h) => h.kind === "chat")!; expect(chat.nodeId).toBe(t.node.nodeId); expect(chat.nodeTitle).toBe("Agente");
     expect(((await api("GET", `/v1/find?q=migra&kinds=chat`)).json as unknown[]).length).toBe(1);

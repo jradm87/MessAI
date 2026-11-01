@@ -459,10 +459,15 @@ export type FsOp = Static<typeof FsOp>;
 export const SearchHit = Type.Object({ path: Type.String(), line: Type.Optional(Type.Integer()), text: Type.Optional(Type.String()) });
 export type SearchHit = Static<typeof SearchHit>;
 // #41 — busca de texto (FTS5) em notas/textos e chats: GET /v1/find?q=&workspaceId=&kinds=note,chat
-export const FindKind = Type.Union([Type.Literal("note"), Type.Literal("chat")]);
+export const FindKind = Type.Union([Type.Literal("note"), Type.Literal("chat"), Type.Literal("node")]); // node = título de qualquer nó (#69)
 export type FindKind = Static<typeof FindKind>;
 export const FindHit = Type.Object({ kind: FindKind, refId: Id, workspaceId: Id, nodeId: Id, nodeTitle: Type.String(), title: Type.String(), snippet: Type.String() });
 export type FindHit = Static<typeof FindHit>;
+// #69 — atenção global: quem espera você, em todos os espaços. GET /v1/attention · POST /v1/nodes/:id/seen
+export const AttentionKind = Type.Union([Type.Literal("finished"), Type.Literal("unread"), Type.Literal("exited"), Type.Literal("lost")]);
+export type AttentionKind = Static<typeof AttentionKind>;
+export const AttentionItem = Type.Object({ kind: AttentionKind, nodeId: Id, workspaceId: Id, workspaceName: Type.String(), title: Type.String(), at: Type.Optional(Type.String()), count: Type.Optional(Type.Integer()) });
+export type AttentionItem = Static<typeof AttentionItem>;
 
 // #56 — presets de Início rápido: editáveis e persistidos no runtime. `theme` é o tema do xterm do terminal criado.
 export const PresetInput = Type.Object({

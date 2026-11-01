@@ -1,5 +1,5 @@
 import { AGENT_ENV, type TreeEntry, type FileContent, type FsOp, type SearchHit, type CreateFloor, type LandFloor, type LandResult, type Role, type CreateRole, type PatchRole, type ChatMessage, type SendChat, type Attachment, type CreateAttachment, type FileEntry, type Connection, type CreateConnection, type PatchConnection, type CreateDrawing, type PatchDrawing, type GroupDrawings, type CreateFolder, type CreateNode, type Drawing, type Folder, type Message, type PatchFolder, type SendMessage, type Sidebar, type CreateWorkspace, type Node, type PatchNode, type PatchWorkspace, type Session, type Workspace, type WorkspaceSnapshot, type TaskFinished, type TaskSummary } from "@messai/contracts";
-import type { RuntimeSettings, PatchRuntimeSettings, PresetInput, Skill, CreateSkill, PatchSkill, FindHit, FindKind, NodeGroup, CreateNodeGroup, PatchNodeGroup } from "@messai/contracts";
+import type { RuntimeSettings, PatchRuntimeSettings, PresetInput, Skill, CreateSkill, PatchSkill, FindHit, FindKind, NodeGroup, CreateNodeGroup, PatchNodeGroup, AttentionItem } from "@messai/contracts";
 import { listProviders } from "./providers.js";
 import { probeAccounts } from "./accounts.js";
 import { backupName, copyBackupFiles, dataStats, isBackupName, listBackups, validateBackup, validateMoveTarget, writeManifest, type BackupEntry } from "./data.js";
@@ -272,7 +272,24 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
   }
   // ---- #41 busca de texto (notas/textos e chats) ----
   findText(q: string, opt: { workspaceId?: string | undefined; kinds?: FindKind[] | undefined; limit?: number | undefined } = {}): FindHit[] {
-    return this.store.search(q, opt).map((r) => ({ kind: r.kind, refId: r.refId, workspaceId: r.workspaceId, nodeId: r.nodeId, nodeTitle: this.store.getNode(r.nodeId)?.title ?? "", title: r.title, snippet: r.snippet }));
+    const kinds = opt.kinds; const wantText = !kinds || kinds.some((k) => k === "note" || k === "chat"); const wantNode = !kinds || kinds.includes("node");
+    const textKinds = kinds?.filter((k): k is "note" | "chat" => k === "note" || k === "chat");
+    const out: FindHit[] = [];
+    if (wantNode && q.trim()) for (const n of this.store.searchNodeTitles(q.trim(), opt.limit ?? 30)) { if (opt.workspaceId && n.workspaceId !== opt.workspaceId) continue; out.push({ kind: "node", refId: n.nodeId, workspaceId: n.workspaceId, nodeId: n.nodeId, nodeTitle: n.title, title: n.title, snippet: `${n.kind} · ${this.store.getWorkspace(n.workspaceId)?.name ?? ""}` }); }
+    if (wantText) out.push(...this.store.search(q, { ...opt, kinds: textKinds?.length ? textKinds : undefined }).map((r) => ({ kind: r.kind, refId: r.refId, workspaceId: r.workspaceId, nodeId: r.nodeId, nodeTitle: this.store.getNode(r.nodeId)?.title ?? "", title: r.title, snippet: r.snippet })));
+    return out;
+  }
+  /** #69 quem espera você em todos os espaços: agente que concluiu (até ser visto), não-lidas, processos encerrados/perdidos. */
+  attention(): AttentionItem[] {
+    const out: AttentionItem[] = []; const wsName = (id: string) => this.store.getWorkspace(id)?.name ?? "";
+    for (const a of this.sessions.awaitingList()) { const s = this.store.getSession(a.sessionId); const n = s && this.store.getNode(s.nodeId); if (n) out.push({ kind: "finished", nodeId: n.nodeId, workspaceId: n.workspaceId, workspaceName: wsName(n.workspaceId), title: n.title, at: a.at }); }
+    for (const u of this.store.unreadAll()) { const n = this.store.getNode(u.nodeId); if (n) out.push({ kind: "unread", nodeId: n.nodeId, workspaceId: n.workspaceId, workspaceName: wsName(n.workspaceId), title: n.title, count: u.count }); }
+    for (const s of this.store.listSessions()) { if (s.state !== "exited" && s.state !== "lost") continue; const n = this.store.getNode(s.nodeId); if (n && n.sessionId === s.sessionId) out.push({ kind: s.state, nodeId: n.nodeId, workspaceId: n.workspaceId, workspaceName: wsName(n.workspaceId), title: n.title }); }
+    return out;
+  }
+  markSeen(nodeId: string): Result<{ cleared: boolean }> {
+    const n = this.store.getNode(nodeId); if (!n) return fail("NOT_FOUND", "nó não encontrado");
+    return succeed({ cleared: n.sessionId ? this.sessions.markSeen(n.sessionId) : false });
   }
 
   // ---- #62 dados ----
