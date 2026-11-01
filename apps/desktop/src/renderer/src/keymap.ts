@@ -32,6 +32,8 @@ export const ACTIONS: ActionDef[] = [
   { id: "composer.toggle", label: "Compositor (mensagem ao terminal)", group: "Agentes", combo: C("p", "cs"), whileTyping: true },
   { id: "chat.toggle", label: "Chat do terminal", group: "Agentes", combo: C("j", "c"), whileTyping: true },
   { id: "link.start", label: "Conectar nó selecionado a…", group: "Agentes", combo: C("l", "c"), note: "No terminal, Ctrl+L limpa a tela" },
+  { id: "history.undo", label: "Desfazer", group: "Edição", combo: C("z", "c"), note: "No terminal, Ctrl+Z é do shell (suspender)" },
+  { id: "history.redo", label: "Refazer", group: "Edição", combo: C("z", "cs"), note: "Ctrl+Y também vale fora de inputs" },
   { id: "delete", label: "Excluir selecionados", group: "Edição", combo: C("w", "c"), note: "Delete/Backspace também valem fora de inputs" },
   { id: "drawings.group", label: "Agrupar desenhos", group: "Edição", combo: C("g", "c") },
   { id: "drawings.ungroup", label: "Desagrupar desenhos", group: "Edição", combo: C("g", "cs") },

@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Background, BackgroundVariant, MiniMap, ReactFlow, applyNodeChanges, applyEdgeChanges, type EdgeChange, useReactFlow, ReactFlowProvider, useOnViewportChange, type Connection as FlowConnection, type Edge, type EdgeTypes, type Node as FlowNode, type NodeChange, type NodeTypes } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Map as MapIcon, Minus, Plus, Activity, Layers, AlignStartVertical, AlignCenterVertical, AlignEndVertical, AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal, LayoutGrid, Sun, Moon, Monitor, Sparkles } from "lucide-react";
+import { Map as MapIcon, Minus, Plus, Activity, Layers, AlignStartVertical, AlignCenterVertical, AlignEndVertical, AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal, LayoutGrid, Sun, Moon, Monitor, Sparkles, Undo2, Redo2 } from "lucide-react";
 import { useAtomValue } from "jotai";
 import { themeAtom } from "./atoms.js";
 import { getThemePref, setThemePref, nextTheme, THEME_LABEL, cssVar } from "./theme.js";
-import { BUILD_VERSION, type Role, type Drawing, type Folder, type Geometry, type Preset, type Sidebar as SidebarData, type Skill, type TermTheme, type Workspace, type WorkspaceSnapshot } from "@messai/contracts";
+import { BUILD_VERSION, type Role, type Drawing, type Folder, type Geometry, type Node, type Preset, type Sidebar as SidebarData, type Skill, type TermTheme, type Workspace, type WorkspaceSnapshot } from "@messai/contracts";
 import { gridLayout, alignGeometries, type AlignMode } from "@messai/domain";
 import { Sidebar } from "./Sidebar.js";
 import { WorkspaceDialog, type WorkspaceInput } from "./WorkspaceDialog.js";
@@ -32,6 +32,7 @@ import { ShutdownOverlay } from "./ShutdownOverlay.js";
 import { Preferences } from "./Preferences.js";
 import { setPref, usePref } from "./prefs.js";
 import { ACTION_BY_ID, comboFromEvent, effectiveCombo, sameCombo, type Keymap } from "./keymap.js";
+import { History, plural, type ConnSpec, type DrawingSpec, type NodeSpec, type Op } from "./undo.js";
 import { useHint, useKeymap } from "./shortcuts.js";
 
 const nodeTypes: NodeTypes = { terminal: TerminalNode as never, note: NoteNode as never, text: TextNode as never, tree: TreeNode as never };
@@ -47,7 +48,8 @@ function freeSpot(nodes: { geometry: Geometry }[], size: { w: number; h: number 
 }
 const isTyping = () => { const el = document.activeElement as HTMLElement | null; return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable || el.classList.contains("xterm-helper-textarea")); };
 
-function ZoomBar({ minimap, setMinimap, onUsage, agents, wsName, inFloors, onFloors, hud, onHud }: { minimap: boolean; setMinimap: (v: boolean) => void; onUsage: () => void; agents: string[]; wsName?: string; inFloors: boolean; onFloors: () => void; hud: boolean; onHud: () => void }) {
+type UndoProps = { canUndo: boolean; canRedo: boolean; undoLabel: string | null; redoLabel: string | null; onUndo: () => void; onRedo: () => void };
+function ZoomBar({ minimap, setMinimap, onUsage, agents, wsName, inFloors, onFloors, hud, onHud, history }: { minimap: boolean; setMinimap: (v: boolean) => void; onUsage: () => void; agents: string[]; wsName?: string; inFloors: boolean; onFloors: () => void; hud: boolean; onHud: () => void; history: UndoProps }) {
   const rf = useReactFlow(); const [z, setZ] = useState(100);
   useOnViewportChange({ onChange: (v) => setZ(Math.round(v.zoom * 100)) });
   useAtomValue(themeAtom); // re-renderiza o botão quando o tema efetivo muda
@@ -62,6 +64,8 @@ function ZoomBar({ minimap, setMinimap, onUsage, agents, wsName, inFloors, onFlo
       {shownAgents.slice(0, 5).map((a) => <button key={a} className="bb-circle" title={`${a} — Agent Usage`} data-testid="bb-agent" onClick={onUsage}><AgentIcon id={a} size={20} /></button>)}
       {usageOn && shownAgents.length === 0 && <button className="bb-circle" title="Agent Usage" data-testid="bb-usage" onClick={onUsage}><Activity size={15} /></button>}
       <button className="bb-circle" title={`Tema: ${THEME_LABEL[pref]} (clique alterna Sistema → Claro → Escuro)`} data-testid="theme-toggle" onClick={() => setThemePref(nextTheme(pref))}><ThemeIcon size={15} /></button>
+      <button className="bb-circle" title={history.canUndo ? `Desfazer: ${history.undoLabel} (Ctrl+Z)` : "Nada para desfazer"} disabled={!history.canUndo} data-testid="undo" onClick={history.onUndo}><Undo2 size={15} /></button>
+      <button className="bb-circle" title={history.canRedo ? `Refazer: ${history.redoLabel} (Ctrl+Shift+Z)` : "Nada para refazer"} disabled={!history.canRedo} data-testid="redo" onClick={history.onRedo}><Redo2 size={15} /></button>
       <button className={`bb-circle ${hud ? "on" : ""}`} title={hud ? "Companheiro: fechar janela flutuante" : "Companheiro: abrir janela flutuante (agentes que terminaram, resumo e próximo passo)"} data-testid="hud-toggle" onClick={onHud}><Sparkles size={15} /></button>
       <button className="bb-circle" title={`Minimapa${hMini}`} onClick={() => setMinimap(!minimap)}><MapIcon size={15} /></button>
       <div className="bb-zoom">
@@ -183,6 +187,70 @@ function Canvas({ conn }: { conn: Connection }) {
     return () => { off(); stream.unsubscribe(current); };
   }, [current, stream, api]);
 
+  // ===== #77 desfazer/refazer: uma pilha por espaço; operações descritas como dados (undo.ts) e executadas aqui contra a API =====
+  const histories = useRef(new Map<string, History>());
+  const snapRef = useRef<WorkspaceSnapshot | null>(snap); snapRef.current = snap; // os handlers de teclado capturam closures antigas: leem o snapshot pela ref
+  const [histTick, setHistTick] = useState(0); // re-render dos botões/rótulos
+  const bump = () => setHistTick((t) => t + 1);
+  /** Como `mutate`, mas PROPAGA o erro (a pilha precisa saber que falhou) e devolve o que a API respondeu. */
+  const runOp = async <T,>(fn: (rev: number) => Promise<T>): Promise<T> => {
+    for (let attempt = 0; ; attempt++) {
+      try { const out = await fn(revision.current); revision.current += 1; return out; }
+      catch (e) {
+        if (e instanceof ApiClientError && e.error.code === "CONFLICT" && current && attempt === 0) { if (typeof e.error.revision === "number") revision.current = e.error.revision; else { const sn = await api.snapshot(current); setSnap(sn); revision.current = sn.workspace.revision; } continue; }
+        toast(e instanceof ApiClientError ? `${e.error.code}: ${e.message}` : String(e), "err"); throw e;
+      }
+    }
+  };
+  const execOp = (wsId: string) => async (op: Op): Promise<string | void> => {
+    switch (op.type) {
+      case "createNode": { const sp = op.spec; const r = await runOp((rev) => api.createNode(wsId, { expectedRevision: rev, kind: sp.kind, title: sp.title, geometry: sp.geometry, ...(sp.content !== undefined ? { content: sp.content } : {}), ...(sp.color ? { color: sp.color } : {}), ...(sp.icon ? { icon: sp.icon } : {}), ...(sp.termTheme ? { termTheme: sp.termTheme } : {}), ...(sp.roleId ? { roleId: sp.roleId } : {}), ...(sp.skillIds?.length ? { skillIds: sp.skillIds } : {}), ...(sp.command ? { command: sp.command, args: sp.args ?? [] } : {}), ...(sp.cwd ? { cwd: sp.cwd } : {}), ...(sp.persistent ? { persistent: true } : {}) })); return r.node.nodeId; }
+      case "deleteNode": await runOp((rev) => api.deleteNode(op.id, rev)); return;
+      case "patchNode": await runOp((rev) => api.patchNode(op.id, { expectedRevision: rev, ...op.patch })); return;
+      case "layout": await runOp((rev) => api.applyLayout(wsId, rev, op.moves)); return;
+      case "createConnection": { const c = await runOp((rev) => api.createConnectionRev(wsId, rev, op.spec.sourceNodeId, op.spec.targetNodeId)); if (op.spec.style && op.spec.style !== "rope") await runOp((rev) => api.patchConnection(c.connectionId, { expectedRevision: rev, style: op.spec.style as "rope" | "circuit" })); return c.connectionId; }
+      case "deleteConnection": await runOp((rev) => api.deleteConnection(op.id, rev)); return;
+      case "patchConnection": await runOp((rev) => api.patchConnection(op.id, { expectedRevision: rev, ...op.patch })); return;
+      case "createDrawing": { const d = await runOp((rev) => api.createDrawing(wsId, { expectedRevision: rev, kind: op.spec.kind as "pen" | "line" | "arrow" | "rect", points: op.spec.points, color: op.spec.color, width: op.spec.width })); return d.drawingId; }
+      case "deleteDrawing": await runOp((rev) => api.deleteDrawing(op.id, rev)); return;
+      case "patchDrawing": await runOp((rev) => api.patchDrawing(op.id, { expectedRevision: rev, points: op.points })); return;
+      case "groupDrawings": await runOp((rev) => api.groupDrawings(wsId, { expectedRevision: rev, drawingIds: op.ids, grouped: op.grouped })); return;
+    }
+  };
+  const hist = (wsId = current): History => { const id = wsId ?? "__none__"; let h = histories.current.get(id); if (!h) { h = new History(execOp(id)); histories.current.set(id, h); } return h; };
+  const rec = (e: { label: string; forward: Op[]; inverse: Op[]; key?: string }) => { hist().record(e); bump(); };
+  /** Spec de recriação de um nó a partir do snapshot (+ sessão, para terminais). */
+  const specOf = async (n: Node): Promise<NodeSpec> => {
+    const sp: NodeSpec = { kind: n.kind, title: n.title, geometry: n.geometry, ...(n.content !== undefined ? { content: n.content } : {}), ...(n.color ? { color: n.color } : {}), ...(n.icon ? { icon: n.icon } : {}), ...(n.termTheme ? { termTheme: n.termTheme as TermTheme } : {}), ...(n.roleId ? { roleId: n.roleId } : {}), ...(n.skillIds?.length ? { skillIds: n.skillIds } : {}) };
+    if (n.kind === "terminal" && n.sessionId) { const ses = await api.session(n.sessionId).catch(() => null); if (ses) { sp.command = ses.command; sp.args = ses.args; sp.cwd = ses.cwd; if (ses.persistent) sp.persistent = true; } }
+    return sp;
+  };
+  const connSpec = (c: { sourceNodeId: string; targetNodeId: string; style?: string }): ConnSpec => ({ sourceNodeId: c.sourceNodeId, targetNodeId: c.targetNodeId, ...(c.style ? { style: c.style } : {}) });
+  const drawSpec = (d: { kind: string; points: [number, number][]; color: string; width: number; groupId?: string }): DrawingSpec => ({ kind: d.kind, points: d.points, color: d.color, width: d.width, ...(d.groupId ? { groupId: d.groupId } : {}) });
+  /** Exclui nós (e suas conexões) registrando a inversa: recriar nó + reconectar. Vários nós = uma etapa. */
+  const deleteNodes = async (ids: string[]) => {
+    const sn = snapRef.current; if (!ids.length || !sn) return;
+    const h = hist(); if (ids.length > 1) h.beginGroup(`excluir ${plural(ids.length, "nó", "nós")}`);
+    for (const id of ids) {
+      const n = sn.nodes.find((x) => x.nodeId === id); if (!n) { try { await runOp((rev) => api.deleteNode(id, rev)); } catch { /* já avisou */ } continue; } // fora do snapshot: apaga sem inversa (não some da tela sem motivo)
+      const sp = await specOf(n);
+      const conns = (sn.connections ?? []).filter((c) => c.sourceNodeId === id || c.targetNodeId === id);
+      try { await runOp((rev) => api.deleteNode(id, rev)); } catch { continue; }
+      h.record({ label: `excluir ${n.kind === "terminal" ? "terminal" : n.kind === "note" ? "nota" : "nó"}`, forward: [{ type: "deleteNode", id }], inverse: [{ type: "createNode", ref: id, spec: sp }, ...conns.map((c): Op => ({ type: "createConnection", ref: c.connectionId, spec: connSpec(c) }))] });
+    }
+    if (ids.length > 1) h.endGroup(); bump();
+  };
+  /** PATCH num nó com inversa calculada a partir dos campos atuais. `key` funde edições seguidas (digitação). */
+  const patchRec = (n: Node, patch: Record<string, unknown>, label: string, key?: string) => {
+    const inverse: Record<string, unknown> = {};
+    for (const k of Object.keys(patch)) { const cur = (n as unknown as Record<string, unknown>)[k]; inverse[k] = cur === undefined ? (k === "content" || k === "title" ? "" : null) : cur; }
+    void mutate((r) => api.patchNode(n.nodeId, { expectedRevision: r, ...patch }));
+    rec({ label, forward: [{ type: "patchNode", id: n.nodeId, patch }], inverse: [{ type: "patchNode", id: n.nodeId, patch: inverse }], ...(key ? { key } : {}) });
+  };
+  const undo = async () => { const h = hist(); if (!h.canUndo) { toast("Nada para desfazer"); return; } try { const e = await h.undo(); if (e) toast(`Desfeito: ${e.label}`, "ok"); } catch { /* já avisou */ } bump(); };
+  const redo = async () => { const h = hist(); if (!h.canRedo) { toast("Nada para refazer"); return; } try { const e = await h.redo(); if (e) toast(`Refeito: ${e.label}`, "ok"); } catch { /* já avisou */ } bump(); };
+  void histTick;
+
   const toast = (text: string, kind: "info" | "err" | "ok" = "info") => {
     const id = Date.now() + Math.random();
     setToasts((ts) => [...ts, { id, text, kind }]);
@@ -213,9 +281,9 @@ function Canvas({ conn }: { conn: Connection }) {
     const prev = new Map(flowRef.current.map((n) => [n.id, n]));
     setFlow(snap.nodes.map((n) => {
       const old = prev.get(n.nodeId); const keepLocal = dragging.current && old;
-      const del = () => void mutate((r) => api.deleteNode(n.nodeId, r));
-      const rename = (title: string) => void mutate((r) => api.patchNode(n.nodeId, { expectedRevision: r, title }));
-      const change = (content: string) => void mutate((r) => api.patchNode(n.nodeId, { expectedRevision: r, content }));
+      const del = () => void deleteNodes([n.nodeId]);
+      const rename = (title: string) => patchRec(n, { title }, "renomear", `title:${n.nodeId}`);
+      const change = (content: string) => patchRec(n, { content }, "editar conteúdo", `content:${n.nodeId}`);
       const linkCount = (snap.connections ?? []).filter((c) => c.sourceNodeId === n.nodeId || c.targetNodeId === n.nodeId).length;
       // atenção/não-lidas: o nó lê dos átomos (atoms.ts), não entram no rebuild.
       const extras = { onLink: () => startLink(n.nodeId), linkCount, onChat: () => (chatFor === n.nodeId ? setChatFor(null) : openChat(n.nodeId)), onRaise: () => toast("Elevar/acoplar: em breve") };
@@ -226,18 +294,18 @@ function Canvas({ conn }: { conn: Connection }) {
         ...(old?.selected ? { selected: true } : {}),
         data: n.kind === "terminal" ? { title: n.title, sessionId: n.sessionId!, api, stream, onDelete: del, onRename: rename,
             ...(n.icon ? { icon: n.icon } : {}), ...(n.color ? { color: n.color } : {}), ...(n.termTheme ? { termTheme: n.termTheme } : {}), // #56 aparência do nó
-            onAppearance: (p: { icon?: string | null; color?: string | null; termTheme?: TermTheme | null }) => void mutate((r) => api.patchNode(n.nodeId, { expectedRevision: r, ...p })), editSignal: renameSig.id === n.nodeId ? renameSig.n : 0, ...extras,
+            onAppearance: (p: { icon?: string | null; color?: string | null; termTheme?: TermTheme | null }) => patchRec(n, p, "aparência do terminal"), editSignal: renameSig.id === n.nodeId ? renameSig.n : 0, ...extras,
             composerOpen: composerFor === n.nodeId, onComposerClose: () => setComposerFor(null), workspaceId: snap.workspace.workspaceId,
             chatOpen: chatFor === n.nodeId, onChatClose: () => setChatFor(null),
             ...(n.roleId && roles.find((r) => r.roleId === n.roleId) ? { role: roles.find((r) => r.roleId === n.roleId)! } : {}), roles,
-            onSetRole: (roleId: string | null) => void mutate((r) => api.patchNode(n.nodeId, { expectedRevision: r, roleId })), onManageRoles: () => setRolesDialog(true),
-            skills, ...(n.skillIds ? { skillIds: n.skillIds } : {}), onSetSkills: (skillIds: string[]) => void mutate((r) => api.patchNode(n.nodeId, { expectedRevision: r, skillIds })), onManageSkills: () => { setPref("agentsSub", "skills"); setPref("prefsTab", "agents"); setPrefsOpen(true); }, // #57
+            onSetRole: (roleId: string | null) => patchRec(n, { roleId }, "trocar papel"), onManageRoles: () => setRolesDialog(true),
+            skills, ...(n.skillIds ? { skillIds: n.skillIds } : {}), onSetSkills: (skillIds: string[]) => patchRec(n, { skillIds }, "habilidades do terminal"), onManageSkills: () => { setPref("agentsSub", "skills"); setPref("prefsTab", "agents"); setPrefsOpen(true); }, // #57
             onResume: () => void api.restart(n.nodeId).catch(() => {}),
             onFocus: () => { focusedTerm.current = n.nodeId; if (composerRef.current && composerRef.current !== n.nodeId) setComposerFor(n.nodeId); },
             targets: snap.nodes.filter((o) => o.nodeId !== n.nodeId && o.kind !== "text").map((o) => ({ id: o.nodeId, kind: o.kind as "terminal" | "note", title: o.title, connected: (snap.connections ?? []).some((c) => (c.sourceNodeId === n.nodeId && c.targetNodeId === o.nodeId) || (c.targetNodeId === n.nodeId && c.sourceNodeId === o.nodeId)) })) }
           : n.kind === "note" ? { title: n.title, content: n.content ?? "", editSignal: renameSig.id === n.nodeId ? renameSig.n : 0, locked: !!n.locked, ...(n.color ? { color: n.color } : {}), ...(n.filePath ? { filePath: n.filePath } : {}), onChange: change, onDelete: del, onRename: rename, ...extras,
-              onLock: (locked: boolean) => void mutate((r) => api.patchNode(n.nodeId, { expectedRevision: r, locked })),
-              onColor: (color: string | null) => void mutate((r) => api.patchNode(n.nodeId, { expectedRevision: r, color })),
+              onLock: (locked: boolean) => patchRec(n, { locked }, locked ? "bloquear nota" : "desbloquear nota"),
+              onColor: (color: string | null) => patchRec(n, { color }, "cor da nota"),
               onMove: () => void window.messai.pickDirectory?.().then((d) => { if (d) void mutate((r) => api.patchNode(n.nodeId, { expectedRevision: r, filePath: `${d}/${n.title.replace(/[\\/:*?"<>|]+/g, " ").trim() || "nota"}.md` })); }) }
           : n.kind === "tree" ? { title: n.title, content: n.content ?? "", editSignal: renameSig.id === n.nodeId ? renameSig.n : 0, workspaceId: snap.workspace.workspaceId, api, onChange: change, onDelete: del, onRename: rename, ...extras,
               onOpenNote: (rel: string) => void mutate((r) => api.createNode(snap.workspace.workspaceId, { expectedRevision: r, kind: "note", geometry: { x: n.geometry.x + n.geometry.w + 40, y: n.geometry.y, w: 360, h: 260 }, filePath: `${snap.workspace.cwd}/${rel}` })),
@@ -250,8 +318,8 @@ function Canvas({ conn }: { conn: Connection }) {
       const wasSelected = prevEdges.find((e) => e.id === c.connectionId)?.selected;
       const data: EdgeData = {
         style,
-        onStyle: (st) => void mutate((r) => api.patchConnection(c.connectionId, { expectedRevision: r, style: st })),
-        onCut: () => void mutate((r) => api.deleteConnection(c.connectionId, r)),
+        onStyle: (st) => { void mutate((r) => api.patchConnection(c.connectionId, { expectedRevision: r, style: st })); rec({ label: "estilo do cabo", forward: [{ type: "patchConnection", id: c.connectionId, patch: { style: st } }], inverse: [{ type: "patchConnection", id: c.connectionId, patch: { style: c.style ?? "rope" } }] }); },
+        onCut: () => { void mutate((r) => api.deleteConnection(c.connectionId, r)); rec({ label: "cortar cabo", forward: [{ type: "deleteConnection", id: c.connectionId }], inverse: [{ type: "createConnection", ref: c.connectionId, spec: connSpec(c) }] }); },
         onGo: (end) => selectNode(end === "source" ? c.sourceNodeId : c.targetNodeId),
       };
       return { id: c.connectionId, type: style, source: c.sourceNodeId, target: c.targetNodeId, deletable: true, data, ...(wasSelected ? { selected: true } : {}) };
@@ -282,7 +350,7 @@ function Canvas({ conn }: { conn: Connection }) {
   const finishLink = (targetId: string) => {
     const src = linkingRef.current; setLinking(null); if (!src || !current || src === targetId) return;
     if (edgesRef.current.some((e) => (e.source === src && e.target === targetId) || (e.source === targetId && e.target === src))) { toast("Já estão conectados"); return; }
-    void mutate((r) => api.createConnectionRev(current, r, src, targetId));
+    void mutate(async (r) => { const c = await api.createConnectionRev(current, r, src, targetId); rec({ label: "conectar", forward: [{ type: "createConnection", ref: c.connectionId, spec: connSpec(c) }], inverse: [{ type: "deleteConnection", id: c.connectionId }] }); });
   };
   const neighbors = (id: string) => edgesRef.current.flatMap((e) => (e.source === id ? [e.target] : e.target === id ? [e.source] : []));
   // Ao abrir um espaço, enquadra uma vez se houver nós (evita "canvas vazio" com tudo fora da vista).
@@ -319,7 +387,7 @@ function Canvas({ conn }: { conn: Connection }) {
             // Redimensionar pela borda de cima/esquerda também move o x/y (a âncora sobe/vai pra esquerda).
             // Persistimos posição E tamanho juntos; senão o nó volta pro x/y antigo e "cresce pro lado errado".
             const x = Math.round(f.position.x), y = Math.round(f.position.y);
-            if (w >= 40 && h >= 40 && (w !== n.geometry.w || h !== n.geometry.h || x !== n.geometry.x || y !== n.geometry.y)) void mutate((r) => api.patchNode(c.id, { expectedRevision: r, geometry: { x, y, w, h } }));
+            if (w >= 40 && h >= 40 && (w !== n.geometry.w || h !== n.geometry.h || x !== n.geometry.x || y !== n.geometry.y)) { void mutate((r) => api.patchNode(c.id, { expectedRevision: r, geometry: { x, y, w, h } })); rec({ label: "redimensionar", key: `resize:${c.id}`, forward: [{ type: "patchNode", id: c.id, patch: { geometry: { x, y, w, h } } }], inverse: [{ type: "patchNode", id: c.id, patch: { geometry: n.geometry } }] }); }
           } else missingOnEnd = true;
         }
       }
@@ -334,18 +402,22 @@ function Canvas({ conn }: { conn: Connection }) {
     dragging.current = false;
     const moved = nodes.length ? nodes : [node]; // multi-seleção: todos os arrastados
     void (async () => {
-      let missing = false;
+      let missing = false; const before: { nodeId: string; geometry: Geometry }[] = []; const after: { nodeId: string; geometry: Geometry }[] = [];
       for (const nd of moved) {
         const sn = snap?.nodes.find((x) => x.nodeId === nd.id);
-        if (sn) await mutate((r) => api.patchNode(nd.id, { expectedRevision: r, geometry: { ...sn.geometry, x: Math.round(nd.position.x), y: Math.round(nd.position.y) } })); // sequencial: sem colisão de revisão
-        else missing = true;
+        if (sn) {
+          const g = { ...sn.geometry, x: Math.round(nd.position.x), y: Math.round(nd.position.y) };
+          if (g.x !== sn.geometry.x || g.y !== sn.geometry.y) { before.push({ nodeId: nd.id, geometry: sn.geometry }); after.push({ nodeId: nd.id, geometry: g }); }
+          await mutate((r) => api.patchNode(nd.id, { expectedRevision: r, geometry: g })); // sequencial: sem colisão de revisão
+        } else missing = true;
       }
+      if (after.length) rec({ label: `mover ${plural(after.length, "nó", "nós")}`, forward: [{ type: "layout", moves: after }], inverse: [{ type: "layout", moves: before }] }); // #77: arrasto múltiplo = uma etapa
       if (missing) setSnap((s) => (s ? { ...s } : s));
     })();
   }, [snap, api]);
-  const onConnect = useCallback((c: FlowConnection) => { if (current && c.source && c.target) void mutate((r) => api.createConnectionRev(current, r, c.source, c.target)); }, [current, api]);
+  const onConnect = useCallback((c: FlowConnection) => { if (current && c.source && c.target) void mutate(async (r) => { const made = await api.createConnectionRev(current, r, c.source, c.target); rec({ label: "conectar", forward: [{ type: "createConnection", ref: made.connectionId, spec: connSpec(made) }], inverse: [{ type: "deleteConnection", id: made.connectionId }] }); }); }, [current, api]); // eslint-disable-line react-hooks/exhaustive-deps
   const onEdgesChange = useCallback((changes: EdgeChange[]) => setEdges((es) => applyEdgeChanges(changes, es)), []);
-  const onEdgesDelete = useCallback((del: Edge[]) => { for (const e of del) void mutate((r) => api.deleteConnection(e.id, r)); }, [api]);
+  const onEdgesDelete = useCallback((del: Edge[]) => { for (const e of del) { const c = snap?.connections.find((x) => x.connectionId === e.id); void mutate((r) => api.deleteConnection(e.id, r)); if (c) rec({ label: "cortar cabo", forward: [{ type: "deleteConnection", id: e.id }], inverse: [{ type: "createConnection", ref: e.id, spec: connSpec(c) }] }); } }, [api, snap]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const ensureVisible = (g: Geometry) => {
     const main = document.querySelector("main.canvas")!.getBoundingClientRect();
@@ -362,12 +434,12 @@ function Canvas({ conn }: { conn: Connection }) {
     const icon = i.icon ?? preset?.icon ?? ""; const color = i.color ?? preset?.color ?? ""; const termTheme = i.termTheme ?? preset?.theme ?? "system";
     const look = { ...(icon ? { icon } : {}), ...(color ? { color } : {}), ...(termTheme !== "system" ? { termTheme } : {}) };
     const target = i.target ?? preset?.target ?? "terminal";
-    void mutate(async (r) => { const made = await api.createNode(current, { expectedRevision: r, kind: "terminal", geometry, title: i.title, ...look, ...(usePreset ? { command: preset.command, args: preset.args } : cmdParts ? { command: cmdParts[0]!, args: cmdParts.slice(1) } : {}), ...(i.cwd ? { cwd: i.cwd } : {}), ...(i.roleId ? { roleId: i.roleId } : {}), ...(i.persistent ? { persistent: true } : {}) }); ensureVisible(geometry); if (target === "chat") setTimeout(() => openChat(made.node.nodeId), 300); });
+    void mutate(async (r) => { const input = { expectedRevision: r, kind: "terminal", geometry, title: i.title, ...look, ...(usePreset ? { command: preset.command, args: preset.args } : cmdParts ? { command: cmdParts[0]!, args: cmdParts.slice(1) } : {}), ...(i.cwd ? { cwd: i.cwd } : {}), ...(i.roleId ? { roleId: i.roleId } : {}), ...(i.persistent ? { persistent: true } : {}) }; const made = await api.createNode(current, input); const { expectedRevision: _er, ...sp } = input; rec({ label: "criar terminal", forward: [{ type: "createNode", ref: made.node.nodeId, spec: sp as NodeSpec }], inverse: [{ type: "deleteNode", id: made.node.nodeId }] }); ensureVisible(geometry); if (target === "chat") setTimeout(() => openChat(made.node.nodeId), 300); });
     setTool("select");
   };
   const createSimple = (kind: "note" | "text" | "tree", geometry: Geometry) => {
     if (!current) return;
-    void mutate(async (r) => { await api.createNode(current, { expectedRevision: r, kind, geometry, content: "" }); ensureVisible(geometry); });
+    void mutate(async (r) => { const made = await api.createNode(current, { expectedRevision: r, kind, geometry, content: "" }); rec({ label: kind === "note" ? "criar nota" : kind === "text" ? "criar texto" : "criar árvore", forward: [{ type: "createNode", ref: made.node.nodeId, spec: { kind, title: made.node.title, geometry, content: "" } }], inverse: [{ type: "deleteNode", id: made.node.nodeId }] }); ensureVisible(geometry); });
     setTool("select");
   };
   const onCreateRect = (kind: "terminal" | "note" | "text" | "tree", rect: CreateRect) => {
@@ -388,10 +460,11 @@ function Canvas({ conn }: { conn: Connection }) {
   const viewCenter = (): { x: number; y: number } => { const m = document.querySelector("main.canvas")!.getBoundingClientRect(); return rf.screenToFlowPosition({ x: m.left + m.width / 2, y: m.top + m.height / 2 }); };
   const deleteSelected = async () => {
     const sel = flowRef.current.filter((n) => n.selected);
-    for (const n of sel) await mutate((r) => api.deleteNode(n.id, r)); // sequencial: cada delete avança a revisão antes do próximo (sem colisão/flicker)
+    await deleteNodes(sel.map((n) => n.id)); // sequencial + uma etapa de undo
     const drw = [...selDrawingsRef.current];
-    for (const id of drw) await mutate((r) => api.deleteDrawing(id, r));
-    if (drw.length) setSelDrawings(new Set());
+    if (drw.length > 1) hist().beginGroup(`apagar ${plural(drw.length, "desenho", "desenhos")}`);
+    for (const id of drw) { const d = snapRef.current?.drawings.find((x) => x.drawingId === id); await mutate((r) => api.deleteDrawing(id, r)); if (d) hist().record({ label: "apagar desenho", forward: [{ type: "deleteDrawing", id }], inverse: [{ type: "createDrawing", ref: id, spec: drawSpec(d) }] }); }
+    if (drw.length > 1) hist().endGroup(); if (drw.length) { setSelDrawings(new Set()); bump(); }
   };
   const groupMembers = (id: string): string[] => { const all = snap?.drawings ?? []; const d = all.find((x) => x.drawingId === id); return d?.groupId ? all.filter((x) => x.groupId === d.groupId).map((x) => x.drawingId) : [id]; };
   const selectDrawing = (id: string, additive: boolean) => setSelDrawings((prev) => {
@@ -399,11 +472,11 @@ function Canvas({ conn }: { conn: Connection }) {
     if (!additive) return new Set(grp);
     const next = new Set(prev); const allIn = grp.every((g) => next.has(g)); grp.forEach((g) => (allIn ? next.delete(g) : next.add(g))); return next;
   });
-  const moveDrawing = (id: string, points: [number, number][]) => void mutate((r) => api.patchDrawing(id, { expectedRevision: r, points }));
+  const moveDrawing = (id: string, points: [number, number][]) => { const d = snap?.drawings.find((x) => x.drawingId === id); void mutate((r) => api.patchDrawing(id, { expectedRevision: r, points })); if (d) rec({ label: "mover desenho", key: `drawing:${id}`, forward: [{ type: "patchDrawing", id, points }], inverse: [{ type: "patchDrawing", id, points: d.points }] }); };
   const duplicateSelected = async () => {
     const sel = flowRef.current.filter((n) => n.selected); if (!sel.length || !current) return;
     for (const n of sel) {
-      try { const r = await api.duplicateNode(n.id, revision.current); revision.current = r.revision; }
+      try { const r = await api.duplicateNode(n.id, revision.current); revision.current = r.revision; const sp = await specOf(r.node); rec({ label: "duplicar", forward: [{ type: "createNode", ref: r.node.nodeId, spec: sp }], inverse: [{ type: "deleteNode", id: r.node.nodeId }] }); }
       catch (e) { if (e instanceof ApiClientError && e.error.code === "CONFLICT") { setSnap(await api.snapshot(current)); } toast(e instanceof ApiClientError ? `${e.error.code}: ${e.message}` : String(e)); break; }
     }
   };
@@ -417,6 +490,8 @@ function Canvas({ conn }: { conn: Connection }) {
     const items = pool.map((n) => ({ id: n.id, geometry: geoOf(n) }));
     const moves = fn(items); if (!moves.length) { toast("Os nós já estão alinhados"); return; }
     void mutate((r) => api.applyLayout(current, r, moves.map((m) => ({ nodeId: m.id, geometry: m.geometry }))));
+    const before = moves.map((m) => ({ nodeId: m.id, geometry: items.find((i) => i.id === m.id)!.geometry }));
+    rec({ label: `organizar ${plural(moves.length, "nó", "nós")}`, forward: [{ type: "layout", moves: moves.map((m) => ({ nodeId: m.id, geometry: m.geometry })) }], inverse: [{ type: "layout", moves: before }] });
   };
   const arrangeGrid = () => layoutSelected((items) => gridLayout(items, 40), true);
   const alignSelected = (mode: AlignMode) => layoutSelected((items) => alignGeometries(items, mode), false);
@@ -468,11 +543,13 @@ function Canvas({ conn }: { conn: Connection }) {
       if (is("arrange.grid")) { e.preventDefault(); arrangeGrid(); return; } // Ctrl+Shift+T não é entrada de terminal; vale mesmo com o xterm focado
       if (is("drawings.group") || is("drawings.ungroup")) { // agrupar / desagrupar desenhos
         e.preventDefault(); const ids = [...selDrawingsRef.current]; if (!current || !ids.length) return;
-        if (is("drawings.ungroup")) void mutate((r) => api.groupDrawings(current, { expectedRevision: r, drawingIds: ids, grouped: false }));
-        else if (ids.length >= 2) void mutate((r) => api.groupDrawings(current, { expectedRevision: r, drawingIds: ids, grouped: true }));
+        if (is("drawings.ungroup")) { void mutate((r) => api.groupDrawings(current, { expectedRevision: r, drawingIds: ids, grouped: false })); rec({ label: "desagrupar desenhos", forward: [{ type: "groupDrawings", ids, grouped: false }], inverse: [{ type: "groupDrawings", ids, grouped: true }] }); }
+        else if (ids.length >= 2) { void mutate((r) => api.groupDrawings(current, { expectedRevision: r, drawingIds: ids, grouped: true })); rec({ label: "agrupar desenhos", forward: [{ type: "groupDrawings", ids, grouped: true }], inverse: [{ type: "groupDrawings", ids, grouped: false }] }); }
         else toast("Selecione 2+ desenhos para agrupar");
         return;
       }
+      if (is("history.undo")) { e.preventDefault(); void undo(); return; } // #77
+      if (is("history.redo") || (ctrl && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "y" && !typing)) { e.preventDefault(); void redo(); return; }
       if (is("delete")) { e.preventDefault(); deleteSelected(); return; }
       if ((e.key === "Delete" || e.key === "Backspace") && !isTyping() && (flowRef.current.some((n) => n.selected) || selDrawingsRef.current.size > 0)) { e.preventDefault(); void deleteSelected(); return; }
       if (e.key === "Escape" && linkingRef.current) { setLinking(null); return; }
@@ -568,6 +645,7 @@ function Canvas({ conn }: { conn: Connection }) {
             <button className="tb" title="Alinhar embaixo" onClick={() => alignSelected("bottom")}><AlignEndHorizontal size={15} /></button>
             <span className="sep" />
             <button className="tb" title="Organizar em grade (Ctrl+Shift+T)" onClick={arrangeGrid}><LayoutGrid size={15} /></button>
+
           </div>
         )}
         <div className="info-bar">{snap?.workspace.parentId && <span className="floor-badge" style={{ borderColor: STATUS_COLOR[snap.workspace.status ?? "working"] }} title={STATUS_LABEL[snap.workspace.status ?? "working"]}>andar · {snap.workspace.branch}</span>}{snap ? `${snap.workspace.name} · rev ${snap.workspace.revision} · ${snap.nodes.length} nós` : "sem espaço"}{linking ? " — conectar: clique no destino (Esc cancela)" : ""}</div>
@@ -597,11 +675,11 @@ function Canvas({ conn }: { conn: Connection }) {
           {minimap && <MiniMap pannable zoomable />}
           <DrawingLayer tool={tool} style={style} drawings={drawings}
             selected={selDrawings} onSelect={selectDrawing} onMovePoints={moveDrawing}
-            onDraw={(d) => current && void mutate((r) => api.createDrawing(current, { expectedRevision: r, ...d }))}
-            onErase={(id) => void mutate((r) => api.deleteDrawing(id, r))}
+            onDraw={(d) => current && void mutate(async (r) => { const made = await api.createDrawing(current, { expectedRevision: r, ...d }); rec({ label: "desenhar", forward: [{ type: "createDrawing", ref: made.drawingId, spec: drawSpec(made) }], inverse: [{ type: "deleteDrawing", id: made.drawingId }] }); })}
+            onErase={(id) => { const dd = snap?.drawings.find((x) => x.drawingId === id); void mutate((r) => api.deleteDrawing(id, r)); if (dd) rec({ label: "apagar desenho", forward: [{ type: "deleteDrawing", id }], inverse: [{ type: "createDrawing", ref: id, spec: drawSpec(dd) }] }); }}
             onCreateRect={onCreateRect} />
         </ReactFlow>
-        <ZoomBar minimap={minimap} setMinimap={setMinimap} onUsage={() => setUsage(true)} agents={barAgents} {...(curWs ? { wsName: curWs.name } : {})} inFloors={!!overview} onFloors={() => (overview ? setOverview(null) : grd && setOverview(grd.workspaceId))} hud={hud} onHud={() => void window.messai.hudToggle?.().then(setHud)} />
+        <ZoomBar minimap={minimap} setMinimap={setMinimap} onUsage={() => setUsage(true)} agents={barAgents} {...(curWs ? { wsName: curWs.name } : {})} inFloors={!!overview} onFloors={() => (overview ? setOverview(null) : grd && setOverview(grd.workspaceId))} hud={hud} onHud={() => void window.messai.hudToggle?.().then(setHud)} history={{ canUndo: hist().canUndo, canRedo: hist().canRedo, undoLabel: hist().undoLabel, redoLabel: hist().redoLabel, onUndo: () => void undo(), onRedo: () => void redo() }} />
         {usage && <AgentUsage api={api} onClose={() => setUsage(false)} />}
       </main>
     </div>

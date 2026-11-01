@@ -568,3 +568,4 @@ button.danger:hover { border-color: var(--danger); color: var(--danger-fg); }
 .pf-confirm code { word-break: break-all; } .pf-confirm input { width: 160px; }
 .danger-field { border-color: var(--danger-line); }
 .spin { animation: spinner .9s linear infinite; } @keyframes spinner { to { transform: rotate(360deg); } }
+.bb-circle:disabled { opacity: .35; cursor: not-allowed; }

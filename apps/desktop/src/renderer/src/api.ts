@@ -83,6 +83,7 @@ export class Api {
   patchFolder(id: string, input: PatchFolder) { return this.req<Folder>("PATCH", `/v1/folders/${id}`, input); }
   deleteFolder(id: string) { return this.req<void>("DELETE", `/v1/folders/${id}`); }
   deleteWorkspace(id: string) { return this.req<void>("DELETE", `/v1/workspaces/${id}`); }
+  session(id: string) { return this.req<Session>("GET", `/v1/sessions/${id}`); }
   snapshot(id: string) { return this.req<WorkspaceSnapshot>("GET", `/v1/workspaces/${id}`); }
   createNode(wsId: string, input: CreateNode) { return this.req<{ node: Node; session?: Session; revision: number }>("POST", `/v1/workspaces/${wsId}/nodes`, input); }
   patchNode(id: string, input: PatchNode) { return this.req<Node>("PATCH", `/v1/nodes/${id}`, input); }
