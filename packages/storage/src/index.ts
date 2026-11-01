@@ -58,6 +58,7 @@ const MIGRATIONS: string[] = [
    ALTER TABLE workspaces ADD COLUMN status TEXT;
    ALTER TABLE workspaces ADD COLUMN status_text TEXT;`,
   `ALTER TABLE drawings ADD COLUMN group_id TEXT;`,
+  `ALTER TABLE sessions ADD COLUMN resume_id TEXT;`, // id de sessão do CLI de IA, para retomar após reboot
 ];
 type DrwRow = { drawing_id: string; workspace_id: string; kind: Drawing["kind"]; points: string; color: string; width: number; created_at: string; group_id: string | null };
 const drwFrom = (r: DrwRow): Drawing => ({ drawingId: r.drawing_id, workspaceId: r.workspace_id, kind: r.kind, points: JSON.parse(r.points) as Drawing["points"], color: r.color, width: r.width, createdAt: r.created_at, ...(r.group_id ? { groupId: r.group_id } : {}) });
@@ -74,7 +75,7 @@ const folderFrom = (r: FolderRow): Folder => ({ folderId: r.folder_id, name: r.n
 type NodeRow = { node_id: string; workspace_id: string; kind: Node["kind"]; title: string; x: number; y: number; w: number; h: number; session_id: string | null; content: string | null; created_at: string; role_id: string | null; locked: number; color: string | null; file_path: string | null; title_auto: number };
 type RoleRow = { role_id: string; name: string; badge: string; instructions: string; created_at: string; updated_at: string };
 const roleFrom = (r: RoleRow): Role => ({ roleId: r.role_id, name: r.name, badge: r.badge, instructions: r.instructions, createdAt: r.created_at, updatedAt: r.updated_at });
-type SessRow = { session_id: string; workspace_id: string; node_id: string; command: string; args: string; cwd: string; state: Session["state"]; pid: number | null; exit_code: number | null; cols: number; rows: number; created_at: string; persistent: number };
+type SessRow = { session_id: string; workspace_id: string; node_id: string; command: string; args: string; cwd: string; state: Session["state"]; pid: number | null; exit_code: number | null; cols: number; rows: number; created_at: string; persistent: number; resume_id: string | null };
 
 const wsFrom = (r: WsRow): Workspace => ({ workspaceId: r.workspace_id, machineId: r.machine_id, name: r.name, cwd: r.cwd, icon: r.icon, color: r.color, sortOrder: r.sort_order, revision: r.revision, createdAt: r.created_at, ...(r.folder_id ? { folderId: r.folder_id } : {}), ...(r.parent_id ? { parentId: r.parent_id } : {}), ...(r.branch ? { branch: r.branch } : {}), ...(r.floor_type ? { floorType: r.floor_type } : {}), ...(r.status ? { status: r.status } : {}), ...(r.status_text ? { statusText: r.status_text } : {}) });
 const nodeFrom = (r: NodeRow): Node => ({
@@ -93,6 +94,7 @@ const sessFrom = (r: SessRow): Session => ({
   ...(r.pid !== null ? { pid: r.pid } : {}),
   ...(r.exit_code !== null ? { exitCode: r.exit_code } : {}),
   ...(r.persistent ? { persistent: true } : {}),
+  ...(r.resume_id ? { resumeId: r.resume_id } : {}),
 });
 
 export class Store {
@@ -278,10 +280,11 @@ export class Store {
     return r ? sessFrom(r) : undefined;
   }
   insertSession(s: Session): void {
-    this.db.prepare("INSERT INTO sessions(session_id,workspace_id,node_id,command,args,cwd,state,pid,exit_code,cols,rows,created_at,persistent) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)").run(
+    this.db.prepare("INSERT INTO sessions(session_id,workspace_id,node_id,command,args,cwd,state,pid,exit_code,cols,rows,created_at,persistent,resume_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(
       s.sessionId, s.workspaceId, s.nodeId, s.command, JSON.stringify(s.args), s.cwd, s.state,
-      s.pid ?? null, s.exitCode ?? null, s.cols, s.rows, s.createdAt, s.persistent ? 1 : 0);
+      s.pid ?? null, s.exitCode ?? null, s.cols, s.rows, s.createdAt, s.persistent ? 1 : 0, s.resumeId ?? null);
   }
+  setSessionResume(id: string, resumeId: string): void { this.db.prepare("UPDATE sessions SET resume_id=? WHERE session_id=?").run(resumeId, id); }
   updateSession(id: string, patch: { state?: Session["state"]; pid?: number | null; exitCode?: number | null; cols?: number; rows?: number }): void {
     this.db.prepare(`UPDATE sessions SET state=COALESCE(?,state), pid=COALESCE(?,pid), exit_code=COALESCE(?,exit_code),
       cols=COALESCE(?,cols), rows=COALESCE(?,rows) WHERE session_id=?`)

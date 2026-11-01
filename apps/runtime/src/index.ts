@@ -12,7 +12,7 @@ const store = new Store(cfg.dbPath);
 const sessions = new SessionManager(store);
 const svc = new WorkspaceService(cfg, store, sessions);
 const rec = svc.recoverPersistent();
-if (rec.reattached || rec.lost) console.log(`sessões persistentes: ${rec.reattached} reanexada(s), ${rec.lost} perdida(s)`);
+if (rec.reattached || rec.respawned || rec.lost) console.log(`sessões: ${rec.reattached} reanexada(s), ${rec.respawned} re-aberta(s) [reboot], ${rec.lost} perdida(s)`);
 svc.ensureDefaultWorkspace(); // primeira vez: cria um espaço padrão (canvas não nasce vazio)
 svc.initNoteWatches(); // observa .md das notas: edição externa reflete na hora
 

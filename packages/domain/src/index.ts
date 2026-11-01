@@ -171,6 +171,49 @@ export function agentKind(command: string, args: string[] = []): AgentKind {
   return { isAgent: false, agentType: "genericShell", label: "shell" };
 }
 
+/**
+ * Receita de retomada por tipo de agente (para o workspace à prova de reboot).
+ * - `startArgs(uuid)`: argumentos a injetar no PRIMEIRO start, quando o CLI deixa fixar o id (claude).
+ * - `resume(id, baseArgs)`: comando/args para RETOMAR a conversa por id.
+ * - `capture`: quando o CLI NÃO deixa fixar o id, onde achar o id que ele criou (subdir do $HOME + regex no nome do arquivo).
+ * Sem receita (ou sem id capturado) → o restore reabre limpo (seguro: nunca retoma conversa errada).
+ */
+export type ResumeRecipe = {
+  startArgs?: (uuid: string) => string[];
+  resume?: (id: string, baseArgs: string[]) => { command: string; args: string[] };
+  capture?: { dir: string; re: RegExp };
+};
+const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+export function agentResume(agentType: string): ResumeRecipe {
+  switch (agentType) {
+    case "claudeCode": // determinístico: fixa o id no start, retoma por ele
+      return {
+        startArgs: (uuid) => ["--session-id", uuid],
+        resume: (id, base) => ({ command: "claude", args: [...stripFlag(base, "--session-id"), "--resume", id] }),
+      };
+    case "codex": // id não fixável no start; capturado do rollout em ~/.codex/sessions
+      return {
+        resume: (id) => ({ command: "codex", args: ["resume", id] }),
+        capture: { dir: ".codex/sessions", re: new RegExp(`(${UUID})\\.jsonl$`) },
+      };
+    case "openCode": // id "ses_…" capturado do store do opencode
+      return {
+        resume: (id, base) => ({ command: "opencode", args: ["--session", id, ...base] }),
+        capture: { dir: ".local/share/opencode/storage", re: /\b(ses_[A-Za-z0-9]+)\.json$/ },
+      };
+    case "antigravityCLI": // agy: retoma por --conversation; captura do store ainda a confirmar (v1 reabre limpo)
+      return { resume: (id, base) => ({ command: "agy", args: ["--conversation", id, ...base] }) };
+    default:
+      return {};
+  }
+}
+/** Remove um flag `--x <valor>` de uma lista de argumentos (para trocar --session-id por --resume). */
+function stripFlag(args: string[], flag: string): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < args.length; i++) { if (args[i] === flag) { i++; continue; } out.push(args[i]!); }
+  return out;
+}
+
 /** Remove sequências de escape ANSI/CSI/OSC — para devolver a "tela" do terminal como texto limpo. */
 export function stripAnsi(s: string): string {
   return s

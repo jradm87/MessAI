@@ -1,5 +1,6 @@
 import { AGENT_ENV, type TreeEntry, type FileContent, type FsOp, type SearchHit, type CreateFloor, type LandFloor, type LandResult, type Role, type CreateRole, type PatchRole, type ChatMessage, type SendChat, type Attachment, type CreateAttachment, type FileEntry, type Connection, type CreateConnection, type PatchConnection, type CreateDrawing, type PatchDrawing, type GroupDrawings, type CreateFolder, type CreateNode, type Drawing, type Folder, type Message, type PatchFolder, type SendMessage, type Sidebar, type CreateWorkspace, type Node, type PatchNode, type PatchWorkspace, type Session, type Workspace, type WorkspaceSnapshot } from "@messai/contracts";
-import { applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, canMessage, checkRevision, formatDelivery, normalizeGeometry, planLocalTerminal, resolveNodeRef, validateNewNode, agentKind, stripAnsi, fail, succeed, type Result } from "@messai/domain";
+import { applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, canMessage, checkRevision, formatDelivery, normalizeGeometry, planLocalTerminal, resolveNodeRef, validateNewNode, agentKind, agentResume, stripAnsi, fail, succeed, type Result } from "@messai/domain";
+import { randomUUID } from "node:crypto";
 import type { Store } from "@messai/storage";
 import { EventEmitter } from "node:events";
 import { newId, nowIso, type Config } from "./config.js";
@@ -57,6 +58,24 @@ async function fetchClaudeLimits(): Promise<{ plan?: string; limits: AgentUsageL
     const limits = [parse("5h", "Session"), parse("7d", "Weekly")].filter((x): x is AgentUsageLimit => x !== null);
     return { ...(plan ? { plan } : {}), limits };
   } catch { return null; }
+}
+
+/** Coleta ids (grupo 1 do regex no nome do arquivo) sob `root`, recursivo e raso; opcionalmente só mtime ≥ since. */
+function scanIds(root: string, re: RegExp, since = 0, depth = 5): Set<string> {
+  const ids = new Set<string>();
+  const walk = (dir: string, d: number) => {
+    let entries: ReturnType<typeof readdirSync>;
+    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) { if (d > 0) walk(p, d - 1); continue; }
+      const m = re.exec(e.name); if (!m?.[1]) continue;
+      if (since) { try { if (statSync(p).mtimeMs < since) continue; } catch { continue; } }
+      ids.add(m[1]);
+    }
+  };
+  walk(root, depth);
+  return ids;
 }
 
 export class WorkspaceService extends EventEmitter<ServiceEvents> {
@@ -565,14 +584,24 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     let session: Session | undefined;
     if (input.kind === "terminal") {
       if (input.persistent && !SessionManager.tmuxAvailable()) return fail("UNSUPPORTED", "tmux não está instalado nesta máquina");
+      const command = input.command ?? this.cfg.defaultShell;
+      let args = input.args ?? [];
+      // Retomada pós-reboot: se for agente de IA que deixa fixar o id no start (claude), gera e injeta
+      // o --session-id e guarda. Os que não deixam (codex/opencode) têm o id capturado depois (async).
+      const k = agentKind(command, args);
+      const recipe = agentResume(k.agentType);
+      let resumeId: string | undefined;
+      if (k.isAgent && recipe.startArgs) { resumeId = randomUUID(); args = [...args, ...recipe.startArgs(resumeId)]; }
       const base = SessionManager.blank({
         sessionId: newId(), workspaceId, nodeId: node.nodeId,
-        command: input.command ?? this.cfg.defaultShell, args: input.args ?? [], cwd: input.cwd ?? w.cwd,
+        command, args, cwd: input.cwd ?? w.cwd,
         ...(input.persistent ? { persistent: true } : {}),
+        ...(resumeId ? { resumeId } : {}),
       });
       node.sessionId = base.sessionId;
       this.store.transaction(() => { this.store.insertNode(node); this.store.insertSession(base); this.store.bumpRevision(workspaceId, rev.value); });
       session = this.sessions.start(base, this.plan(w, node, base));
+      if (k.isAgent && !resumeId && recipe.capture) void this.captureResumeId(base.sessionId, recipe.capture, Date.now());
     } else {
       this.store.transaction(() => { this.store.insertNode(node, titleAuto); this.store.bumpRevision(workspaceId, rev.value); });
       if (node.kind === "note" && node.filePath && !input.filePath) this.writeNoteFile(node, node.content ?? "");
@@ -639,15 +668,41 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
   }
   /** Reinicia o processo de um nó terminal cuja sessão saiu ou se perdeu. Mesmo sessionId. */
   /** Na subida: reanexa sessões tmux que sobreviveram ao runtime anterior; as demais viram `lost`. */
-  recoverPersistent(): { reattached: number; lost: number } {
-    let reattached = 0, lost = 0;
+  /**
+   * Restaura o workspace no boot (à prova de reboot): o banco é a verdade do que deve estar aberto.
+   * tmux vivo (reinício do runtime) → reanexa; tmux morto (reboot / "Encerrar tudo") → RE-SOBE. Agente
+   * com id guardado → retoma a conversa (claude --resume etc.); shell/sem-id → reabre limpo.
+   */
+  recoverPersistent(): { reattached: number; respawned: number; lost: number } {
+    let reattached = 0, respawned = 0, lost = 0;
     for (const s of this.store.listSessions()) {
       if (!s.persistent || (s.state !== "running" && s.state !== "starting")) continue;
       const node = this.store.getNode(s.nodeId); const w = node && this.store.getWorkspace(node.workspaceId);
-      if (node && w && this.sessions.tmuxAlive(s.sessionId)) { this.sessions.start({ ...s, state: "starting" }, this.plan(w, node, s)); reattached++; }
-      else { this.store.updateSession(s.sessionId, { state: "lost", pid: null }); lost++; }
+      if (!node || !w) { this.store.updateSession(s.sessionId, { state: "lost", pid: null }); lost++; continue; }
+      if (this.sessions.tmuxAlive(s.sessionId)) { this.sessions.start({ ...s, state: "starting" }, this.plan(w, node, s)); reattached++; }
+      else { const r = this.resumeSession(s); this.sessions.start({ ...r, state: "starting" }, this.plan(w, node, r)); respawned++; }
     }
-    return { reattached, lost };
+    return { reattached, respawned, lost };
+  }
+
+  /** Monta a sessão para RE-SUBIR: agente com id → comando de retomada; senão, o comando original (limpo). */
+  private resumeSession(s: Session): Session {
+    const k = agentKind(s.command, s.args);
+    if (!k.isAgent || !s.resumeId) return s;
+    const r = agentResume(k.agentType).resume?.(s.resumeId, s.args);
+    return r ? { ...s, command: r.command, args: r.args } : s;
+  }
+
+  /** Captura (async) o id que um CLI de IA criou no seu store, para retomar depois do reboot. */
+  private async captureResumeId(sessionId: string, cap: { dir: string; re: RegExp }, since: number): Promise<void> {
+    const root = join(homedir(), cap.dir);
+    const before = scanIds(root, cap.re);
+    for (let i = 0; i < 24; i++) { // ~12s de janela
+      await new Promise((r) => setTimeout(r, 500));
+      if (!this.store.getSession(sessionId)) return; // nó removido no meio
+      const fresh = [...scanIds(root, cap.re, since)].find((id) => !before.has(id));
+      if (fresh) { this.store.setSessionResume(sessionId, fresh); return; }
+    }
   }
 
   restartTerminal(nodeId: string): Result<Session> {

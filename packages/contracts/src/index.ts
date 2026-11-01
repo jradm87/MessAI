@@ -242,6 +242,8 @@ export const Session = Type.Object({
   rows: Type.Integer(),
   /** Sessão dentro do tmux: sobrevive ao runtime (reinício, crash, reboot não). */
   persistent: Type.Optional(Type.Boolean()),
+  /** Id da sessão do CLI de IA (claude/codex/…), para retomar a conversa no restore pós-reboot. */
+  resumeId: Type.Optional(Type.String()),
   lease: Type.Optional(
     Type.Object({ clientId: Id, expiresAt: Type.String() }),
   ),

@@ -251,9 +251,16 @@ export class SessionManager extends EventEmitter<SessionEvents> {
     for (const id of [...this.live.keys()]) { const p = this.store.getSession(id)?.persistent; this.dispose(id, true); if (p) this.store.updateSession(id, { state: "starting", pid: null }); }
   }
 
-  /** Encerra TUDO de verdade: mata também as sessões tmux (agentes). Usado pelo "Encerrar tudo". */
+  /**
+   * "Encerrar tudo": mata também as sessões tmux (agentes). Persistentes ficam "starting" (o banco é a
+   * verdade) para o próximo boot RE-ABRIR e retomar; não-persistentes viram "exited" (não há o que restaurar).
+   */
   disposeAllHard(): void {
-    for (const id of [...this.live.keys()]) { this.dispose(id, false); this.store.updateSession(id, { state: "exited", pid: null }); }
+    for (const id of [...this.live.keys()]) {
+      const persistent = this.store.getSession(id)?.persistent;
+      this.dispose(id, false);
+      this.store.updateSession(id, { state: persistent ? "starting" : "exited", pid: null });
+    }
   }
 
   /** Sessões rodando agora (para a tela de encerramento): título do nó + tipo (agente/shell). */

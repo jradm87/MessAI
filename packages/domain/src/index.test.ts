@@ -1,5 +1,5 @@
 import {  describe, expect, it } from "vitest";
-import { canMessage, formatDelivery, resolveNodeRef, canWrite, checkRevision, decideLease, normalizeGeometry, trimBuffer, MAX_BUFFER_BYTES, applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxAttachPlan, shellQuote, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, alignGeometries, gridLayout, agentKind, stripAnsi } from "./index.js";
+import { canMessage, formatDelivery, resolveNodeRef, canWrite, checkRevision, decideLease, normalizeGeometry, trimBuffer, MAX_BUFFER_BYTES, applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxAttachPlan, shellQuote, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, alignGeometries, gridLayout, agentKind, agentResume, stripAnsi } from "./index.js";
 
 describe("revisão", () => {
   it("aceita revisão igual e devolve próxima", () => {
@@ -109,6 +109,27 @@ describe("agentKind", () => {
     expect(agentKind("fish", [])).toMatchObject({ isAgent: false, agentType: "genericShell" });
     expect(agentKind("/bin/bash", ["-l"]).isAgent).toBe(false);
     expect(agentKind("cat", []).isAgent).toBe(false);
+  });
+});
+
+describe("agentResume", () => {
+  it("claude fixa o id no start e retoma por ele (troca --session-id por --resume)", () => {
+    const r = agentResume("claudeCode");
+    expect(r.startArgs!("abc-123")).toEqual(["--session-id", "abc-123"]);
+    const resumed = r.resume!("abc-123", ["--append-system-prompt", "x", "--session-id", "abc-123"]);
+    expect(resumed.command).toBe("claude");
+    expect(resumed.args).toEqual(["--append-system-prompt", "x", "--resume", "abc-123"]); // --session-id removido
+  });
+  it("codex/opencode/agy retomam por id; sem startArgs (id é capturado)", () => {
+    expect(agentResume("codex").startArgs).toBeUndefined();
+    expect(agentResume("codex").resume!("uuid", [])).toEqual({ command: "codex", args: ["resume", "uuid"] });
+    expect(agentResume("openCode").resume!("ses_1", [])).toEqual({ command: "opencode", args: ["--session", "ses_1"] });
+    expect(agentResume("antigravityCLI").resume!("cid", [])).toEqual({ command: "agy", args: ["--conversation", "cid"] });
+    expect(agentResume("codex").capture?.dir).toBe(".codex/sessions");
+  });
+  it("shell não tem retomada", () => {
+    expect(agentResume("genericShell").resume).toBeUndefined();
+    expect(agentResume("genericShell").startArgs).toBeUndefined();
   });
 });
 
