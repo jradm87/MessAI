@@ -3,7 +3,7 @@ import electronUpdater from "electron-updater";
 import { spawn, execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, openSync, readFileSync, readdirSync, readlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BUILD_VERSION } from "@messai/contracts";
 import { parsePowerMode, shouldBlock, type PowerMode } from "./power.js";
@@ -262,6 +262,14 @@ ipcMain.handle("mess:connection", async (event) => {
   return { baseUrl: BASE, wsUrl: `ws://127.0.0.1:${PORT}/v1/ws`, token: readToken() ?? "", homeDir: homedir() };
 });
 
+// #38 — abre uma pasta no gerenciador de arquivos, só dentro do diretório de dados (ex.: ~/.messai/providers); cria se faltar.
+ipcMain.handle("mess:openPath", async (_e, p: unknown) => {
+  if (typeof p !== "string") return "caminho inválido";
+  const target = resolve(p); const root = resolve(DATA_DIR);
+  if (target !== root && !target.startsWith(root + sep)) return "só pastas dentro do diretório de dados do MessAI";
+  try { mkdirSync(target, { recursive: true }); } catch { /* já existe / sem permissão: o openPath reporta */ }
+  return shell.openPath(target);
+});
 ipcMain.handle("mess:pickDirectory", async () => {
   const r = await dialog.showOpenDialog({ properties: ["openDirectory", "createDirectory"] });
   return r.canceled ? null : (r.filePaths[0] ?? null);

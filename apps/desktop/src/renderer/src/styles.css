@@ -529,3 +529,16 @@ button.danger:hover { border-color: var(--danger); color: var(--danger-fg); }
 .node.terminal .bar .node-ic:hover { background: var(--hover-2); }
 .appearance-menu { position: absolute; top: 28px; left: 6px; z-index: 12; width: 300px; display: flex; flex-direction: column; gap: 8px; padding: 8px; }
 .appearance-menu .icon-grid { grid-template-columns: repeat(10, 1fr); }
+/* ===== #57 — Preferências → Agentes ===== */
+.roles-search { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--input); margin-bottom: 4px; }
+.roles-search input { flex: 1; border: 0; background: transparent; color: var(--fg); outline: none; font-size: 12px; }
+.roles-list .rn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pa-acc, .pa-prov { align-items: center; } .pa-prov.off .pa-acc-main { opacity: .5; }
+.pa-acc-main { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.pa-chip { display: inline-block; margin-left: 6px; font-size: 10px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; padding: 1px 6px; border-radius: 8px; background: var(--chip); color: var(--mut); vertical-align: middle; }
+.pa-chip.logged { background: color-mix(in srgb, var(--ok) 22%, transparent); color: var(--ok); } .pa-chip.none { background: var(--danger-bg); color: var(--danger-fg); } .pa-chip.plan { background: color-mix(in srgb, var(--acc) 22%, transparent); color: var(--acc); }
+.pa-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.mono { font-family: ui-monospace, monospace; }
+.sk-head { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; cursor: default; }
+.sk-count { margin-left: 4px; font-size: 10px; font-weight: 700; color: var(--acc); }
+.role-menu .mi input[type=checkbox] { margin: 0 4px 0 0; pointer-events: none; }

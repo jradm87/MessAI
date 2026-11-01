@@ -3,6 +3,7 @@ import { NodeToolbar, Position } from "@xyflow/react";
 import { Paperclip, SendHorizontal, SquareTerminal, StickyNote, FileText, Folder, Bookmark, Plus, X } from "lucide-react";
 import type { FileEntry } from "@messai/contracts";
 import type { Api, Stream } from "./api.js";
+import { loadPrompts, onPrompts, promptTitle, savePrompts, upsertPrompt, type SavedPrompt } from "./prompts.js";
 
 export type MentionTarget = { id: string; kind: "terminal" | "note"; title: string; connected: boolean };
 export type ComposerProps = {
@@ -24,10 +25,10 @@ export function Composer(p: ComposerProps) {
   const [sel, setSel] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);
   // prompts salvos (conveniência pessoal, localStorage)
-  const [prompts, setPrompts] = useState<{ title: string; text: string }[]>(() => { try { return JSON.parse(localStorage.getItem("mess.prompts") ?? "[]") as { title: string; text: string }[]; } catch { return []; } });
+  const [prompts, setPrompts] = useState<SavedPrompt[]>(() => loadPrompts()); // módulo compartilhado com Preferências → Agentes → Prompts (#57)
+  useEffect(() => onPrompts(() => setPrompts(loadPrompts())), []);
   const [promptMenu, setPromptMenu] = useState(false);
-  const savePrompts = (list: { title: string; text: string }[]) => { setPrompts(list); try { localStorage.setItem("mess.prompts", JSON.stringify(list)); } catch { /* sem storage */ } };
-  const saveCurrent = () => { const t = text.trim(); if (!t) return; const title = (t.split("\n")[0] ?? t).slice(0, 48); savePrompts([{ title, text: t }, ...prompts.filter((x) => x.text !== t)].slice(0, 30)); };
+  const saveCurrent = () => { const t = text.trim(); if (!t) return; savePrompts(upsertPrompt(prompts, { title: promptTitle(t), text: t })); };
   const insertPrompt = (txt: string) => { setText((x) => `${x}${x && !/\s$/.test(x) ? " " : ""}${txt}`); setPromptMenu(false); ta.current?.focus(); };
   const ta = useRef<HTMLTextAreaElement>(null);
   const fileIn = useRef<HTMLInputElement>(null);

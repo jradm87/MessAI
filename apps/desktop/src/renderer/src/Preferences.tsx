@@ -4,6 +4,7 @@ import { getThemePref, onTheme, setThemePref, THEME_LABEL, type ThemePref } from
 import { setPref, usePref } from "./prefs.js";
 import type { Api, UiPrefsState } from "./api.js";
 import { PrefsTerminal } from "./PrefsTerminal.js";
+import { PrefsAgents, type OpenTerminal } from "./PrefsAgents.js";
 
 /**
  * #64 — janela de Preferências em abas (engrenagem da barra lateral / Ctrl+,).
@@ -86,7 +87,12 @@ function GeneralTab({ api }: { api: Api }) {
   </>);
 }
 
-export function Preferences({ api, onClose, onPresetsChanged }: { api: Api; onClose: () => void; onPresetsChanged?: () => void }) {
+export type PreferencesProps = {
+  api: Api; onClose: () => void; onPresetsChanged?: () => void;
+  // #57 Agentes
+  workspaceCwd?: string; onRolesChanged?: () => void; onOpenTerminal?: OpenTerminal; onOpenUsage?: () => void;
+};
+export function Preferences({ api, onClose, onPresetsChanged, workspaceCwd, onRolesChanged, onOpenTerminal, onOpenUsage }: PreferencesProps) {
   const saved = usePref("prefsTab");
   const tab: PrefTabId = isTab(saved) ? saved : "general";
   const pick = (id: PrefTabId) => setPref("prefsTab", id);
@@ -94,7 +100,7 @@ export function Preferences({ api, onClose, onPresetsChanged }: { api: Api; onCl
   const cur = PREF_TABS.find((t) => t.id === tab)!;
   const body = tab === "general" ? <GeneralTab api={api} />
     : tab === "terminal" ? <PrefsTerminal api={api} onPresetsChanged={onPresetsChanged ?? (() => {})} />
-    : tab === "agents" ? <Soon issue={57} what="papéis, skills, contas e uso dos agentes" />
+    : tab === "agents" ? <PrefsAgents api={api} workspaceCwd={workspaceCwd ?? ""} onRolesChanged={onRolesChanged ?? (() => {})} onOpenTerminal={onOpenTerminal ?? (() => {})} onOpenUsage={onOpenUsage ?? (() => {})} />
     : tab === "shortcuts" ? <Soon issue={58} what="atalhos de teclado personalizáveis" />
     : tab === "remote" ? <Soon issue={59} what="controle remoto e pareamento (depende do hub #28)" />
     : tab === "updates" ? <Soon issue={61} what="canal e verificação de atualizações" />

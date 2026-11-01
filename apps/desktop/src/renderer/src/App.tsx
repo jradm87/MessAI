@@ -5,7 +5,7 @@ import { Map as MapIcon, Minus, Plus, Activity, Layers, AlignStartVertical, Alig
 import { useAtomValue } from "jotai";
 import { themeAtom } from "./atoms.js";
 import { getThemePref, setThemePref, nextTheme, THEME_LABEL, cssVar } from "./theme.js";
-import { BUILD_VERSION, type Role, type Drawing, type Folder, type Geometry, type Preset, type Sidebar as SidebarData, type TermTheme, type Workspace, type WorkspaceSnapshot } from "@messai/contracts";
+import { BUILD_VERSION, type Role, type Drawing, type Folder, type Geometry, type Preset, type Sidebar as SidebarData, type Skill, type TermTheme, type Workspace, type WorkspaceSnapshot } from "@messai/contracts";
 import { gridLayout, alignGeometries, type AlignMode } from "@messai/domain";
 import { Sidebar } from "./Sidebar.js";
 import { WorkspaceDialog, type WorkspaceInput } from "./WorkspaceDialog.js";
@@ -30,6 +30,7 @@ import { DrawingLayer, type CreateRect } from "./DrawingLayer.js";
 import { NewTerminalDialog, type NewTerminalInput } from "./NewTerminalDialog.js";
 import { ShutdownOverlay } from "./ShutdownOverlay.js";
 import { Preferences } from "./Preferences.js";
+import { setPref, usePref } from "./prefs.js";
 
 const nodeTypes: NodeTypes = { terminal: TerminalNode as never, note: NoteNode as never, text: TextNode as never, tree: TreeNode as never };
 const edgeTypes: EdgeTypes = { rope: RopeEdge as never, circuit: CircuitEdge as never };
@@ -49,11 +50,14 @@ function ZoomBar({ minimap, setMinimap, onUsage, agents, wsName, inFloors, onFlo
   useOnViewportChange({ onChange: (v) => setZ(Math.round(v.zoom * 100)) });
   useAtomValue(themeAtom); // re-renderiza o botão quando o tema efetivo muda
   const pref = getThemePref(); const ThemeIcon = pref === "light" ? Sun : pref === "dark" ? Moon : Monitor;
+  // #38 Agent Usage: desligado em Preferências → Agentes → Uso some da barra; provedores escondidos também
+  const usageOn = usePref("usageEnabled"); const hidden = new Set(usePref("usageDisabled").split(",").filter(Boolean));
+  const shownAgents = usageOn ? agents.filter((a) => !hidden.has(a)) : [];
   return (
     <div className="botbar">
       {wsName && <button className={`bb-pill ${inFloors ? "on" : ""}`} title="Andares" onClick={onFloors} data-testid="ws-pill"><Layers size={15} /><span className="bb-name">{inFloors ? "Floors" : wsName}</span></button>}
-      {agents.slice(0, 5).map((a) => <button key={a} className="bb-circle" title={`${a} — Agent Usage`} onClick={onUsage}><AgentIcon id={a} size={20} /></button>)}
-      {agents.length === 0 && <button className="bb-circle" title="Agent Usage" onClick={onUsage}><Activity size={15} /></button>}
+      {shownAgents.slice(0, 5).map((a) => <button key={a} className="bb-circle" title={`${a} — Agent Usage`} data-testid="bb-agent" onClick={onUsage}><AgentIcon id={a} size={20} /></button>)}
+      {usageOn && shownAgents.length === 0 && <button className="bb-circle" title="Agent Usage" data-testid="bb-usage" onClick={onUsage}><Activity size={15} /></button>}
       <button className="bb-circle" title={`Tema: ${THEME_LABEL[pref]} (clique alterna Sistema → Claro → Escuro)`} data-testid="theme-toggle" onClick={() => setThemePref(nextTheme(pref))}><ThemeIcon size={15} /></button>
       <button className={`bb-circle ${hud ? "on" : ""}`} title={hud ? "Companheiro: fechar janela flutuante" : "Companheiro: abrir janela flutuante (agentes que terminaram, resumo e próximo passo)"} data-testid="hud-toggle" onClick={onHud}><Sparkles size={15} /></button>
       <button className="bb-circle" title="Minimapa (Ctrl+Shift+M)" onClick={() => setMinimap(!minimap)}><MapIcon size={15} /></button>
@@ -134,6 +138,9 @@ function Canvas({ conn }: { conn: Connection }) {
   const [overview, setOverview] = useState<string | null>(null); // id do térreo
   const groundOf = (id: string | null): Workspace | null => { const w = side.workspaces.find((x) => x.workspaceId === id); if (!w) return null; return w.parentId ? side.workspaces.find((x) => x.workspaceId === w.parentId) ?? null : w; };
   const loadRoles = useCallback(() => api.roles().then((r) => setRoles((old) => (JSON.stringify(old) === JSON.stringify(r) ? old : r))).catch(() => {}), [api]);
+  const [skills, setSkills] = useState<Skill[]>([]); // #57
+  const loadSkills = useCallback(() => api.skills().then((r) => setSkills((old) => (JSON.stringify(old) === JSON.stringify(r) ? old : r))).catch(() => {}), [api]);
+  useEffect(() => { void loadSkills(); const t = setInterval(() => void loadSkills(), 4000); return () => clearInterval(t); }, [loadSkills]);
   useEffect(() => { void loadRoles(); const t = setInterval(() => void loadRoles(), 4000); return () => clearInterval(t); }, [loadRoles]);
   useEffect(() => { if (dialog || rolesDialog) void loadRoles(); }, [dialog, rolesDialog, loadRoles]);
   const chatRef = useRef<string | null>(null); useEffect(() => { chatRef.current = chatFor; }, [chatFor]);
@@ -220,6 +227,7 @@ function Canvas({ conn }: { conn: Connection }) {
             chatOpen: chatFor === n.nodeId, onChatClose: () => setChatFor(null),
             ...(n.roleId && roles.find((r) => r.roleId === n.roleId) ? { role: roles.find((r) => r.roleId === n.roleId)! } : {}), roles,
             onSetRole: (roleId: string | null) => void mutate((r) => api.patchNode(n.nodeId, { expectedRevision: r, roleId })), onManageRoles: () => setRolesDialog(true),
+            skills, ...(n.skillIds ? { skillIds: n.skillIds } : {}), onSetSkills: (skillIds: string[]) => void mutate((r) => api.patchNode(n.nodeId, { expectedRevision: r, skillIds })), onManageSkills: () => { setPref("agentsSub", "skills"); setPref("prefsTab", "agents"); setPrefsOpen(true); }, // #57
             onResume: () => void api.restart(n.nodeId).catch(() => {}),
             onFocus: () => { focusedTerm.current = n.nodeId; if (composerRef.current && composerRef.current !== n.nodeId) setComposerFor(n.nodeId); },
             targets: snap.nodes.filter((o) => o.nodeId !== n.nodeId && o.kind !== "text").map((o) => ({ id: o.nodeId, kind: o.kind as "terminal" | "note", title: o.title, connected: (snap.connections ?? []).some((c) => (c.sourceNodeId === n.nodeId && c.targetNodeId === o.nodeId) || (c.targetNodeId === n.nodeId && c.sourceNodeId === o.nodeId)) })) }
@@ -244,7 +252,7 @@ function Canvas({ conn }: { conn: Connection }) {
       };
       return { id: c.connectionId, type: style, source: c.sourceNodeId, target: c.targetNodeId, deletable: true, data, ...(wasSelected ? { selected: true } : {}) };
     }));
-  }, [snap, composerFor, chatFor, roles, renameSig]);
+  }, [snap, composerFor, chatFor, roles, skills, renameSig]);
 
   /** Seleciona um nó e o traz para a vista. */
   const selectNode = (id: string) => {
@@ -570,7 +578,9 @@ function Canvas({ conn }: { conn: Connection }) {
         {floorDialog && <FloorDialog ground={floorDialog} onSubmit={(i) => void submitFloor(floorDialog, i)} onClose={() => setFloorDialog(null)} />}
         {overview && groundOf(overview) && <FloorOverview ground={groundOf(overview)!} floors={side.workspaces.filter((w) => w.parentId === overview)} current={current} terminals={side.terminals} api={api}
           onOpen={(id) => { setCurrent(id); setOverview(null); }} onNew={() => { setFloorDialog(groundOf(overview)!); }} onClose={() => setOverview(null)} onChanged={() => void refreshList()} onError={toast} />}
-        {prefsOpen && <Preferences api={api} onClose={() => setPrefsOpen(false)} onPresetsChanged={() => void api.presets().then(setPresets).catch(() => {})} />}
+        {prefsOpen && <Preferences api={api} onClose={() => setPrefsOpen(false)} onPresetsChanged={() => void api.presets().then(setPresets).catch(() => {})}
+          workspaceCwd={snap?.workspace.cwd ?? ""} onRolesChanged={() => { void loadRoles(); void loadSkills(); }} onOpenUsage={() => { setPrefsOpen(false); setUsage(true); }}
+          onOpenTerminal={(t) => { if (!current) { toast("Abra um espaço para criar o terminal de login"); return; } setPrefsOpen(false); createTerminal(freeSpot(snap?.nodes ?? [], SIZE.terminal), { title: t.title, command: t.command }); }} />}
         {rolesDialog && <RolesDialog api={api} workspaceCwd={snap?.workspace.cwd ?? ""} onClose={() => setRolesDialog(false)} onChanged={() => void loadRoles()} />}
         <ReactFlow nodes={flow} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onNodeDragStart={onNodeDragStart} onNodeDragStop={onNodeDragStop} onEdgesChange={onEdgesChange} onConnect={onConnect} onEdgesDelete={onEdgesDelete}
           onNodeClick={(_, n) => { if (linkingRef.current) finishLink(n.id); }} onPaneClick={() => { if (linkingRef.current) setLinking(null); if (selDrawingsRef.current.size) setSelDrawings(new Set()); }}

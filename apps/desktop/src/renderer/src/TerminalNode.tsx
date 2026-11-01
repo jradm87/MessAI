@@ -18,10 +18,10 @@ import { onTheme, cssVar } from "./theme.js";
 import { EditableTitle } from "./EditableTitle.js";
 import { Composer, type MentionTarget } from "./Composer.js";
 import { ChatLayer } from "./ChatLayer.js";
-import type { ChatMessage, Role } from "@messai/contracts";
+import type { ChatMessage, Role, Skill } from "@messai/contracts";
 
 export type NodeExtras = { onLink: () => void; linkCount: number; onChat: () => void; onRaise: () => void };
-export type ComposerExtras = { composerOpen: boolean; onComposerClose: () => void; onFocus: () => void; workspaceId: string; targets: MentionTarget[]; chatOpen: boolean; onChatClose: () => void; role?: Role; roles: Role[]; onSetRole: (roleId: string | null) => void; onManageRoles: () => void };
+export type ComposerExtras = { composerOpen: boolean; onComposerClose: () => void; onFocus: () => void; workspaceId: string; targets: MentionTarget[]; chatOpen: boolean; onChatClose: () => void; role?: Role; roles: Role[]; onSetRole: (roleId: string | null) => void; onManageRoles: () => void; skills?: Skill[]; skillIds?: string[]; onSetSkills?: (ids: string[]) => void; onManageSkills?: () => void };
 export type Appearance = { icon?: string | null; color?: string | null; termTheme?: TermTheme | null };
 export type TerminalData = { title: string; sessionId: string; api: Api; stream: Stream; onDelete: () => void; onRename: (t: string) => void; onResume: () => void; editSignal?: number; icon?: string; color?: string; termTheme?: string; onAppearance: (p: Appearance) => void } & NodeExtras & ComposerExtras;
 const THEMES: { id: TermTheme; label: string }[] = [{ id: "system", label: "Sistema" }, { id: "dark", label: "Escuro" }, { id: "light", label: "Claro" }, { id: "custom", label: "Custom" }];
@@ -162,13 +162,17 @@ export function TerminalNode({ id, data, selected }: NodeProps & { data: Termina
         {attention && <span className="dot" title={finishedAt ? `concluiu e espera você (${new Date(finishedAt).toLocaleTimeString()})${summary ? `\n${summary.summary}\nPróximo passo: ${summary.nextStep}` : ""} — Ctrl+Shift+A` : "precisa de atenção (Ctrl+Shift+A)"} />}
         <EditableTitle value={data.title} onSave={data.onRename} editSignal={data.editSignal ?? 0} />
         <span className={`role-pill nodrag ${data.role ? "" : "none"}`} title={data.role ? `Papel: ${data.role.name}\n${data.role.instructions.slice(0, 200)}` : "Sem papel (clique para atribuir)"} data-testid="role-pill" onClick={(e) => { e.stopPropagation(); setRoleMenu((v) => !v); }}>
-          {data.role ? <><span className="role-badge">{data.role.badge || data.role.name.slice(0, 2).toUpperCase()}</span>{data.role.name}</> : "papel"}
+          {data.role ? <><span className="role-badge">{data.role.badge || data.role.name.slice(0, 2).toUpperCase()}</span>{data.role.name}</> : "papel"}{data.skillIds?.length ? <span className="sk-count" title={`${data.skillIds.length} habilidade(s) anexada(s)`}>+{data.skillIds.length}</span> : null}
         </span>
         {roleMenu && (
           <div className="menu role-menu nodrag" onMouseLeave={() => setRoleMenu(false)}>
             <div className={`mi ${!data.role ? "on" : ""}`} onClick={() => { setRoleMenu(false); data.onSetRole(null); }}>Sem papel</div>
             {data.roles.map((r) => <div key={r.roleId} className={`mi ${data.role?.roleId === r.roleId ? "on" : ""}`} onClick={() => { setRoleMenu(false); data.onSetRole(r.roleId); }}><span className="role-badge">{r.badge}</span>{r.name}</div>)}
             <hr /><div className="mi" onClick={() => { setRoleMenu(false); data.onManageRoles(); }}>Gerenciar…</div>
+            <hr /><div className="mi mut sk-head">Habilidades {data.skillIds?.length ? `(${data.skillIds.length})` : ""}</div>
+            {(data.skills ?? []).map((k) => { const on = (data.skillIds ?? []).includes(k.skillId); return <div key={k.skillId} className={`mi ${on ? "on" : ""}`} title={k.description || k.instructions.slice(0, 120)} data-testid={`skill-toggle-${k.skillId}`} onClick={() => data.onSetSkills?.(on ? (data.skillIds ?? []).filter((x) => x !== k.skillId) : [...(data.skillIds ?? []), k.skillId])}><input type="checkbox" readOnly checked={on} tabIndex={-1} /> {k.name}</div>; })}
+            {(data.skills ?? []).length === 0 && <div className="mi mut">nenhuma habilidade criada</div>}
+            <div className="mi" onClick={() => { setRoleMenu(false); data.onManageSkills?.(); }}>Gerenciar habilidades…</div>
           </div>
         )}
         <span className={`st ${state}`} title={`${state}${session?.pid ? ` · pid ${session.pid}` : ""}${session?.lease ? (mine ? " · você controla" : " · observando") : ""}`}>

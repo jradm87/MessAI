@@ -23,6 +23,10 @@ export const DEFAULTS = {
   termMemLimit: true, // limitar histórico (scrollback) por terminal
   termScrollback: 2000,
   termCopyOnSelect: false,
+  // #57/#38 Agentes
+  agentsSub: "roles", // sub-aba lembrada
+  usageEnabled: true, // Agent Usage (ícones na barra + painel)
+  usageDisabled: "", // ids de provedores escondidos do uso, separados por vírgula
 } as const;
 export type Prefs = { -readonly [K in keyof typeof DEFAULTS]: (typeof DEFAULTS)[K] extends string ? string : (typeof DEFAULTS)[K] extends number ? number : boolean };
 export type PrefKey = keyof Prefs;
