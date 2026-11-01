@@ -5,7 +5,7 @@ import type { WebSocket } from "ws";
 import {
   BUILD_VERSION, PROTOCOL_VERSION, SendMessage, Ask, CreateConnection, CreateDrawing, CreateNode, CreateWorkspace, DeleteNode, PatchNode, PatchWorkspace, ApplyLayout, WsClientMessage,
   type Capabilities, type WsServerMessage, type ApiError,
- CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, FsOp } from "@messai/contracts";
+ CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, FsOp, PatchRuntimeSettings } from "@messai/contracts";
 import type { Result } from "@messai/domain";
 import { newId, type Config } from "./config.js";
 import { accessSync, constants } from "node:fs";
@@ -112,6 +112,9 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
   });
 
   // papéis (responsabilidades)
+  // #55 — configurações do runtime (persistidas; valem para todos os clientes desta máquina)
+  app.get("/v1/settings", async () => svc.settings());
+  app.patch("/v1/settings", async (req, reply) => { const b = body<PatchRuntimeSettings>(PatchRuntimeSettings, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.patchSettings(b)); });
   app.get("/v1/roles", async () => svc.listRoles());
   app.post("/v1/roles", async (req, reply) => { const b = body<CreateRole>(CreateRole, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.createRole(b), 201); });
   app.patch<{ Params: { id: string } }>("/v1/roles/:id", async (req, reply) => { const b = body<PatchRole>(PatchRole, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.patchRole(req.params.id, b)); });

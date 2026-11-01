@@ -500,3 +500,7 @@ button.danger:hover { border-color: var(--danger); color: var(--danger-fg); }
 .seg { display: inline-flex; background: var(--pop-2); border: 1px solid var(--line); border-radius: 8px; padding: 2px; gap: 2px; }
 .seg button { display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; padding: 4px 10px; border-radius: 6px; font-size: 12px; color: var(--fg); }
 .seg button:hover { background: var(--hover-2); } .seg button.on { background: var(--acc); color: var(--on-acc); }
+/* #55 — cursor: "web" (padrão) usa mão em botões/menus; "native" deixa a seta do SO */
+:root[data-cursor="native"] button, :root[data-cursor="native"] .mi, :root[data-cursor="native"] .tb, :root[data-cursor="native"] select, :root[data-cursor="native"] .switch, :root[data-cursor="native"] .seg button, :root[data-cursor="native"] .side li { cursor: default; }
+.pf-field select { width: auto; min-width: 190px; }
+.pf-status { font-size: 11px; color: var(--mut); }

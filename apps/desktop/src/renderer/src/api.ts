@@ -1,4 +1,4 @@
-import type { ApiError, CompanionConfig, TaskSummary, TreeEntry, FileContent, FsOp, SearchHit, CreateFloor, LandFloor, LandResult, PatchConnection, Role, CreateRole, PatchRole, ChatMessage, SendChat, Attachment, CreateAttachment, FileEntry, Connection as WsConnection, CreateDrawing, PatchDrawing, GroupDrawings, CreateFolder, CreateNode, CreateWorkspace, Drawing, Folder, Geometry, PatchFolder, PatchWorkspace, Preset, Node, PatchNode, Session, Sidebar, Workspace, WorkspaceSnapshot, WsClientMessage, WsServerMessage } from "@messai/contracts";
+import type { ApiError, CompanionConfig, RuntimeSettings, PatchRuntimeSettings, TaskSummary, TreeEntry, FileContent, FsOp, SearchHit, CreateFloor, LandFloor, LandResult, PatchConnection, Role, CreateRole, PatchRole, ChatMessage, SendChat, Attachment, CreateAttachment, FileEntry, Connection as WsConnection, CreateDrawing, PatchDrawing, GroupDrawings, CreateFolder, CreateNode, CreateWorkspace, Drawing, Folder, Geometry, PatchFolder, PatchWorkspace, Preset, Node, PatchNode, Session, Sidebar, Workspace, WorkspaceSnapshot, WsClientMessage, WsServerMessage } from "@messai/contracts";
 
 export type Connection = { baseUrl: string; wsUrl: string; token: string; homeDir?: string };
 export type RunningEntry = { title: string; agentType: string; isAgent: boolean; workspace: string };
@@ -10,7 +10,11 @@ declare global { interface Window { messai: {
   hudToggle?: (open?: boolean) => Promise<boolean>; hudState?: () => Promise<boolean>; onHudState?: (cb: (open: boolean) => void) => () => void;
   hudFocus?: (target: FocusTarget) => Promise<void>; onFocusNode?: (cb: (target: FocusTarget) => void) => () => void;
   hudDismiss?: (nodeId: string) => Promise<void>; onHudDismiss?: (cb: (nodeId: string) => void) => () => void;
+  // #55 — preferências que vivem no processo principal
+  setUiPrefs?: (p: UiPrefs) => Promise<UiPrefsState>; uiPrefsState?: () => Promise<UiPrefsState>;
 } } }
+export type UiPrefs = { powerMode: string; confirmExit: boolean; closeToTray: boolean };
+export type UiPrefsState = UiPrefs & { powerBlocking: boolean };
 
 export class ApiClientError extends Error { constructor(readonly error: ApiError, readonly status: number) { super(error.message); } }
 
@@ -32,6 +36,8 @@ export class Api {
   agentUsage() { return this.req<{ agents: { id: string; label: string; available: boolean; note?: string; plan?: string; limits?: { label: string; pct: number; resets: string }[]; metrics: { label: string; value: string }[]; models: { name: string; input: number; output: number }[] }[] }>("GET", "/v1/agent-usage"); }
   capabilities() { return this.req<{ features: string[] }>("GET", "/v1/capabilities"); }
   companion() { return this.req<CompanionConfig>("GET", "/v1/companion"); }
+  settings() { return this.req<RuntimeSettings>("GET", "/v1/settings"); }
+  patchSettings(p: PatchRuntimeSettings) { return this.req<RuntimeSettings>("PATCH", "/v1/settings", p); }
   summarize(nodeId: string) { return this.req<TaskSummary>("POST", "/v1/companion/summarize", { nodeId }); }
   presets() { return this.req<Preset[]>("GET", "/v1/presets"); }
   listWorkspaces() { return this.req<Workspace[]>("GET", "/v1/workspaces"); }

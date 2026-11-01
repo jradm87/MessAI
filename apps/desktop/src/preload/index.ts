@@ -16,4 +16,7 @@ contextBridge.exposeInMainWorld("messai", {
   onFocusNode: (cb: (target: { workspaceId: string; nodeId: string }) => void) => on<{ workspaceId: string; nodeId: string }>("mess:focus-node", cb),
   hudDismiss: (nodeId: string): Promise<void> => ipcRenderer.invoke("mess:hud-dismiss", nodeId),
   onHudDismiss: (cb: (nodeId: string) => void) => on<string>("mess:hud-dismiss", cb),
+  // #55 — preferências que vivem no processo principal (energia, confirmação ao sair, bandeja)
+  setUiPrefs: (p: { powerMode: string; confirmExit: boolean; closeToTray: boolean }): Promise<unknown> => ipcRenderer.invoke("mess:ui-prefs", p),
+  uiPrefsState: (): Promise<unknown> => ipcRenderer.invoke("mess:ui-prefs-state"),
 });

@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App.js";
 import { Hud } from "./Hud.js";
 import { initTheme, onTheme, getEffectiveTheme } from "./theme.js";
+import { initUiPrefs } from "./ui-prefs.js";
 import { store, themeAtom } from "./atoms.js";
 import "./styles.css";
 
@@ -15,6 +16,7 @@ if (isHud) { document.documentElement.dataset["hud"] = "1"; document.title = "Me
 initTheme();
 store.set(themeAtom, getEffectiveTheme());
 onTheme((t) => store.set(themeAtom, t));
+if (!isHud) initUiPrefs(); // #55: cursor + prefs que vivem no processo principal (energia, saída, bandeja)
 
 // Remove o splash estático (index.html) com um fade curto quando o conteúdo React já está pronto.
 const dropSplash = () => { const s = document.getElementById("splash"); if (s) { s.style.opacity = "0"; setTimeout(() => s.remove(), 250); } };

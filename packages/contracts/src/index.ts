@@ -2,7 +2,7 @@ import { Type, type Static } from "@sinclair/typebox";
 
 export const PROTOCOL_VERSION = 1 as const;
 /** Incrementar a cada mudança de snapshot/rotas; o cliente avisa quando o runtime está atrás. */
-export const BUILD_VERSION = 16 as const;
+export const BUILD_VERSION = 17 as const;
 
 // ---------- Identidades ----------
 export const Id = Type.String({ minLength: 8, maxLength: 64 });
@@ -224,6 +224,14 @@ export const CompanionConfig = Type.Object({
   model: Type.Union([Type.String(), Type.Null()]), models: Type.Array(Type.String()),
 });
 export type CompanionConfig = Static<typeof CompanionConfig>;
+
+// Configurações do runtime (#55): valem entre sessões, para todos os clientes desta máquina (persistidas no banco).
+export const RuntimeSettings = Type.Object({
+  restoreSessions: Type.Boolean(), // re-abrir sessões persistentes após reboot (ADR-0010); tmux vivo sempre reanexa
+});
+export type RuntimeSettings = Static<typeof RuntimeSettings>;
+export const PatchRuntimeSettings = Type.Partial(RuntimeSettings);
+export type PatchRuntimeSettings = Static<typeof PatchRuntimeSettings>;
 
 export const SendMessage = Type.Object({
   to: Type.String({ minLength: 1 }), // nodeId, prefixo de id ou título

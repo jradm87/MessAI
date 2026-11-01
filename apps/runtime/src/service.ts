@@ -1,4 +1,5 @@
 import { AGENT_ENV, type TreeEntry, type FileContent, type FsOp, type SearchHit, type CreateFloor, type LandFloor, type LandResult, type Role, type CreateRole, type PatchRole, type ChatMessage, type SendChat, type Attachment, type CreateAttachment, type FileEntry, type Connection, type CreateConnection, type PatchConnection, type CreateDrawing, type PatchDrawing, type GroupDrawings, type CreateFolder, type CreateNode, type Drawing, type Folder, type Message, type PatchFolder, type SendMessage, type Sidebar, type CreateWorkspace, type Node, type PatchNode, type PatchWorkspace, type Session, type Workspace, type WorkspaceSnapshot, type TaskFinished, type TaskSummary } from "@messai/contracts";
+import type { RuntimeSettings, PatchRuntimeSettings } from "@messai/contracts";
 import { applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, canMessage, checkRevision, formatDelivery, normalizeGeometry, planLocalTerminal, resolveNodeRef, validateNewNode, agentKind, agentResume, stripAnsi, fail, succeed, type Result } from "@messai/domain";
 import { randomUUID } from "node:crypto";
 import { Companion } from "./companion.js";
@@ -692,22 +693,31 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     return s.persistent ? wrapInTmux(plan, tmuxSessionName(s.sessionId), { ...inject, PATH: baseEnv["PATH"]! }, this.cfg.tmuxSocket) : plan;
   }
   /** Reinicia o processo de um nó terminal cuja sessão saiu ou se perdeu. Mesmo sessionId. */
+  // #55 — configurações do runtime, persistidas na tabela meta (chave `settings.<nome>`).
+  settings(): RuntimeSettings { return { restoreSessions: this.store.getMeta("settings.restoreSessions") !== "0" }; }
+  patchSettings(p: PatchRuntimeSettings): Result<RuntimeSettings> {
+    if (p.restoreSessions !== undefined) this.store.setMeta("settings.restoreSessions", p.restoreSessions ? "1" : "0");
+    return succeed(this.settings());
+  }
+
   /** Na subida: reanexa sessões tmux que sobreviveram ao runtime anterior; as demais viram `lost`. */
   /**
    * Restaura o workspace no boot (à prova de reboot): o banco é a verdade do que deve estar aberto.
    * tmux vivo (reinício do runtime) → reanexa; tmux morto (reboot / "Encerrar tudo") → RE-SOBE. Agente
    * com id guardado → retoma a conversa (claude --resume etc.); shell/sem-id → reabre limpo.
    */
-  recoverPersistent(): { reattached: number; respawned: number; lost: number } {
-    let reattached = 0, respawned = 0, lost = 0;
+  recoverPersistent(): { reattached: number; respawned: number; lost: number; skipped: number } {
+    let reattached = 0, respawned = 0, lost = 0, skipped = 0;
+    const restore = this.settings().restoreSessions; // #55: desligado → não RE-SOBE após reboot (tmux vivo ainda reanexa)
     for (const s of this.store.listSessions()) {
       if (!s.persistent || (s.state !== "running" && s.state !== "starting")) continue;
       const node = this.store.getNode(s.nodeId); const w = node && this.store.getWorkspace(node.workspaceId);
       if (!node || !w) { this.store.updateSession(s.sessionId, { state: "lost", pid: null }); lost++; continue; }
       if (this.sessions.tmuxAlive(s.sessionId)) { this.sessions.start({ ...s, state: "starting" }, this.plan(w, node, s)); reattached++; }
+      else if (!restore) { this.store.updateSession(s.sessionId, { state: "lost", pid: null }); skipped++; }
       else { const r = this.resumeSession(s); this.sessions.start({ ...r, state: "starting" }, this.plan(w, node, r)); respawned++; }
     }
-    return { reattached, respawned, lost };
+    return { reattached, respawned, lost, skipped };
   }
 
   /**

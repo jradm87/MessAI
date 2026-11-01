@@ -7,10 +7,14 @@ import { join } from "node:path";
 
 // #64 — janela de Preferências: engrenagem abre, abas (a última fica lembrada), Esc/Ctrl+, fecham/alternam,
 // seletor de tema na aba Geral aplica `data-theme` e sincroniza com o botão da barra inferior (#54).
+// #55 — Geral: cursor (data-cursor), evitar suspensão (inibidor real no processo principal), restaurar sessões
+// (config do runtime), fechar para a bandeja (esconde em vez de fechar) e sair sem confirmação.
 const ROOT = join(import.meta.dirname, "../..");
 const PORT = 47959;
 let dataDir: string; let runtime: ChildProcess; let app: ElectronApplication; let page: Page; let token: string;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const api = async (path: string) => (await fetch(`http://127.0.0.1:${PORT}${path}`, { headers: { authorization: `Bearer ${token}` } })).json();
+const mainState = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((w) => ({ url: w.webContents.getURL(), visible: w.isVisible(), destroyed: w.isDestroyed() })));
 
 beforeAll(async () => {
   dataDir = mkdtempSync(join(tmpdir(), "mess-prefs-"));
@@ -68,4 +72,54 @@ describe("Preferências (#64)", () => {
     await page.keyboard.press("Control+,");
     await page.waitForSelector('[data-testid="prefs"]', { state: "detached" });
   }, 20_000);
+});
+
+describe("Preferências → Geral (#55)", () => {
+  it("cursor web/nativo aplica data-cursor; Evitar suspensão liga/desliga o inibidor real; Restaurar sessões grava no runtime", async () => {
+    await page.click('[data-testid="settings"]');
+    await page.waitForSelector('[data-testid="prefs-pane-general"]');
+    expect(await page.evaluate(() => document.documentElement.getAttribute("data-cursor"))).toBe("web");
+    await page.click('[data-testid="pref-cursor"]');
+    await page.waitForFunction(() => document.documentElement.getAttribute("data-cursor") === "native");
+    await page.click('[data-testid="pref-cursor"]');
+    await page.waitForFunction(() => document.documentElement.getAttribute("data-cursor") === "web");
+    // energia: Sempre → inibidor ativo no processo principal; Nunca → inativo
+    await page.click('[data-testid="power-always"]');
+    await page.waitForFunction(async () => (await window.messai.uiPrefsState!()).powerBlocking === true, undefined, { timeout: 5000 });
+    await page.waitForSelector('[data-testid="power-status"]:has-text("ativo agora")');
+    await page.click('[data-testid="power-never"]');
+    await page.waitForFunction(async () => (await window.messai.uiPrefsState!()).powerBlocking === false, undefined, { timeout: 5000 });
+    // restaurar sessões: config do runtime
+    await page.waitForSelector('[data-testid="pref-restore"][aria-checked="true"]');
+    await page.click('[data-testid="pref-restore"]');
+    await page.waitForSelector('[data-testid="pref-restore"][aria-checked="false"]');
+    for (let i = 0; i < 20 && ((await api("/v1/settings")) as { restoreSessions: boolean }).restoreSessions; i++) await sleep(150);
+    expect(((await api("/v1/settings")) as { restoreSessions: boolean }).restoreSessions).toBe(false);
+    await page.click('[data-testid="pref-restore"]');
+    for (let i = 0; i < 20 && !((await api("/v1/settings")) as { restoreSessions: boolean }).restoreSessions; i++) await sleep(150);
+    expect(((await api("/v1/settings")) as { restoreSessions: boolean }).restoreSessions).toBe(true);
+    const prefs = JSON.parse(await page.evaluate(() => localStorage.getItem("mess.prefs") ?? "{}") as string) as Record<string, unknown>;
+    expect(prefs).toMatchObject({ webCursor: true, powerMode: "never" });
+  }, 30_000);
+
+  it("Fechar para a bandeja: fechar a janela só a esconde; depois, sem confirmação ao sair, fechar encerra de verdade", async () => {
+    await page.click('[data-testid="pref-tray"]');
+    await page.waitForFunction(async () => (await window.messai.uiPrefsState!()).closeToTray === true, undefined, { timeout: 5000 });
+    await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows().find((w) => !w.webContents.getURL().endsWith("#hud"))!.close(); });
+    await sleep(600);
+    let st = await mainState();
+    expect(st.length, "janela deveria continuar existindo (escondida)").toBe(1);
+    expect(st[0]!.visible).toBe(false);
+    await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows()[0]!.show(); });
+    await sleep(300);
+    st = await mainState(); expect(st[0]!.visible).toBe(true);
+    // desliga bandeja e confirmação → fechar encerra sem tela de encerramento (runtime fica)
+    await page.click('[data-testid="pref-tray"]');
+    await page.click('[data-testid="pref-confirm-exit"]');
+    await page.waitForFunction(async () => { const s = await window.messai.uiPrefsState!(); return s.closeToTray === false && s.confirmExit === false; }, undefined, { timeout: 5000 });
+    const exited = new Promise<void>((r) => { app.process().once("exit", () => r()); });
+    await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows()[0]!.close(); });
+    await Promise.race([exited, sleep(8000).then(() => { throw new Error("app não encerrou ao fechar sem confirmação"); })]);
+    expect((await fetch(`http://127.0.0.1:${PORT}/v1/health`, { headers: { authorization: `Bearer ${token}` } })).ok).toBe(true); // runtime continua
+  }, 30_000);
 });

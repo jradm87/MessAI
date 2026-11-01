@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, screen, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, powerSaveBlocker, screen, shell, Tray } from "electron";
 import electronUpdater from "electron-updater";
 import { spawn, execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, openSync, readFileSync, readdirSync, readlinkSync, writeFileSync } from "node:fs";
@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BUILD_VERSION } from "@messai/contracts";
+import { parsePowerMode, shouldBlock, type PowerMode } from "./power.js";
 
 const DATA_DIR = process.env["MESS_DATA_DIR"] ?? join(homedir(), ".messai");
 const PORT = Number(process.env["MESS_PORT"] ?? 47821);
@@ -137,7 +138,13 @@ function load(win: BrowserWindow, hash?: string): void {
 function createWindow(): void {
   const win = new BrowserWindow({ width: 1400, height: 900, title: "MessAI", webPreferences: WEB_PREFS });
   mainWin = win;
-  win.on("close", (e) => { if (!allowClose) { e.preventDefault(); void promptShutdown(); } });
+  win.on("close", (e) => {
+    if (allowClose) return;
+    e.preventDefault();
+    if (uiPrefs.closeToTray) { ensureTray(); win.hide(); return; } // #55: fechar para a bandeja (runtime e agentes seguem)
+    if (!uiPrefs.confirmExit) { allowClose = true; win.close(); return; } // #55: sem confirmação — fecha; runtime continua em segundo plano
+    void promptShutdown();
+  });
   win.on("closed", () => { mainWin = null; closeHud(); }); // o HUD não vive sem a janela principal
   wire(win, "renderer");
   load(win);
@@ -189,12 +196,63 @@ ipcMain.handle("mess:hud-state", () => hudOpen());
 // "Ir ao terminal" no HUD: traz a janela principal e pede para ela trocar de espaço e selecionar o nó.
 ipcMain.handle("mess:hud-focus", (_e, target: { workspaceId: string; nodeId: string }) => {
   if (!mainWin || mainWin.isDestroyed() || typeof target?.workspaceId !== "string" || typeof target?.nodeId !== "string") return;
-  if (mainWin.isMinimized()) mainWin.restore();
-  mainWin.show(); mainWin.focus();
+  showMain();
   mainWin.webContents.send("mess:focus-node", { workspaceId: target.workspaceId, nodeId: target.nodeId });
 });
 // Usuário focou o terminal na janela principal: o cartão correspondente sai do HUD.
 ipcMain.handle("mess:hud-dismiss", (_e, nodeId: string) => { if (hudOpen() && typeof nodeId === "string") hudWin!.webContents.send("mess:hud-dismiss", nodeId); });
+
+/** Traz a janela principal (bandeja, HUD, SIGUSR2). */
+function showMain(): void { if (!mainWin || mainWin.isDestroyed()) return; if (mainWin.isMinimized()) mainWin.restore(); mainWin.show(); mainWin.focus(); }
+
+// #55 — preferências de UI que precisam do processo principal: energia (inibidor de sleep), saída do app, bandeja.
+const uiPrefs: { powerMode: PowerMode; confirmExit: boolean; closeToTray: boolean } = { powerMode: "never", confirmExit: true, closeToTray: false };
+let blockerId: number | null = null; let agentsRunning = false; let agentsPoll: ReturnType<typeof setInterval> | undefined;
+const powerBlocking = () => blockerId !== null && powerSaveBlocker.isStarted(blockerId);
+/** Segura/solta o inibidor "prevent-app-suspension": o sistema não dorme, mas a tela pode apagar normalmente. */
+function applyPower(): void {
+  const want = shouldBlock(uiPrefs.powerMode, agentsRunning);
+  if (want && !powerBlocking()) blockerId = powerSaveBlocker.start("prevent-app-suspension");
+  else if (!want && blockerId !== null) { powerSaveBlocker.stop(blockerId); blockerId = null; }
+}
+async function pollAgents(): Promise<void> {
+  try {
+    const r = await fetch(`${BASE}/v1/running`, { headers: { authorization: `Bearer ${readToken()}` }, signal: AbortSignal.timeout(1500) });
+    agentsRunning = r.ok && ((await r.json()) as { sessions: { isAgent: boolean }[] }).sessions.some((s) => s.isAgent);
+  } catch { agentsRunning = false; }
+  applyPower();
+}
+function syncAgentsPoll(): void {
+  if (uiPrefs.powerMode === "agents") { if (!agentsPoll) { agentsPoll = setInterval(() => void pollAgents(), 15_000); void pollAgents(); } }
+  else if (agentsPoll) { clearInterval(agentsPoll); agentsPoll = undefined; agentsRunning = false; }
+}
+const uiState = () => ({ ...uiPrefs, powerBlocking: powerBlocking() });
+ipcMain.handle("mess:ui-prefs", (_e, p: { powerMode?: unknown; confirmExit?: unknown; closeToTray?: unknown }) => {
+  uiPrefs.powerMode = parsePowerMode(p?.powerMode);
+  if (typeof p?.confirmExit === "boolean") uiPrefs.confirmExit = p.confirmExit;
+  if (typeof p?.closeToTray === "boolean") uiPrefs.closeToTray = p.closeToTray;
+  syncAgentsPoll(); applyPower();
+  if (!uiPrefs.closeToTray && tray && mainWin && !mainWin.isDestroyed() && mainWin.isVisible()) { tray.destroy(); tray = null; } // só mantém o ícone enquanto a opção vale
+  return uiState();
+});
+ipcMain.handle("mess:ui-prefs-state", () => uiState());
+
+// Bandeja (só quando "Fechar para a bandeja" está ligado e a janela foi escondida).
+let tray: Tray | null = null;
+const ICON = app.isPackaged ? join(process.resourcesPath, "icon.png") : join(here, "../../build/icon.png");
+function ensureTray(): void {
+  if (tray) return;
+  const img = nativeImage.createFromPath(ICON);
+  tray = new Tray(img.isEmpty() ? nativeImage.createEmpty() : img.resize({ width: 22, height: 22 }));
+  tray.setToolTip("MessAI — agentes continuam rodando");
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: "Abrir MessAI", click: () => showMain() },
+    { type: "separator" },
+    { label: "Encerrar o app (agentes continuam)", click: () => { allowClose = true; mainWin?.close(); } },
+    { label: "Encerrar tudo (para os agentes)", click: () => { void stopRuntime(true).catch(() => {}).then(() => { allowClose = true; mainWin?.close(); }); } },
+  ]));
+  tray.on("click", () => showMain());
+}
 
 ipcMain.handle("mess:connection", async (event) => {
   // Só os renderers das nossas janelas (principal e HUD) recebem a conexão.
@@ -238,4 +296,4 @@ app.whenReady().then(() => {
 });
 app.on("window-all-closed", () => app.quit()); // o runtime continua vivo
 // Ajuda de desenvolvimento: `kill -USR2 <pid>` traz a janela para frente.
-process.on("SIGUSR2", () => { if (mainWin) { if (mainWin.isMinimized()) mainWin.restore(); mainWin.show(); mainWin.focus(); } });
+process.on("SIGUSR2", () => showMain());

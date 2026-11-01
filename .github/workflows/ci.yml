@@ -3,7 +3,7 @@ name: ci
 # Gate de qualidade: build + testes determinísticos em todo push/PR (MESS-06).
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "auto/**"]
   pull_request:
   workflow_dispatch:
 

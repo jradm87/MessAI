@@ -8,6 +8,11 @@ import { useSyncExternalStore } from "react";
 export const PREFS_KEY = "mess.prefs";
 export const DEFAULTS = {
   prefsTab: "general", // última aba aberta na janela de Preferências
+  // #55 Geral
+  webCursor: true, // mão em botões/menus (web) vs seta nativa
+  powerMode: "never", // evitar suspensão: never | agents | always
+  confirmExit: true, // tela de encerramento ao fechar a janela
+  closeToTray: false, // fechar a janela esconde na bandeja (runtime e agentes seguem)
 } as const;
 export type Prefs = { -readonly [K in keyof typeof DEFAULTS]: (typeof DEFAULTS)[K] extends string ? string : (typeof DEFAULTS)[K] extends number ? number : boolean };
 export type PrefKey = keyof Prefs;

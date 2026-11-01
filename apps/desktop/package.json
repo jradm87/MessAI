@@ -28,6 +28,10 @@
       {
         "from": "resources",
         "to": "."
+      },
+      {
+        "from": "build/icon.png",
+        "to": "icon.png"
       }
     ],
     "npmRebuild": false,
