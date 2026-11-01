@@ -31,4 +31,6 @@ contextBridge.exposeInMainWorld("messai", {
   openExternal: (url: string): Promise<boolean> => ipcRenderer.invoke("mess:open-external", url),
   runtimeLogTail: (lines: number): Promise<string> => ipcRenderer.invoke("mess:runtime-log-tail", lines),
   saveText: (suggestedName: string, text: string): Promise<string | null> => ipcRenderer.invoke("mess:save-text", suggestedName, text),
+  // #62 — reinicia o runtime (após restaurar/mover/apagar dados)
+  runtimeRestart: (): Promise<boolean> => ipcRenderer.invoke("mess:runtime-restart"),
 });

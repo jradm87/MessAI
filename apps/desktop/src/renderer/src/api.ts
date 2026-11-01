@@ -17,8 +17,12 @@ declare global { interface Window { messai: {
   // #61 — auto-update
   updateState?: () => Promise<UpdateState>; updateCheck?: () => Promise<UpdateState>; updateInstall?: () => Promise<void>; onUpdateState?: (cb: (s: UpdateState) => void) => () => void;
   // #63 — Sobre
-  appInfo?: () => Promise<import("./diagnostics.js").AppInfo>; openExternal?: (url: string) => Promise<boolean>; runtimeLogTail?: (lines: number) => Promise<string>; saveText?: (suggestedName: string, text: string) => Promise<string | null>;
+  appInfo?: () => Promise<import("./diagnostics.js").AppInfo>;
+  // #62 — sobe o runtime de novo (depois de restaurar/mover/apagar) e devolve se ficou saudável
+  runtimeRestart?: () => Promise<boolean>; openExternal?: (url: string) => Promise<boolean>; runtimeLogTail?: (lines: number) => Promise<string>; saveText?: (suggestedName: string, text: string) => Promise<string | null>;
 } } }
+export type BackupEntry = { name: string; path: string; bytes: number; manifest: { createdAt: string; buildVersion: number; counts: { workspaces: number; nodes: number; notes: number }; source: string } | null };
+export type DataInfo = { dir: string; source: "env" | "pointer" | "default"; bytes: number; dbBytes: number; notesBytes: number; backupsBytes: number; backupsDir: string; counts: { workspaces: number; nodes: number; notes: number; sessions: number }; backups: BackupEntry[] };
 export type UiPrefs = { powerMode: string; confirmExit: boolean; closeToTray: boolean; updateAuto?: boolean };
 export type UpdateState = { supported: boolean; status: "unsupported" | "idle" | "checking" | "available" | "not-available" | "downloading" | "downloaded" | "error"; version?: string; percent?: number; error?: string; lastCheck?: string; current: string };
 export type UiPrefsState = UiPrefs & { powerBlocking: boolean };
@@ -44,6 +48,13 @@ export class Api {
   capabilities() { return this.req<{ features: string[] }>("GET", "/v1/capabilities"); }
   companion() { return this.req<CompanionConfig>("GET", "/v1/companion"); }
   settings() { return this.req<RuntimeSettings>("GET", "/v1/settings"); }
+  // #62 dados
+  dataInfo() { return this.req<DataInfo>("GET", "/v1/data"); }
+  createBackup(dir?: string) { return this.req<BackupEntry>("POST", "/v1/data/backup", dir ? { dir } : {}); }
+  deleteBackup(name: string) { return this.req<void>("DELETE", `/v1/data/backups/${encodeURIComponent(name)}`); }
+  restoreData(path: string) { return this.req<{ ok: boolean }>("POST", "/v1/data/restore", { path, confirm: "RESTAURAR" }); }
+  moveData(dir: string) { return this.req<{ ok: boolean }>("POST", "/v1/data/move", { dir, confirm: "MOVER" }); }
+  resetData() { return this.req<{ ok: boolean }>("POST", "/v1/data/reset", { confirm: "APAGAR" }); }
   // #57 skills · contas · #38 provedores
   skills() { return this.req<Skill[]>("GET", "/v1/skills"); }
   createSkill(input: CreateSkill) { return this.req<Skill>("POST", "/v1/skills", input); }

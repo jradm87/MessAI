@@ -9,6 +9,7 @@ import { PrefsShortcuts } from "./PrefsShortcuts.js";
 import { PrefsUpdates } from "./PrefsUpdates.js";
 import { PrefsAbout } from "./PrefsAbout.js";
 import { PrefsOpenSource } from "./PrefsOpenSource.js";
+import { PrefsData } from "./PrefsData.js";
 import type { AppInfo } from "./diagnostics.js";
 
 /**
@@ -111,7 +112,7 @@ export function Preferences({ api, onClose, onPresetsChanged, workspaceCwd, onRo
     : tab === "shortcuts" ? <PrefsShortcuts />
     : tab === "remote" ? <Soon issue={59} what="controle remoto e pareamento (depende do hub #28)" />
     : tab === "updates" ? <PrefsUpdates appVersion={appInfo?.version ?? "…"} buildVersion={appInfo?.buildVersion ?? 0} />
-    : tab === "data" ? <Soon issue={62} what="local dos dados, uso, backups e apagar" />
+    : tab === "data" ? <PrefsData api={api} />
     : tab === "opensource" ? <PrefsOpenSource />
     : <PrefsAbout api={api} appInfo={appInfo} />;
   return (

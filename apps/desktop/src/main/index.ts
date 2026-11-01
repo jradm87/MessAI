@@ -9,7 +9,13 @@ import { BUILD_VERSION } from "@messai/contracts";
 import { parsePowerMode, shouldBlock, type PowerMode } from "./power.js";
 import { applyUpdateEvent, friendlyUpdateError, initialUpdateState, type UpdateState } from "./updates.js";
 
-const DATA_DIR = process.env["MESS_DATA_DIR"] ?? join(homedir(), ".messai");
+/** Pasta de dados: MESS_DATA_DIR > ponteiro ~/.messai/datadir (#62 "Mudar…") > ~/.messai. Re-resolvida ao reiniciar o runtime. */
+function resolveDataDir(): string {
+  if (process.env["MESS_DATA_DIR"]) return process.env["MESS_DATA_DIR"];
+  try { const p = readFileSync(join(homedir(), ".messai", "datadir"), "utf8").trim(); if (p.startsWith("/")) return p; } catch { /* sem ponteiro */ }
+  return join(homedir(), ".messai");
+}
+let DATA_DIR = resolveDataDir();
 const PORT = Number(process.env["MESS_PORT"] ?? 47821);
 const BASE = `http://127.0.0.1:${PORT}`;
 const here = fileURLToPath(new URL(".", import.meta.url));
@@ -157,11 +163,11 @@ let hudWin: BrowserWindow | null = null;
 const HUD_W = 380, HUD_H = 480;
 const hudOpen = () => !!hudWin && !hudWin.isDestroyed();
 const broadcastHud = () => { if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send("mess:hud-state", hudOpen()); };
-const HUD_BOUNDS = join(DATA_DIR, "hud.json");
+const hudBoundsPath = () => join(DATA_DIR, "hud.json");
 /** Posição/tamanho salvos, só se ainda caem num monitor existente (multi-monitor / monitor desligado). */
 function savedHudBounds(): { x: number; y: number; width: number; height: number } | null {
   try {
-    const b = JSON.parse(readFileSync(HUD_BOUNDS, "utf8")) as { x: number; y: number; width: number; height: number };
+    const b = JSON.parse(readFileSync(hudBoundsPath(), "utf8")) as { x: number; y: number; width: number; height: number };
     if (![b.x, b.y, b.width, b.height].every((n) => Number.isFinite(n))) return null;
     const wa = screen.getDisplayMatching(b).workArea;
     const visible = b.x + b.width > wa.x + 40 && b.x < wa.x + wa.width - 40 && b.y >= wa.y - 10 && b.y < wa.y + wa.height - 40;
@@ -180,7 +186,7 @@ function openHud(): void {
   hudWin = win;
   // Lembra onde o usuário deixou a janela (debounce; `move`/`resize` são os eventos que existem no Linux).
   let saveT: ReturnType<typeof setTimeout> | undefined;
-  const save = () => { clearTimeout(saveT); saveT = setTimeout(() => { try { if (!win.isDestroyed()) writeFileSync(HUD_BOUNDS, JSON.stringify(win.getBounds())); } catch { /* disco cheio/sem permissão: só não lembra */ } }, 300); };
+  const save = () => { clearTimeout(saveT); saveT = setTimeout(() => { try { if (!win.isDestroyed()) writeFileSync(hudBoundsPath(), JSON.stringify(win.getBounds())); } catch { /* disco cheio/sem permissão: só não lembra */ } }, 300); };
   win.on("move", save); win.on("resize", save);
   win.setAlwaysOnTop(true, "floating");
   try { win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch { /* WM sem suporte */ }
@@ -306,6 +312,14 @@ ipcMain.handle("mess:openPath", async (_e, p: unknown) => {
   if (target !== root && !target.startsWith(root + sep)) return "só pastas dentro do diretório de dados do MessAI";
   try { mkdirSync(target, { recursive: true }); } catch { /* já existe / sem permissão: o openPath reporta */ }
   return shell.openPath(target);
+});
+// #62 — depois de restaurar/mover/apagar, o runtime saiu sozinho: re-resolve a pasta de dados e sobe outro.
+ipcMain.handle("mess:runtime-restart", async () => {
+  DATA_DIR = resolveDataDir();
+  for (let i = 0; i < 30 && (await runtimeHealth()).ok; i++) await new Promise((r) => setTimeout(r, 200)); // espera o antigo sair
+  runtimeReady = ensureRuntime().catch((e) => { console.error(e); });
+  await runtimeReady;
+  return compatible(await runtimeHealth());
 });
 ipcMain.handle("mess:pickDirectory", async () => {
   const r = await dialog.showOpenDialog({ properties: ["openDirectory", "createDirectory"] });
