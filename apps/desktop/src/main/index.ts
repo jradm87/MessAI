@@ -92,7 +92,16 @@ app.whenReady().then(() => {
   runtimeReady = ensureRuntime().catch((e) => { console.error(e); });
   createWindow();
   // Auto-update (só no app empacotado): checa o GitHub releases e baixa em segundo plano.
-  if (app.isPackaged) { try { void electronUpdater.autoUpdater.checkForUpdatesAndNotify(); } catch { /* sem update */ } }
+  // Tolerante: aceita pré-lançamento, não deixa logs barulhentos, e NUNCA derruba/suja o console
+  // quando não há release estável ou falta o latest-linux.yml (ex.: 406 "find latest version").
+  if (app.isPackaged) {
+    const up = electronUpdater.autoUpdater;
+    up.allowPrerelease = true; // a v0.0.1 é pré-lançamento
+    up.autoDownload = true;
+    up.logger = null;
+    up.on("error", () => { /* sem rede / sem release estável: ignorar silenciosamente */ });
+    up.checkForUpdatesAndNotify().catch(() => { /* idem: nada a atualizar */ });
+  }
 });
 app.on("window-all-closed", () => app.quit()); // o runtime continua vivo
 // Ajuda de desenvolvimento: `kill -USR2 <pid>` traz a janela para frente.
