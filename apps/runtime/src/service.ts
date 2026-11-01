@@ -2,6 +2,8 @@ import { AGENT_ENV, type TreeEntry, type FileContent, type FsOp, type SearchHit,
 import type { RuntimeSettings, PatchRuntimeSettings, PresetInput, Skill, CreateSkill, PatchSkill } from "@messai/contracts";
 import { listProviders } from "./providers.js";
 import { probeAccounts } from "./accounts.js";
+import { backupName, copyBackupFiles, dataStats, isBackupName, listBackups, validateBackup, validateMoveTarget, writeManifest, type BackupEntry } from "./data.js";
+import { BUILD_VERSION } from "@messai/contracts";
 import { defaultPresets, parsePresets, validatePresets, PRESETS_META_KEY } from "./presets.js";
 import { applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, canMessage, checkRevision, formatDelivery, normalizeGeometry, planLocalTerminal, resolveNodeRef, validateNewNode, agentKind, agentResume, stripAnsi, fail, succeed, type Result, applySkills, skillsText } from "@messai/domain";
 import { randomUUID } from "node:crypto";
@@ -9,7 +11,7 @@ import { Companion } from "./companion.js";
 import type { Store } from "@messai/storage";
 import { EventEmitter } from "node:events";
 import { newId, nowIso, type Config } from "./config.js";
-import { dirname, join, delimiter, basename, extname, relative } from "node:path";
+import { dirname, join, delimiter, basename, extname, relative, isAbsolute } from "node:path";
 import { closeSync, existsSync, mkdirSync, openSync, readSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { execFile, execFileSync, spawnSync } from "node:child_process";
@@ -268,6 +270,32 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     this.publish(node.workspaceId);
     return succeed(updated);
   }
+  // ---- #62 dados ----
+  dataInfo() { const st = dataStats(this.cfg.dataDir, this.cfg.dataDirSource); return { ...st, counts: this.store.counts(), backups: listBackups(st.backupsDir) }; }
+  /** Backup consistente: VACUUM INTO (banco) + notas/provedores/identidade + manifesto. Destino padrão <dataDir>/backups. */
+  createBackup(dir?: string): Result<BackupEntry> {
+    const base = dir ? dir : join(this.cfg.dataDir, "backups");
+    if (dir && !isAbsolute(dir)) return fail("INVALID", "pasta de destino precisa ser absoluta");
+    const name = backupName(); const dest = join(base, name);
+    try {
+      mkdirSync(dest, { recursive: true, mode: 0o700 });
+      this.store.backupTo(join(dest, "runtime.sqlite"));
+      copyBackupFiles(this.cfg.dataDir, dest);
+      const c = this.store.counts();
+      writeManifest(dest, { createdAt: nowIso(), buildVersion: BUILD_VERSION, counts: { workspaces: c.workspaces, nodes: c.nodes, notes: c.notes }, source: this.cfg.dataDir });
+    } catch (e) { try { rmSync(dest, { recursive: true, force: true }); } catch { /* */ } return fail("INTERNAL", `backup falhou: ${e instanceof Error ? e.message : String(e)}`); }
+    const entry = listBackups(base).find((b) => b.name === name);
+    return entry ? succeed(entry) : fail("INTERNAL", "backup criado mas não listado");
+  }
+  deleteBackup(name: string): Result<void> {
+    if (!isBackupName(name)) return fail("INVALID", "nome de backup inválido");
+    const p = join(this.cfg.dataDir, "backups", name);
+    if (!existsSync(p)) return fail("NOT_FOUND", "backup não encontrado");
+    rmSync(p, { recursive: true, force: true }); return succeed(undefined);
+  }
+  validateRestore(path: string): Result<{ path: string }> { const v = validateBackup(path); return v.ok ? succeed({ path }) : fail("INVALID", v.error); }
+  validateMove(dir: string): Result<{ dir: string }> { const v = validateMoveTarget(this.cfg.dataDir, dir, this.cfg.dataDirSource); return v.ok ? succeed({ dir }) : fail("INVALID", v.error); }
+
   // ---- #38 provedores / #57 contas ----
   providers() { return listProviders(join(this.cfg.dataDir, "providers")); }
   accounts() { return { accounts: probeAccounts(homedir()) }; }

@@ -127,6 +127,13 @@ export class Store {
     }
   }
   close(): void { this.db.close(); }
+  /** #62 Cópia consistente do banco (VACUUM INTO): funciona com o runtime vivo e em WAL. O destino não pode existir. */
+  backupTo(path: string): void { this.db.prepare("VACUUM INTO ?").run(path); }
+  /** #62 Contagens para o manifesto do backup. */
+  counts(): { workspaces: number; nodes: number; notes: number; sessions: number } {
+    const n = (sql: string) => (this.db.prepare(sql).get() as { c: number }).c;
+    return { workspaces: n("SELECT COUNT(*) c FROM workspaces"), nodes: n("SELECT COUNT(*) c FROM nodes"), notes: n("SELECT COUNT(*) c FROM nodes WHERE kind='note'"), sessions: n("SELECT COUNT(*) c FROM sessions") };
+  }
 
   getMeta(key: string): string | undefined {
     return (this.db.prepare("SELECT value FROM meta WHERE key=?").get(key) as { value: string } | undefined)?.value;

@@ -2,9 +2,12 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, hostname, platform, userInfo } from "node:os";
 import { join } from "node:path";
+import { resolveDataDir } from "./data.js";
 
 export type Config = {
   dataDir: string;
+  /** #62 de onde veio a pasta de dados: MESS_DATA_DIR, ponteiro ~/.messai/datadir ou padrão. */
+  dataDirSource: "env" | "pointer" | "default";
   dbPath: string;
   tokenPath: string;
   socketPath: string;
@@ -32,7 +35,7 @@ function resolveDefaultShell(): string {
 }
 
 export function loadConfig(): Config {
-  const dataDir = process.env["MESS_DATA_DIR"] ?? join(homedir(), ".messai");
+  const { dir: dataDir, source: dataDirSource } = resolveDataDir(); // #62: env > ponteiro > padrão
   // Migração dos nomes antigos: copia ~/.messyai (ou ~/.koba) para ~/.messai na primeira vez (preserva espaços/terminais).
   if (!process.env["MESS_DATA_DIR"] && !existsSync(dataDir)) {
     for (const old of [".messyai", ".koba"]) {
@@ -49,7 +52,7 @@ export function loadConfig(): Config {
   const idPath = join(dataDir, "machine.id");
   if (!existsSync(idPath)) writeFileSync(idPath, randomUUID().replace(/-/g, ""), { mode: 0o600 });
   return {
-    dataDir,
+    dataDir, dataDirSource,
     dbPath: join(dataDir, "runtime.sqlite"),
     tokenPath,
     socketPath: join(dataDir, "agent.sock"),

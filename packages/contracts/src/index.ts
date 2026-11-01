@@ -242,6 +242,16 @@ export type RuntimeSettings = Static<typeof RuntimeSettings>;
 export const PatchRuntimeSettings = Type.Partial(RuntimeSettings);
 export type PatchRuntimeSettings = Static<typeof PatchRuntimeSettings>;
 
+// #62 — Dados: backup/restauração/troca de pasta/reset. As operações destrutivas exigem confirmação literal.
+export const BackupInput = Type.Object({ dir: Type.Optional(Type.String({ minLength: 1 })) }); // destino; padrão <dataDir>/backups
+export type BackupInput = Static<typeof BackupInput>;
+export const RestoreInput = Type.Object({ path: Type.String({ minLength: 1 }), confirm: Type.Literal("RESTAURAR") });
+export type RestoreInput = Static<typeof RestoreInput>;
+export const MoveDataInput = Type.Object({ dir: Type.String({ minLength: 1 }), confirm: Type.Literal("MOVER") });
+export type MoveDataInput = Static<typeof MoveDataInput>;
+export const ResetInput = Type.Object({ confirm: Type.Literal("APAGAR") });
+export type ResetInput = Static<typeof ResetInput>;
+
 export const SendMessage = Type.Object({
   to: Type.String({ minLength: 1 }), // nodeId, prefixo de id ou título
   text: Type.String({ minLength: 1, maxLength: 20000 }),

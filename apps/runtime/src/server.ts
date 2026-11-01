@@ -5,7 +5,7 @@ import type { WebSocket } from "ws";
 import {
   BUILD_VERSION, PROTOCOL_VERSION, SendMessage, Ask, CreateConnection, CreateDrawing, CreateNode, CreateWorkspace, DeleteNode, PatchNode, PatchWorkspace, ApplyLayout, WsClientMessage,
   type Capabilities, type WsServerMessage, type ApiError,
- CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, FsOp, PatchRuntimeSettings, PutPresets, CreateSkill, PatchSkill, type PresetInput, type Preset } from "@messai/contracts";
+ CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, FsOp, PatchRuntimeSettings, PutPresets, CreateSkill, PatchSkill, BackupInput, RestoreInput, MoveDataInput, ResetInput, type PresetInput, type Preset } from "@messai/contracts";
 import type { Result } from "@messai/domain";
 import { newId, type Config } from "./config.js";
 import type { WorkspaceService } from "./service.js";
@@ -23,7 +23,8 @@ function send<T>(reply: FastifyReply, r: Result<T>, okStatus = 200) {
   return reply.status(STATUS[r.error.code]).send({ error: r.error });
 }
 
-export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: boolean; onShutdown?: (killAgents: boolean) => void }): FastifyInstance {
+export type DataOp = { kind: "restore"; path: string } | { kind: "reset" } | { kind: "move"; dir: string };
+export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: boolean; onShutdown?: (killAgents: boolean) => void; onDataOp?: (op: DataOp) => void }): FastifyInstance {
   const app = Fastify({ logger: false, bodyLimit: 40 * 1024 * 1024 });
 
   // Autenticação: token Bearer (ou ?token= para o WS do navegador). Origem só loopback/file.
@@ -104,6 +105,18 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
   });
 
   // papéis (responsabilidades)
+  // #62 — dados: estatísticas, backups, restauração/reset/mover (estas três respondem 202 e o runtime sai; o app sobe outro)
+  app.get("/v1/data", async () => svc.dataInfo());
+  app.post("/v1/data/backup", async (req, reply) => { const b = body<BackupInput>(BackupInput, req.body ?? {}); if ("code" in b) return invalid(reply, b); return send(reply, svc.createBackup(b.dir), 201); });
+  app.delete<{ Params: { name: string } }>("/v1/data/backups/:name", async (req, reply) => send(reply, svc.deleteBackup(req.params.name), 204));
+  const dataOp = (op: DataOp, reply: FastifyReply) => {
+    if (!opts.onDataOp) return reply.status(400).send({ error: { code: "INVALID", message: "operação indisponível neste servidor" } });
+    reply.status(202).send({ ok: true, op: op.kind });
+    setTimeout(() => opts.onDataOp!(op), 50); // responde antes de parar tudo
+  };
+  app.post("/v1/data/restore", async (req, reply) => { const b = body<RestoreInput>(RestoreInput, req.body); if ("code" in b) return invalid(reply, b); const v = svc.validateRestore(b.path); if (!v.ok) return send(reply, v); return dataOp({ kind: "restore", path: b.path }, reply); });
+  app.post("/v1/data/move", async (req, reply) => { const b = body<MoveDataInput>(MoveDataInput, req.body); if ("code" in b) return invalid(reply, b); const v = svc.validateMove(b.dir); if (!v.ok) return send(reply, v); return dataOp({ kind: "move", dir: b.dir }, reply); });
+  app.post("/v1/data/reset", async (req, reply) => { const b = body<ResetInput>(ResetInput, req.body); if ("code" in b) return invalid(reply, b); return dataOp({ kind: "reset" }, reply); });
   // #55 — configurações do runtime (persistidas; valem para todos os clientes desta máquina)
   app.get("/v1/settings", async () => svc.settings());
   app.patch("/v1/settings", async (req, reply) => { const b = body<PatchRuntimeSettings>(PatchRuntimeSettings, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.patchSettings(b)); });

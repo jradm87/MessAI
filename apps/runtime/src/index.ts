@@ -5,7 +5,8 @@ import { Store } from "@messai/storage";
 import { loadConfig } from "./config.js";
 import { SessionManager } from "./sessions.js";
 import { WorkspaceService } from "./service.js";
-import { buildServer } from "./server.js";
+import { buildServer, type DataOp } from "./server.js";
+import { performMove, performReset, performRestore } from "./data.js";
 
 const cfg = loadConfig();
 const store = new Store(cfg.dbPath);
@@ -35,7 +36,24 @@ const shutdown = async (killAgents = false) => {
   process.exit(0);
 };
 
-const http = buildServer(cfg, svc, { unix: false, onShutdown: (killAgents) => void shutdown(killAgents) });
+// #62 — restaurar/mover/apagar: para tudo, fecha o banco, mexe nos arquivos e SAI; o app detecta e sobe um runtime novo.
+const dataOp = async (op: DataOp) => {
+  setTimeout(() => process.exit(0), 4000).unref();
+  try { if (existsSync(pidPath)) unlinkSync(pidPath); } catch { /* já foi */ }
+  try { if (existsSync(cfg.socketPath)) unlinkSync(cfg.socketPath); } catch { /* já foi */ }
+  if (op.kind === "move") sessions.shutdownAll(); else sessions.disposeAllHard(); // mover mantém os tmux (o banco vai junto); restaurar/apagar não têm para onde voltar
+  for (const s of [http, agent]) { try { for (const c of s.websocketServer?.clients ?? []) c.terminate(); } catch { /* */ } }
+  await Promise.all([http.close(), agent.close()]).catch(() => {});
+  store.close();
+  try {
+    if (op.kind === "restore") performRestore(cfg.dataDir, op.path);
+    else if (op.kind === "reset") performReset(cfg.dataDir);
+    else performMove(cfg.dataDir, op.dir);
+    console.log(`dados: ${op.kind} concluído`);
+  } catch (e) { console.error(`dados: ${op.kind} falhou:`, e); }
+  process.exit(0);
+};
+const http = buildServer(cfg, svc, { unix: false, onShutdown: (killAgents) => void shutdown(killAgents), onDataOp: (op) => void dataOp(op) });
 const agent = buildServer(cfg, svc, { unix: true });
 
 if (existsSync(cfg.socketPath)) unlinkSync(cfg.socketPath);
