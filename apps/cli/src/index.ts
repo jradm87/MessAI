@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // CLI mínima para agentes e humanos dentro de um terminal REA. Fala com o runtime pelo socket Unix.
 import { request } from "node:http";
-import { AGENT_ENV, type ChatMessage, type Message, type Node, type Workspace, type WorkspaceSnapshot } from "@messai/contracts";
+import { AGENT_ENV, type AskResult, type ChatMessage, type Message, type Node, type Workspace, type WorkspaceSnapshot } from "@messai/contracts";
 
 const env = (k: keyof typeof AGENT_ENV) => process.env[AGENT_ENV[k]];
 const socketPath = env("socket"), token = env("token"), workspaceId = env("workspaceId"), nodeId = env("nodeId");
@@ -39,7 +39,9 @@ try {
   mess note path <id|título>        caminho do arquivo .md da nota (edite direto se preferir)
   mess connect <id|título>          liga seu nó a outro nó
   mess peers                        terminais conectados a você (com quem pode falar)
-  mess ask <id|título> <texto>      envia mensagem a um agente conectado
+  mess ask <id|título> <texto>      pergunta a um nó conectado e ESPERA a resposta (última tela)
+                                      [--no-wait] só dispara · [--timeout seg] tempo máx. de espera
+  mess check <id|título>            lê a tela atual de um nó conectado (sem enviar nada)
   mess reply <idMsg> <texto>        responde uma mensagem recebida
   mess inbox [--all]                mensagens recebidas (marca como lidas)
   mess say <texto> [--thread N]     responde no chat do seu terminal (Markdown; aparece em balões)
@@ -136,17 +138,32 @@ try {
     console.log("ok");
   } else if (cmd === "peers") {
     if (!nodeId) throw new Error("sem MESS_NODE_ID");
-    const conn = await call<{ node: Node; direction: string }[]>("GET", `/v1/nodes/${nodeId}/connected`);
+    const conn = await call<{ node: Node; direction: string; agentType?: string }[]>("GET", `/v1/nodes/${nodeId}/connected`);
     const peers = conn.filter((c) => c.node.kind === "terminal");
     if (!peers.length) console.log("Nenhum terminal conectado a você. Use `mess connect <nome>` ou ligue no canvas.");
-    for (const c of peers) console.log(`${short(c.node.nodeId)}  ${c.node.title}`);
-  } else if (cmd === "ask" || cmd === "reply") {
+    for (const c of peers) console.log(`${short(c.node.nodeId)}  ${c.node.title.padEnd(24)} ${c.agentType && c.agentType !== "genericShell" ? c.agentType : "shell"}`);
+  } else if (cmd === "ask") {
     if (!nodeId) throw new Error("sem MESS_NODE_ID");
-    const [ref, ...text] = [sub, ...rest]; if (!ref || !text.length) throw new Error(`uso: mess ${cmd} <${cmd === "ask" ? "id|título" : "idMsg"}> <texto>`);
-    let to = ref, replyTo: string | undefined;
-    if (cmd === "reply") { const orig = await call<Message>("GET", `/v1/messages/${ref}`); to = orig.fromNodeId; replyTo = orig.messageId; }
-    const m = await call<Message>("POST", `/v1/nodes/${nodeId}/messages`, { to, text: text.join(" "), ...(replyTo ? { replyTo } : {}) });
-    console.log(`${cmd === "ask" ? "enviada" : "respondida"} [${short(m.messageId)}]${m.delivered ? "" : " (destino não está rodando; fica na caixa de entrada)"}`);
+    const args = [sub, ...rest].filter((a): a is string => a !== undefined);
+    const noWait = (() => { const i = args.indexOf("--no-wait"); if (i >= 0) { args.splice(i, 1); return true; } return false; })();
+    const ti = args.indexOf("--timeout"); let timeoutMs: number | undefined; if (ti >= 0) { timeoutMs = Math.round(Number(args[ti + 1]) * 1000); args.splice(ti, 2); }
+    const [ref, ...text] = args; if (!ref || !text.length) throw new Error("uso: mess ask <id|título> <texto> [--no-wait] [--timeout seg]");
+    const r = await call<AskResult>("POST", `/v1/nodes/${nodeId}/ask`, { to: ref, text: text.join(" "), ...(noWait ? { noWait: true } : {}), ...(timeoutMs ? { timeoutMs } : {}) });
+    if (!r.delivered) console.log(`(destino não está rodando; mensagem [${short(r.messageId)}] fica na caixa de entrada)`);
+    else if (noWait) console.log(`enviada [${short(r.messageId)}]`);
+    else if (r.response) { console.log(r.response); if (r.timedOut) console.error("(aviso: tempo limite atingido; resposta pode estar incompleta)"); }
+    else console.log(r.timedOut ? "(sem resposta no tempo limite; use `mess check` ou olhe o terminal)" : "(destino não devolveu saída)");
+  } else if (cmd === "reply") {
+    if (!nodeId) throw new Error("sem MESS_NODE_ID");
+    const [ref, ...text] = [sub, ...rest]; if (!ref || !text.length) throw new Error("uso: mess reply <idMsg> <texto>");
+    const orig = await call<Message>("GET", `/v1/messages/${ref}`);
+    const m = await call<Message>("POST", `/v1/nodes/${nodeId}/messages`, { to: orig.fromNodeId, text: text.join(" "), replyTo: orig.messageId });
+    console.log(`respondida [${short(m.messageId)}]${m.delivered ? "" : " (destino não está rodando; fica na caixa de entrada)"}`);
+  } else if (cmd === "check") {
+    if (!nodeId) throw new Error("sem MESS_NODE_ID");
+    if (!sub) throw new Error("uso: mess check <id|título>");
+    const r = await call<{ agentType: string; screen: string }>("GET", `/v1/nodes/${nodeId}/check?ref=${encodeURIComponent(sub)}`);
+    console.log(r.screen || "(tela vazia ou destino não está rodando)");
   } else if (cmd === "inbox") {
     if (!nodeId) throw new Error("sem MESS_NODE_ID");
     const all = sub === "--all";

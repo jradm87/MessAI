@@ -150,6 +150,37 @@ export function formatDelivery(m: { messageId: string; fromTitle: string; text: 
   return `${head}\n${m.text.replace(/\r?\n/g, " ")}\r`;
 }
 
+/**
+ * Identidade do terminal: é um CLI de IA ou um shell cru? (paridade com o Maestri, que
+ * carrega isAgent/agentType por terminal). Derivado do comando ORIGINAL da sessão — robusto
+ * porque o wrap do tmux e o cwd não entram no command/args salvos.
+ * Importa para a resposta implícita do `ask`: shell assenta rápido (prompt volta); agente
+ * costuma animar enquanto pensa, então a quiescência é mais longa.
+ */
+export type AgentKind = { isAgent: boolean; agentType: string; label: string };
+const AGENT_BINS: { re: RegExp; type: string; label: string }[] = [
+  { re: /(^|[\s/])claude([\s/-]|$)/, type: "claudeCode", label: "claude" },
+  { re: /(^|[\s/])codex([\s/-]|$)/, type: "codex", label: "codex" },
+  { re: /(^|[\s/])gemini([\s/-]|$)/, type: "geminiCLI", label: "gemini" },
+  { re: /(^|[\s/])opencode([\s/-]|$)/, type: "openCode", label: "opencode" },
+  { re: /(^|[\s/])antigravity([\s/-]|$)/, type: "antigravityCLI", label: "antigravity" },
+  { re: /(^|[\s/])aider([\s/-]|$)/, type: "aider", label: "aider" },
+];
+export function agentKind(command: string, args: string[] = []): AgentKind {
+  const hay = [command, ...args].join(" ");
+  for (const a of AGENT_BINS) if (a.re.test(hay)) return { isAgent: true, agentType: a.type, label: a.label };
+  return { isAgent: false, agentType: "genericShell", label: "shell" };
+}
+
+/** Remove sequências de escape ANSI/CSI/OSC — para devolver a "tela" do terminal como texto limpo. */
+export function stripAnsi(s: string): string {
+  return s
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "") // OSC (ex.: título da janela)
+    .replace(/\x1b[@-Z\\-_]/g, "") // escapes de 1 byte
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "") // CSI (cores, cursor)
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, ""); // controles (mantém \t \n \r)
+}
+
 /** Resolve "to" por id, prefixo de id ou título (sem diferenciar maiúsculas). */
 export function resolveNodeRef<T extends Pick<Node, "nodeId" | "title">>(nodes: T[], ref: string): Result<T> {
   const r = ref.trim().toLowerCase();

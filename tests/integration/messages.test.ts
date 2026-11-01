@@ -49,8 +49,8 @@ describe("mensagens entre agentes", () => {
     await new Promise<void>((res) => { wsock.onopen = () => { wsock.send(JSON.stringify({ type: "attach", sessionId: b.sessionId })); res(); }; });
     wsock.onmessage = (e) => { const m = JSON.parse(e.data as string); if (m.type === "output") seen.push(m.data); };
     const r = await cli(["ask", "Revisor", "você revisou o login?"], envA);
-    expect(r.code).toBe(0); expect(r.out).toContain("enviada");
-    await new Promise((res) => setTimeout(res, 600));
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("você revisou o login?"); // ask bloqueante devolve a tela (cat ecoa)
     const out = seen.join("");
     expect(out).toContain('Mensagem de "Dev"'); expect(out).toContain("você revisou o login?"); // cat ecoa o que recebeu
     wsock.close();
@@ -69,8 +69,26 @@ describe("mensagens entre agentes", () => {
     expect(Object.keys(unread).length).toBe(0);
   });
 
-  it("peers lista só terminais conectados", async () => {
+  it("--no-wait só dispara; check lê a tela sem enviar", async () => {
+    const nw = await cli(["ask", "Revisor", "--no-wait", "disparo-xyz"], envA);
+    expect(nw.code).toBe(0); expect(nw.out).toContain("enviada");
+    await new Promise((res) => setTimeout(res, 300));
+    const c = await cli(["check", "Revisor"], envA); // Dev checa a tela do Revisor
+    expect(c.code).toBe(0); expect(c.out).toContain("disparo-xyz"); // o eco ficou na tela
+  });
+
+  it("ask a um shell roda o comando e devolve a saída", async () => {
+    const rev = ((await api("GET", `/v1/workspaces/${ws}`)).json as { workspace: { revision: number } }).workspace.revision;
+    await api("POST", `/v1/workspaces/${ws}/nodes`, { expectedRevision: rev, kind: "terminal", title: "Shell", command: "/bin/sh", geometry: { x: 0, y: 0, w: 400, h: 300 } });
+    expect((await cli(["connect", "Shell"], envA)).out).toContain("ligado");
+    await new Promise((res) => setTimeout(res, 400)); // sh pronto
+    const r = await cli(["ask", "Shell", "echo ola-mundo-123"], envA);
+    expect(r.code).toBe(0); expect(r.out).toContain("ola-mundo-123"); // saída do comando volta pro quem perguntou
+    expect(r.out).not.toContain("[MessAI]"); // cabeçalho (linha própria num shell real) é filtrado
+  });
+
+  it("peers lista terminais conectados com o tipo", async () => {
     const p = await cli(["peers"], envB);
-    expect(p.out).toContain("Dev");
+    expect(p.out).toContain("Dev"); expect(p.out).toContain("shell"); // cat/sh = shell cru
   });
 });

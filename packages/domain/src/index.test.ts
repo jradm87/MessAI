@@ -1,5 +1,5 @@
 import {  describe, expect, it } from "vitest";
-import { canMessage, formatDelivery, resolveNodeRef, canWrite, checkRevision, decideLease, normalizeGeometry, trimBuffer, MAX_BUFFER_BYTES, applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxAttachPlan, shellQuote, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, alignGeometries, gridLayout } from "./index.js";
+import { canMessage, formatDelivery, resolveNodeRef, canWrite, checkRevision, decideLease, normalizeGeometry, trimBuffer, MAX_BUFFER_BYTES, applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxAttachPlan, shellQuote, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, alignGeometries, gridLayout, agentKind, stripAnsi } from "./index.js";
 
 describe("revisão", () => {
   it("aceita revisão igual e devolve próxima", () => {
@@ -93,6 +93,31 @@ describe("mensagens", () => {
   it("formata entrega em uma linha com Enter no fim", () => {
     const t = formatDelivery({ messageId: "1234567890", fromTitle: "Dev", text: "oi\ntudo bem" });
     expect(t.endsWith("\r")).toBe(true); expect(t).toContain("mess reply 12345678"); expect(t).not.toContain("\n tudo");
+  });
+  it("cabeçalho da entrega é comentário (shell ignora)", () => {
+    const t = formatDelivery({ messageId: "abcdef12", fromTitle: "Dev", text: "ls" });
+    expect(t.startsWith("# [MessAI]")).toBe(true); // '#' faz o fish/bash ignorarem a linha e o (id)
+  });
+});
+
+describe("agentKind", () => {
+  it("distingue CLI de IA de shell cru", () => {
+    expect(agentKind("claude", ["--flag"])).toMatchObject({ isAgent: true, agentType: "claudeCode" });
+    expect(agentKind("/usr/bin/codex", [])).toMatchObject({ isAgent: true, agentType: "codex" });
+    expect(agentKind("gemini", [])).toMatchObject({ isAgent: true, agentType: "geminiCLI" });
+    expect(agentKind("opencode", [])).toMatchObject({ isAgent: true, agentType: "openCode" });
+    expect(agentKind("fish", [])).toMatchObject({ isAgent: false, agentType: "genericShell" });
+    expect(agentKind("/bin/bash", ["-l"]).isAgent).toBe(false);
+    expect(agentKind("cat", []).isAgent).toBe(false);
+  });
+});
+
+describe("stripAnsi", () => {
+  it("remove cores, CSI e OSC", () => {
+    expect(stripAnsi("\x1b[31mvermelho\x1b[0m")).toBe("vermelho");
+    expect(stripAnsi("a\x1b[2Kb")).toBe("ab");
+    expect(stripAnsi("\x1b]0;título\x07resto")).toBe("resto");
+    expect(stripAnsi("linha1\nlinha2\t fim")).toBe("linha1\nlinha2\t fim"); // mantém \n \t
   });
 });
 

@@ -181,6 +181,50 @@ export class SessionManager extends EventEmitter<SessionEvents> {
     return succeed(undefined);
   }
 
+  /** "Tela" atual do terminal (viewport visível), como texto limpo — para `mess check`. */
+  screen(sessionId: string): string | undefined {
+    const l = this.live.get(sessionId);
+    if (!l) return undefined;
+    const b = l.term.buffer.active;
+    const rows: string[] = [];
+    const top = b.viewportY;
+    for (let y = top; y < top + l.term.rows; y++) {
+      const line = b.getLine(y);
+      rows.push(line ? line.translateToString(true).replace(/\s+$/, "") : "");
+    }
+    while (rows.length && rows[rows.length - 1] === "") rows.pop();
+    return rows.join("\n");
+  }
+
+  /**
+   * Resposta implícita do `ask` (modo "última tela" do Maestri): dispara a entrega e coleta o
+   * output até o terminal assentar (quiescência `idleMs`) ou estourar `timeoutMs`. O `trigger`
+   * roda só depois do listener ligado — sem corrida de perder os primeiros bytes.
+   */
+  awaitReply(sessionId: string, opts: { idleMs: number; timeoutMs: number; trigger: () => void }): Promise<{ text: string; timedOut: boolean }> {
+    return new Promise((resolve) => {
+      if (!this.live.get(sessionId)) { resolve({ text: "", timedOut: false }); return; }
+      let buf = "";
+      let idle: ReturnType<typeof setTimeout> | undefined;
+      const onOut = (sid: string, _seq: number, data: string) => {
+        if (sid !== sessionId) return;
+        buf += data;
+        if (buf.length > 200_000) buf = buf.slice(-200_000); // teto de segurança
+        if (idle) clearTimeout(idle);
+        idle = setTimeout(() => finish(false), opts.idleMs);
+      };
+      const finish = (timedOut: boolean) => {
+        this.off("output", onOut);
+        if (idle) clearTimeout(idle);
+        clearTimeout(hard);
+        resolve({ text: buf, timedOut });
+      };
+      const hard = setTimeout(() => finish(true), opts.timeoutMs);
+      this.on("output", onOut);
+      opts.trigger();
+    });
+  }
+
   /** Parada explícita (diferente de fechar o painel). */
   stop(sessionId: string): Result<Session> {
     const l = this.live.get(sessionId);

@@ -3,7 +3,7 @@ import websocket from "@fastify/websocket";
 import { Value } from "@sinclair/typebox/value";
 import type { WebSocket } from "ws";
 import {
-  BUILD_VERSION, PROTOCOL_VERSION, SendMessage, CreateConnection, CreateDrawing, CreateNode, CreateWorkspace, DeleteNode, PatchNode, PatchWorkspace, ApplyLayout, WsClientMessage,
+  BUILD_VERSION, PROTOCOL_VERSION, SendMessage, Ask, CreateConnection, CreateDrawing, CreateNode, CreateWorkspace, DeleteNode, PatchNode, PatchWorkspace, ApplyLayout, WsClientMessage,
   type Capabilities, type WsServerMessage, type ApiError,
  CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, FsOp } from "@messai/contracts";
 import type { Result } from "@messai/domain";
@@ -193,6 +193,12 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
     const b = body<SendMessage>(SendMessage, req.body); if ("code" in b) return invalid(reply, b);
     return send(reply, svc.sendMessage(req.params.id, b), 201);
   });
+  app.post<{ Params: { id: string } }>("/v1/nodes/:id/ask", async (req, reply) => {
+    const b = body<Ask>(Ask, req.body); if ("code" in b) return invalid(reply, b);
+    return send(reply, await svc.ask(req.params.id, b), 200);
+  });
+  app.get<{ Params: { id: string }; Querystring: { ref?: string } }>("/v1/nodes/:id/check", async (req, reply) =>
+    send(reply, svc.checkPeer(req.params.id, req.query.ref ?? "")));
   app.get<{ Params: { id: string }; Querystring: { unread?: string; mark?: string } }>("/v1/nodes/:id/inbox", async (req, reply) =>
     send(reply, svc.inbox(req.params.id, req.query.unread === "1", req.query.mark === "1")));
   app.get<{ Params: { id: string } }>("/v1/messages/:id", async (req, reply) => {

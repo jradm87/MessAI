@@ -208,6 +208,17 @@ export const SendMessage = Type.Object({
 });
 export type SendMessage = Static<typeof SendMessage>;
 
+// `ask` bloqueante: entrega e espera a "última tela" do destino assentar (ou noWait para disparar e sair).
+export const Ask = Type.Object({
+  to: Type.String({ minLength: 1 }),
+  text: Type.String({ minLength: 1, maxLength: 20000 }),
+  timeoutMs: Type.Optional(Type.Integer({ minimum: 500, maximum: 600000 })),
+  noWait: Type.Optional(Type.Boolean()),
+  replyTo: Type.Optional(Id),
+});
+export type Ask = Static<typeof Ask>;
+export type AskResult = { messageId: string; delivered: boolean; response: string; timedOut: boolean; agentType: string };
+
 // ---------- Sessões de terminal ----------
 export const SessionState = Type.Union([
   Type.Literal("starting"),

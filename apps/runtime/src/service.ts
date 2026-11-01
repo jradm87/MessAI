@@ -1,5 +1,5 @@
 import { AGENT_ENV, type TreeEntry, type FileContent, type FsOp, type SearchHit, type CreateFloor, type LandFloor, type LandResult, type Role, type CreateRole, type PatchRole, type ChatMessage, type SendChat, type Attachment, type CreateAttachment, type FileEntry, type Connection, type CreateConnection, type PatchConnection, type CreateDrawing, type PatchDrawing, type GroupDrawings, type CreateFolder, type CreateNode, type Drawing, type Folder, type Message, type PatchFolder, type SendMessage, type Sidebar, type CreateWorkspace, type Node, type PatchNode, type PatchWorkspace, type Session, type Workspace, type WorkspaceSnapshot } from "@messai/contracts";
-import { applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, canMessage, checkRevision, formatDelivery, normalizeGeometry, planLocalTerminal, resolveNodeRef, validateNewNode, fail, succeed, type Result } from "@messai/domain";
+import { applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, canMessage, checkRevision, formatDelivery, normalizeGeometry, planLocalTerminal, resolveNodeRef, validateNewNode, agentKind, stripAnsi, fail, succeed, type Result } from "@messai/domain";
 import type { Store } from "@messai/storage";
 import { EventEmitter } from "node:events";
 import { newId, nowIso, type Config } from "./config.js";
@@ -744,17 +744,26 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
   }
 
   /** Nós ligados a um nó, nos dois sentidos. Base para agentes lerem contexto. */
-  connectedNodes(nodeId: string): Result<{ node: Node; direction: "in" | "out"; connectionId: string }[]> {
+  connectedNodes(nodeId: string): Result<{ node: Node; direction: "in" | "out"; connectionId: string; agentType?: string }[]> {
     const me = this.store.getNode(nodeId);
     if (!me) return fail("NOT_FOUND", "nó não encontrado");
-    const out: { node: Node; direction: "in" | "out"; connectionId: string }[] = [];
+    const out: { node: Node; direction: "in" | "out"; connectionId: string; agentType?: string }[] = [];
     for (const c of this.store.listConnections(me.workspaceId)) {
       const otherId = c.sourceNodeId === nodeId ? c.targetNodeId : c.targetNodeId === nodeId ? c.sourceNodeId : null;
       if (!otherId) continue;
       const node = this.store.getNode(otherId);
-      if (node) out.push({ node, direction: c.sourceNodeId === nodeId ? "out" : "in", connectionId: c.connectionId });
+      if (!node) continue;
+      const row: { node: Node; direction: "in" | "out"; connectionId: string; agentType?: string } = { node, direction: c.sourceNodeId === nodeId ? "out" : "in", connectionId: c.connectionId };
+      if (node.kind === "terminal" && node.sessionId) { const s = this.store.getSession(node.sessionId); if (s) row.agentType = agentKind(s.command, s.args).agentType; }
+      out.push(row);
     }
     return succeed(out);
+  }
+
+  /** Identidade (agente de IA × shell) de um nó terminal. */
+  private kindOfNode(node: Node): { isAgent: boolean; agentType: string } {
+    if (node.kind === "terminal" && node.sessionId) { const s = this.store.getSession(node.sessionId); if (s) return agentKind(s.command, s.args); }
+    return { isAgent: false, agentType: "genericShell" };
   }
 
   /** Envia mensagem de um nó terminal a outro nó conectado; entrega como prompt se o destino estiver rodando. */
@@ -775,6 +784,67 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     }
     this.emit("message", m);
     return succeed(m);
+  }
+
+  /**
+   * `ask` bloqueante (paridade com o Maestri): entrega o prompt no destino e espera ele assentar,
+   * devolvendo a "última tela" como resposta. Para shell cru isso traz a saída do comando; para
+   * agente de IA, a resposta dele. Timeout/quiescência dependem do tipo (agente anima enquanto pensa).
+   */
+  async ask(fromNodeId: string, input: { to: string; text: string; timeoutMs?: number; noWait?: boolean; replyTo?: string }): Promise<Result<{ messageId: string; delivered: boolean; response: string; timedOut: boolean; agentType: string }>> {
+    const from = this.store.getNode(fromNodeId);
+    if (!from) return fail("NOT_FOUND", "nó de origem não encontrado");
+    const nodes = this.store.listNodes(from.workspaceId);
+    const to = resolveNodeRef(nodes, input.to);
+    if (!to.ok) return to;
+    if (to.value.kind !== "terminal") return fail("INVALID", "o destino precisa ser um terminal");
+    const allowed = canMessage(this.store.listConnections(from.workspaceId), fromNodeId, to.value.nodeId);
+    if (!allowed.ok) return allowed;
+    const kind = this.kindOfNode(to.value);
+    const m: Message = { messageId: newId(), workspaceId: from.workspaceId, fromNodeId, toNodeId: to.value.nodeId, text: input.text, createdAt: nowIso(), delivered: false, ...(input.replyTo ? { replyTo: input.replyTo } : {}) };
+    this.store.insertMessage(m);
+    const payload = formatDelivery({ messageId: m.messageId, fromTitle: from.title, text: m.text, replyTo: input.replyTo });
+    const sid = to.value.sessionId;
+    const deliverNow = () => { const d = this.sessions.deliver(sid!, payload); if (d.ok) { this.store.markDelivered(m.messageId); m.delivered = true; } return d.ok; };
+    if (!sid || this.sessions.get(sid)?.state !== "running") {
+      this.emit("message", m); // fica na caixa de entrada para quando subir
+      return succeed({ messageId: m.messageId, delivered: false, response: "", timedOut: false, agentType: kind.agentType });
+    }
+    if (input.noWait) { deliverNow(); this.emit("message", m); return succeed({ messageId: m.messageId, delivered: m.delivered, response: "", timedOut: false, agentType: kind.agentType }); }
+    const idleMs = kind.isAgent ? 1500 : 600;
+    const timeoutMs = Math.min(input.timeoutMs ?? (kind.isAgent ? 180_000 : 20_000), 600_000);
+    const cap = await this.sessions.awaitReply(sid, { idleMs, timeoutMs, trigger: deliverNow });
+    this.emit("message", m);
+    // A resposta é a "última tela" renderizada (o headless resolve os \r de sobrescrita), não o
+    // fluxo bruto — senão o cabeçalho/corpo se misturam na mesma linha por causa do carriage return.
+    const screen = this.sessions.screen(sid) ?? "";
+    return succeed({ messageId: m.messageId, delivered: m.delivered, response: this.cleanReply(stripAnsi(screen)), timedOut: cap.timedOut, agentType: kind.agentType });
+  }
+
+  /**
+   * Limpa a captura: remove o eco do nosso cabeçalho (`[MessAI] …` até o fim da linha — num shell
+   * ele vem depois do prompt, ex. `$ # [MessAI] …`, por isso não dá pra ancorar no início), apara
+   * espaços à direita e colapsa linhas vazias repetidas.
+   */
+  private cleanReply(s: string): string {
+    const lines = s.split(/\r?\n/).map((l) => l.replace(/#?\s*\[MessAI\][^\n]*$/, "").replace(/\s+$/, ""));
+    const out: string[] = [];
+    for (const l of lines) { if (l === "" && (out.length === 0 || out[out.length - 1] === "")) continue; out.push(l); }
+    return out.join("\n").trim();
+  }
+
+  /** Lê a tela atual de um terminal conectado, sem enviar nada (paridade com `maestri check`). */
+  checkPeer(fromNodeId: string, ref: string): Result<{ agentType: string; screen: string }> {
+    const from = this.store.getNode(fromNodeId);
+    if (!from) return fail("NOT_FOUND", "nó de origem não encontrado");
+    const nodes = this.store.listNodes(from.workspaceId);
+    const to = resolveNodeRef(nodes, ref);
+    if (!to.ok) return to;
+    if (to.value.kind !== "terminal") return fail("INVALID", "o destino precisa ser um terminal");
+    const allowed = canMessage(this.store.listConnections(from.workspaceId), fromNodeId, to.value.nodeId);
+    if (!allowed.ok) return allowed;
+    const screen = to.value.sessionId ? this.sessions.screen(to.value.sessionId) : undefined;
+    return succeed({ agentType: this.kindOfNode(to.value).agentType, screen: screen ?? "" });
   }
 
   inbox(nodeId: string, unreadOnly: boolean, markRead: boolean): Result<{ messages: (Message & { fromTitle: string })[] }> {
