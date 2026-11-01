@@ -9,6 +9,11 @@ const ROOT = join(import.meta.dirname, "../..");
 const PORT = 47955;
 let dataDir: string; let runtime: ChildProcess; let app: ElectronApplication; let page: Page; let token: string;
 const api = async (path: string) => (await fetch(`http://127.0.0.1:${PORT}${path}`, { headers: { authorization: `Bearer ${token}` } })).json();
+type WsRow = { workspaceId: string; name: string; icon: string; color: string; folderId?: string };
+/** O runtime cria um espaço padrão no 1º boot; os testes trabalham no "E2E" criado pela UI. */
+const e2eWs = async (): Promise<WsRow> => { const list = (await api("/v1/workspaces")) as WsRow[]; const w = list.find((x) => x.name === "E2E"); if (!w) throw new Error(`espaço E2E não existe: ${list.map((x) => x.name).join(", ")}`); return w; };
+/** A janela principal intercepta o fechar (tela de encerramento): sai pelo processo principal. */
+const quitApp = async () => { await app?.evaluate(({ app: a }) => a.exit(0)).catch(() => {}); await app?.close().catch(() => {}); };
 
 beforeAll(async () => {
   dataDir = mkdtempSync(join(tmpdir(), "mess-e2e-"));
@@ -19,7 +24,7 @@ beforeAll(async () => {
   await page.waitForSelector(".side h1");
 }, 60_000);
 
-afterAll(async () => { await app?.close(); runtime?.kill(); rmSync(dataDir, { recursive: true, force: true }); });
+afterAll(async () => { await quitApp(); runtime?.kill(); for (let i = 0; i < 15 && runtime && runtime.exitCode === null; i++) await new Promise((r) => setTimeout(r, 100)); if (runtime && runtime.exitCode === null) { try { runtime.kill("SIGKILL"); } catch { /* */ } } rmSync(dataDir, { recursive: true, force: true }); }, 30_000);
 
 async function visibleSpot(page: Page): Promise<{ x: number; y: number }> {
   return page.evaluate(() => {
@@ -44,9 +49,8 @@ describe("piloto local", () => {
     await page.click('.color-row .sw[title="#5aa9ff"]');
     await page.click('[data-testid="ws-submit"]');
     await page.waitForSelector(".side li.ws.on:has-text('E2E')");
-    const list = await api("/v1/workspaces") as { icon: string; color: string }[];
-    expect(list.length).toBe(1);
-    expect(list[0]!.icon).toBe("rocket"); expect(list[0]!.color).toBe("#5aa9ff");
+    const w = await e2eWs();
+    expect(w.icon).toBe("rocket"); expect(w.color).toBe("#5aa9ff");
   });
 
   it("adiciona shell e nota pelo menu, sem sobreposição", async () => {
@@ -54,15 +58,15 @@ describe("piloto local", () => {
     await page.waitForSelector(".node.terminal .st.running", { timeout: 10_000 });
     await page.click('[data-testid="add"]'); await page.click(".menu .mi:has-text('Nota')");
     await page.waitForSelector(".node.note");
-    const [ws] = await api("/v1/workspaces") as { workspaceId: string }[];
-    const snap = await api(`/v1/workspaces/${ws!.workspaceId}`) as { nodes: { kind: string; geometry: { x: number; w: number } }[] };
+    const ws = await e2eWs();
+    const snap = await api(`/v1/workspaces/${ws.workspaceId}`) as { nodes: { kind: string; geometry: { x: number; w: number } }[] };
     const t = snap.nodes.find((n) => n.kind === "terminal")!, n = snap.nodes.find((n) => n.kind === "note")!;
     expect(n.geometry.x).toBeGreaterThanOrEqual(t.geometry.x + t.geometry.w);
   });
 
   it("arrasta a nota pela barra e persiste a posição", async () => {
-    const [ws] = await api("/v1/workspaces") as { workspaceId: string }[];
-    const before = (await api(`/v1/workspaces/${ws!.workspaceId}`) as { nodes: { kind: string; geometry: { x: number; y: number } }[] }).nodes.find((n) => n.kind === "note")!.geometry;
+    const ws = await e2eWs();
+    const before = (await api(`/v1/workspaces/${ws.workspaceId}`) as { nodes: { kind: string; geometry: { x: number; y: number } }[] }).nodes.find((n) => n.kind === "note")!.geometry;
     await page.waitForTimeout(500);
     const bar = page.locator(".node.note .bar .title");
     const b = (await bar.boundingBox())!;
@@ -71,28 +75,30 @@ describe("piloto local", () => {
     await page.mouse.up();
     await page.waitForTimeout(600);
     await page.screenshot({ path: join(ROOT, "tests/e2e/last.png") });
-    const after = (await api(`/v1/workspaces/${ws!.workspaceId}`) as { nodes: { kind: string; geometry: { x: number; y: number } }[] }).nodes.find((n) => n.kind === "note")!.geometry;
+    const after = (await api(`/v1/workspaces/${ws.workspaceId}`) as { nodes: { kind: string; geometry: { x: number; y: number } }[] }).nodes.find((n) => n.kind === "note")!.geometry;
     expect(after.x).toBeLessThan(before.x); expect(after.y).toBeGreaterThan(before.y);
     await page.screenshot({ path: join(ROOT, "tests/e2e/last.png") });
   });
 
   it("fechar o cliente não mata o shell", async () => {
-    const [s] = await api("/v1/sessions/" + ((await api("/v1/workspaces/" + ((await api("/v1/workspaces")) as { workspaceId: string }[])[0]!.workspaceId)) as { nodes: { sessionId?: string }[] }).nodes.find((n) => n.sessionId)!.sessionId).then((x) => [x as { pid: number; state: string }]);
-    await app.close();
+    const [s] = await api("/v1/sessions/" + ((await api("/v1/workspaces/" + (await e2eWs()).workspaceId)) as { nodes: { sessionId?: string }[] }).nodes.find((n) => n.sessionId)!.sessionId).then((x) => [x as { pid: number; state: string }]);
+    await quitApp();
     await new Promise((r) => setTimeout(r, 500));
     expect(() => process.kill(s!.pid, 0)).not.toThrow();
     app = await electron.launch({ args: ["."], cwd: join(ROOT, "apps/desktop"), env: { ...process.env, MESS_DATA_DIR: dataDir, MESS_PORT: String(PORT) } });
     page = await app.firstWindow();
-    await page.waitForSelector(".node.terminal .st.running", { timeout: 10_000 });
-  });
+    await page.waitForSelector(".side li.ws:has-text('E2E')", { timeout: 20_000 });
+    await page.click(".side li.ws:has-text('E2E')"); // garante o espaço do teste (o padrão também existe)
+    await page.waitForSelector(".node.terminal .st.running", { timeout: 20_000 });
+  }, 60_000);
 });
 
 describe("conexões e rename", () => {
   it("liga nota ao terminal pelos handles e persiste", async () => {
-    const [ws] = await api("/v1/workspaces") as { workspaceId: string }[];
+    const ws = await e2eWs();
     const src = page.locator(".react-flow__node-note .react-flow__handle.source").first();
     const dst = page.locator(".react-flow__node-terminal .react-flow__handle.target").first();
-    const count = async () => ((await api(`/v1/workspaces/${ws!.workspaceId}`)) as { connections: unknown[] }).connections.length;
+    const count = async () => ((await api(`/v1/workspaces/${ws.workspaceId}`)) as { connections: unknown[] }).connections.length;
     for (let attempt = 0; attempt < 6 && (await count()) === 0; attempt++) {
       await page.waitForTimeout(300);
       const a = (await src.boundingBox())!, b = (await dst.boundingBox())!;
@@ -104,11 +110,11 @@ describe("conexões e rename", () => {
     await page.waitForSelector(".react-flow__edge", { timeout: 5000 });
   }, 20_000);
   it("renomeia a nota por duplo clique", async () => {
-    const [ws] = await api("/v1/workspaces") as { workspaceId: string }[];
+    const ws = await e2eWs();
     await page.dblclick(".node.note .bar .title");
     await page.fill(".node.note .title-edit", "Minha nota"); await page.keyboard.press("Enter");
     await page.waitForSelector(".node.note .bar .title:has-text('Minha nota')");
-    const snap = await api(`/v1/workspaces/${ws!.workspaceId}`) as { nodes: { kind: string; title: string }[] };
+    const snap = await api(`/v1/workspaces/${ws.workspaceId}`) as { nodes: { kind: string; title: string }[] };
     expect(snap.nodes.find((n) => n.kind === "note")!.title).toBe("Minha nota");
   });
 });
@@ -116,7 +122,7 @@ describe("conexões e rename", () => {
 describe("ferramentas do canvas", () => {
   beforeEach(async () => { await page.keyboard.press("Escape"); await page.waitForTimeout(250); });
   it("tecla T + arrastar cria terminal com o tamanho desenhado (via diálogo)", async () => {
-    const [ws] = await api("/v1/workspaces") as { workspaceId: string }[];
+    const ws = await e2eWs();
     await page.mouse.click(700, 60); // tira foco de inputs/terminal
     await page.keyboard.press("Escape"); await page.keyboard.press("t");
     await page.waitForSelector(".capture.terminal");
@@ -126,7 +132,7 @@ describe("ferramentas do canvas", () => {
     await page.waitForSelector(".modal");
     await page.click(".qs:has-text('Shell')"); await page.click(".actions .pri");
     await page.waitForSelector(".node.terminal .st.running >> nth=1", { timeout: 10_000 });
-    const snap = await api(`/v1/workspaces/${ws!.workspaceId}`) as { nodes: { kind: string; geometry: { w: number; h: number } }[] };
+    const snap = await api(`/v1/workspaces/${ws.workspaceId}`) as { nodes: { kind: string; geometry: { w: number; h: number } }[] };
     const terms = snap.nodes.filter((n) => n.kind === "terminal");
     const last = terms[terms.length - 1]!;
     // zoom pode não ser 1: o retângulo desenhado tem proporção 3:2
@@ -134,7 +140,7 @@ describe("ferramentas do canvas", () => {
   });
 
   it("tecla B + arrastar desenha um traço persistido; borracha apaga", async () => {
-    const [ws] = await api("/v1/workspaces") as { workspaceId: string }[];
+    const ws = await e2eWs();
     await page.mouse.click(700, 60); await page.keyboard.press("Escape"); await page.keyboard.press("b");
     await page.waitForSelector(".tools.sub");
     const pane = (await page.locator("main.canvas").boundingBox())!;
@@ -143,7 +149,7 @@ describe("ferramentas do canvas", () => {
     for (let i = 1; i <= 12; i++) await page.mouse.move(x0 + i * 10, y0 + Math.sin(i / 2) * 20);
     await page.mouse.up();
     await page.waitForTimeout(500);
-    let snap = await api(`/v1/workspaces/${ws!.workspaceId}`) as { drawings: { kind: string; points: number[][] }[] };
+    let snap = await api(`/v1/workspaces/${ws.workspaceId}`) as { drawings: { kind: string; points: number[][] }[] };
     expect(snap.drawings.length).toBe(1); expect(snap.drawings[0]!.kind).toBe("pen"); expect(snap.drawings[0]!.points.length).toBeGreaterThan(3);
     await page.click(".tools.sub .tb[title='Borracha']");
     await page.waitForTimeout(150);
@@ -152,7 +158,7 @@ describe("ferramentas do canvas", () => {
     await page.mouse.click(x0 + 1, y0 + 1);
     await page.waitForTimeout(500);
     void box;
-    snap = await api(`/v1/workspaces/${ws!.workspaceId}`) as { drawings: unknown[] };
+    snap = await api(`/v1/workspaces/${ws.workspaceId}`) as { drawings: unknown[] };
     expect(snap.drawings.length).toBe(0);
     await page.keyboard.press("Escape");
   });
@@ -310,7 +316,7 @@ describe("ferramentas do canvas", () => {
     await node.locator('[data-testid="role-pill"].none').waitFor({ state: "attached", timeout: 10_000 });
     // Gerenciar… abre o diálogo
     await node.locator('[data-testid="role-pill"]').click();
-    await node.locator(".role-menu .mi:has-text('Gerenciar')").click();
+    await node.locator(".role-menu .mi", { hasText: /^Gerenciar…$/ }).click(); // há também "Gerenciar habilidades…" (#57)
     await page.waitForSelector('[data-testid="roles-dialog"] .mi:has-text("Revisor")');
     await page.keyboard.press("Escape");
   }, 40_000);
