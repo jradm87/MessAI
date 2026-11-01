@@ -89,10 +89,10 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
   app.delete<{ Params: { id: string }; Querystring: { deleteBranch?: string } }>("/v1/workspaces/:id", async (req, reply) => send(reply, svc.deleteWorkspace(req.params.id, { deleteBranch: req.query.deleteBranch === "1" }), 204));
 
   // árvore de arquivos
-  app.get<{ Params: { id: string }; Querystring: { path?: string } }>("/v1/workspaces/:id/tree", async (req, reply) => send(reply, svc.listTree(req.params.id, req.query.path ?? "")));
+  app.get<{ Params: { id: string }; Querystring: { path?: string } }>("/v1/workspaces/:id/tree", async (req, reply) => send(reply, await svc.listTree(req.params.id, req.query.path ?? "")));
   app.get<{ Params: { id: string }; Querystring: { path?: string } }>("/v1/workspaces/:id/file", async (req, reply) => send(reply, svc.readFile(req.params.id, req.query.path ?? "")));
   app.post<{ Params: { id: string } }>("/v1/workspaces/:id/fs", async (req, reply) => { const b = body<FsOp>(FsOp, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.fsOp(req.params.id, b)); });
-  app.get<{ Params: { id: string }; Querystring: { q?: string; content?: string } }>("/v1/workspaces/:id/search", async (req, reply) => send(reply, svc.searchFiles(req.params.id, req.query.q ?? "", req.query.content === "1")));
+  app.get<{ Params: { id: string }; Querystring: { q?: string; content?: string } }>("/v1/workspaces/:id/search", async (req, reply) => send(reply, await svc.searchFiles(req.params.id, req.query.q ?? "", req.query.content === "1")));
 
   // andares (floors)
   app.get<{ Params: { id: string } }>("/v1/workspaces/:id/floors", async (req, reply) => send(reply, svc.listFloors(req.params.id)));

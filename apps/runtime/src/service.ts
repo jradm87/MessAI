@@ -7,7 +7,8 @@ import { newId, nowIso, type Config } from "./config.js";
 import { dirname, join, delimiter, basename, extname, relative } from "node:path";
 import { closeSync, existsSync, mkdirSync, openSync, readSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFile, execFileSync, spawnSync } from "node:child_process";
+import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 // Dev: CLI em apps/cli/bin. Empacotado: resources/cli (MESS_RESOURCES vem do main).
 const CLI_DIR = process.env["MESS_RESOURCES"] ? join(process.env["MESS_RESOURCES"], "cli") : join(dirname(fileURLToPath(import.meta.url)), "../../cli/bin");
@@ -59,6 +60,23 @@ async function fetchClaudeLimits(): Promise<{ plan?: string; limits: AgentUsageL
     return { ...(plan ? { plan } : {}), limits };
   } catch { return null; }
 }
+
+const execFileP = promisify(execFile);
+/**
+ * Roda um comando externo SEM bloquear o event loop (MESS-05), com timeout e teto de saída.
+ * Nunca lança: devolve status + stdout (grep sai 1 sem resultado; git sai !=0 fora de repo).
+ */
+async function runCmd(cmd: string, args: string[], opts: { cwd?: string; timeoutMs: number; maxBuffer?: number }): Promise<{ status: number; stdout: string }> {
+  try {
+    const { stdout } = await execFileP(cmd, args, { cwd: opts.cwd, timeout: opts.timeoutMs, maxBuffer: opts.maxBuffer ?? 8 * 1024 * 1024, encoding: "utf8" });
+    return { status: 0, stdout: String(stdout) };
+  } catch (e) {
+    const err = e as { code?: number | string; stdout?: string };
+    return { status: typeof err.code === "number" ? err.code : 1, stdout: String(err.stdout ?? "") };
+  }
+}
+/** Teto para operações git síncronas de andares (transacionais, raras): limita o pior caso em vez de travar indefinidamente. */
+const GIT_SYNC_TIMEOUT_MS = 15_000;
 
 export class WorkspaceService extends EventEmitter<ServiceEvents> {
   constructor(private readonly cfg: Config, private readonly store: Store, readonly sessions: SessionManager) { super(); }
@@ -294,19 +312,23 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const r = safeRelPath(rel); if (!r.ok) return r;
     return succeed({ abs: r.value ? join(root, r.value) : root, rel: r.value });
   }
-  private gitStatusMap(root: string): Map<string, string> {
+  /** Cache curto do `git status` por raiz: listagens repetidas (navegar pastas) não re-spawnam o git. */
+  private gitStatusCache = new Map<string, { at: number; map: Map<string, string> }>();
+  private async gitStatusMap(root: string): Promise<Map<string, string>> {
+    const hit = this.gitStatusCache.get(root);
+    if (hit && Date.now() - hit.at < 1500) return hit.map;
     const m = new Map<string, string>();
-    const r = spawnSync("git", ["-C", root, "status", "--porcelain", "--untracked-files=all"], { encoding: "utf8" });
-    if (r.status !== 0) return m;
-    for (const line of r.stdout.split("\n")) { if (line.length < 4) continue; const code = line.slice(0, 2).trim() || "M"; const p = line.slice(3).split(" -> ").pop()!.trim(); m.set(p, code); let d = p; while (d.includes("/")) { d = d.slice(0, d.lastIndexOf("/")); if (!m.has(d)) m.set(d, "•"); } }
+    const r = await runCmd("git", ["-C", root, "status", "--porcelain", "--untracked-files=all"], { timeoutMs: 4000 });
+    if (r.status === 0) for (const line of r.stdout.split("\n")) { if (line.length < 4) continue; const code = line.slice(0, 2).trim() || "M"; const p = line.slice(3).split(" -> ").pop()!.trim(); m.set(p, code); let d = p; while (d.includes("/")) { d = d.slice(0, d.lastIndexOf("/")); if (!m.has(d)) m.set(d, "•"); } }
+    this.gitStatusCache.set(root, { at: Date.now(), map: m }); // cacheia também o "não é git" para não martelar
     return m;
   }
-  listTree(workspaceId: string, rel: string): Result<TreeEntry[]> {
+  async listTree(workspaceId: string, rel: string): Promise<Result<TreeEntry[]>> {
     const root = this.wsRoot(workspaceId); if (!root.ok) return root;
     const p = this.resolveIn(root.value, rel); if (!p.ok) return p;
     let entries: import("node:fs").Dirent[];
     try { entries = readdirSync(p.value.abs, { withFileTypes: true }); } catch { return fail("NOT_FOUND", "diretório não encontrado"); }
-    const git = this.gitStatusMap(root.value);
+    const git = await this.gitStatusMap(root.value);
     const out: TreeEntry[] = [];
     for (const e of entries) {
       if (e.name === ".git") continue; // metadados do git ficam fora da árvore
@@ -343,7 +365,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     return succeed({ path: p.value.rel });
   }
   /** Busca por nome (substring) ou, com `content`, por conteúdo (grep -rnI, até 200 linhas). */
-  searchFiles(workspaceId: string, q: string, content: boolean): Result<SearchHit[]> {
+  async searchFiles(workspaceId: string, q: string, content: boolean): Promise<Result<SearchHit[]>> {
     const root = this.wsRoot(workspaceId); if (!root.ok) return root;
     if (!q.trim()) return succeed([]);
     if (!content) {
@@ -357,9 +379,10 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       walk(root.value, "", 0);
       return succeed(out);
     }
-    const r = spawnSync("grep", ["-rnI", "--exclude-dir=.git", "--exclude-dir=node_modules", "--exclude-dir=dist", "--exclude-dir=build", "-m", "20", "--", q, "."], { cwd: root.value, encoding: "utf8", maxBuffer: 8 * 1024 * 1024 });
+    // grep async com timeout: um repositório grande não trava o event loop nem as outras rotas.
+    const r = await runCmd("grep", ["-rnI", "--exclude-dir=.git", "--exclude-dir=node_modules", "--exclude-dir=dist", "--exclude-dir=build", "-m", "20", "--", q, "."], { cwd: root.value, timeoutMs: 8000 });
     const hits: SearchHit[] = [];
-    for (const line of (r.stdout ?? "").split("\n")) { const m = /^\.\/(.+?):(\d+):(.*)$/.exec(line); if (m) hits.push({ path: m[1]!, line: Number(m[2]), text: m[3]!.slice(0, 200) }); if (hits.length >= 200) break; }
+    for (const line of r.stdout.split("\n")) { const m = /^\.\/(.+?):(\d+):(.*)$/.exec(line); if (m) hits.push({ path: m[1]!, line: Number(m[2]), text: m[3]!.slice(0, 200) }); if (hits.length >= 200) break; }
     return succeed(hits);
   }
 
@@ -407,7 +430,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
 
   // ---- andares (floors) ----
   private git(cwd: string, args: string[]): { ok: boolean; out: string } {
-    const r = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
+    const r = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8", timeout: GIT_SYNC_TIMEOUT_MS });
     return { ok: r.status === 0, out: `${r.stdout ?? ""}${r.stderr ?? ""}`.trim() };
   }
   isGitRepo(cwd: string): boolean { return this.git(cwd, ["rev-parse", "--is-inside-work-tree"]).ok; }
@@ -517,9 +540,9 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     if (w.parentId && w.floorType === "worktree") {
       const ground = this.store.getWorkspace(w.parentId);
       if (ground) {
-        spawnSync("git", ["-C", ground.cwd, "worktree", "remove", "--force", w.cwd], { stdio: "ignore" });
-        spawnSync("git", ["-C", ground.cwd, "worktree", "prune"], { stdio: "ignore" });
-        if (opts.deleteBranch && w.branch) spawnSync("git", ["-C", ground.cwd, "branch", "-D", w.branch], { stdio: "ignore" });
+        spawnSync("git", ["-C", ground.cwd, "worktree", "remove", "--force", w.cwd], { stdio: "ignore", timeout: GIT_SYNC_TIMEOUT_MS });
+        spawnSync("git", ["-C", ground.cwd, "worktree", "prune"], { stdio: "ignore", timeout: GIT_SYNC_TIMEOUT_MS });
+        if (opts.deleteBranch && w.branch) spawnSync("git", ["-C", ground.cwd, "branch", "-D", w.branch], { stdio: "ignore", timeout: GIT_SYNC_TIMEOUT_MS });
       }
       if (existsSync(w.cwd) && w.cwd.startsWith(join(this.cfg.dataDir, "floors"))) rmSync(w.cwd, { recursive: true, force: true });
     }

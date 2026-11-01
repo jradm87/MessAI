@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -61,5 +61,23 @@ describe("árvore de arquivos", () => {
     const byContent = (await api("GET", `/v1/workspaces/${ws}/search?q=answer&content=1`)).json as { path: string; line: number; text: string }[];
     expect(byContent).toEqual([{ path: "src/deep/main.ts", line: 1, text: "export const answer = 42;" }]);
     expect((await api("GET", `/v1/workspaces/${ws}/search?q=`)).json).toEqual([]);
+  });
+  it("#90: status git na árvore (async + cache) e rotas independentes respondem sob concorrência", async () => {
+    execFileSync("git", ["init", "-q"], { cwd: join(dir, "proj"), env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null" } });
+    await new Promise((r) => setTimeout(r, 1600)); // os testes anteriores cachearam "não é repo"; o cache de git status tem TTL de 1,5 s
+    type G = E & { git?: string };
+    const a = (await api("GET", `/v1/workspaces/${ws}/tree`)).json as G[];
+    expect(a.find((e) => e.name === "README.md")?.git).toBe("??"); // untracked, vindo do git status async
+    const b = (await api("GET", `/v1/workspaces/${ws}/tree`)).json as G[]; // 2ª chamada dentro do TTL → serve do cache
+    expect(b.find((e) => e.name === "README.md")?.git).toBe("??");
+    // busca por conteúdo (grep async) + árvore + health + busca por nome, tudo em paralelo: nenhuma rota fica presa
+    const rs = await Promise.all([
+      api("GET", `/v1/workspaces/${ws}/search?q=answer&content=1`),
+      api("GET", `/v1/workspaces/${ws}/tree?path=src`),
+      api("GET", `/v1/health`),
+      api("GET", `/v1/workspaces/${ws}/search?q=main`),
+    ]);
+    expect(rs.map((r) => r.status)).toEqual([200, 200, 200, 200]);
+    expect(rs[0].json).toEqual([{ path: "src/deep/main.ts", line: 1, text: "export const answer = 42;" }]);
   });
 });
