@@ -137,11 +137,16 @@ export function canMessage(connections: Pick<Connection, "sourceNodeId" | "targe
   return linked ? succeed(undefined) : fail("FORBIDDEN", "os nós não estão conectados; ligue-os no canvas ou use `mess connect`");
 }
 
-/** Texto entregue no terminal de destino. Uma linha de cabeçalho e o corpo; termina com Enter. */
+/**
+ * Texto entregue no terminal de destino: cabeçalho + corpo, termina com Enter.
+ * O cabeçalho vai como COMENTÁRIO (`# …`): um shell comum (fish/bash) ignora a linha
+ * inteira — inclusive o `(id)`, que o fish senão trataria como command substitution e
+ * cuspiria "Unknown command". Agentes de IA recebem como paste multilinha e leem igual.
+ */
 export function formatDelivery(m: { messageId: string; fromTitle: string; text: string; replyTo?: string | undefined }): string {
   const head = m.replyTo
-    ? `[MessAI] Resposta de "${m.fromTitle}" (${m.messageId.slice(0, 8)}):`
-    : `[MessAI] Mensagem de "${m.fromTitle}" (${m.messageId.slice(0, 8)}). Para responder: mess reply ${m.messageId.slice(0, 8)} "texto"`;
+    ? `# [MessAI] Resposta de "${m.fromTitle}" (${m.messageId.slice(0, 8)}):`
+    : `# [MessAI] Mensagem de "${m.fromTitle}" (${m.messageId.slice(0, 8)}). Para responder: mess reply ${m.messageId.slice(0, 8)} "texto"`;
   return `${head}\n${m.text.replace(/\r?\n/g, " ")}\r`;
 }
 

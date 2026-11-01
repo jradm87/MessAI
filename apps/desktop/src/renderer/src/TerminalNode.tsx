@@ -4,7 +4,6 @@ import { Search, Eraser, Lock, Eye, Folder } from "lucide-react";
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
-import { WebglAddon } from "@xterm/addon-webgl";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { SearchAddon } from "@xterm/addon-search";
 import "@xterm/xterm/css/xterm.css";
@@ -45,8 +44,10 @@ export function TerminalNode({ id, data, selected }: NodeProps & { data: Termina
     // Ctrl+F abre a busca sem repassar ao shell (no readline seria forward-char).
     term.attachCustomKeyEventHandler((e) => { if (e.type === "keydown" && (e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "f") { setFind((v) => v ?? ""); return false; } return true; });
     term.open(host.current!);
-    // Render em GPU quando houver contexto; se faltar (ex.: --disable-gpu) cai no renderer padrão.
-    try { const webgl = new WebglAddon(); webgl.onContextLoss(() => { try { webgl.dispose(); } catch { /* já descartado */ } }); term.loadAddon(webgl); } catch { /* sem WebGL */ }
+    // Renderer canvas/DOM (sem WebGL de propósito): o React Flow aplica `transform: scale` no
+    // zoom, e o renderer WebGL ignora esse scale — mede a célula errado, o `fit` calcula colunas
+    // demais e o `ls`/prompt saem embaralhados (timestamps repetidos, conteúdo jogado pra direita).
+    // O canvas respeita o scale do CSS e mede a célula de forma confiável.
     termRef.current = term;
     let lastSeq = 0;
     let mine = false;
@@ -63,7 +64,17 @@ export function TerminalNode({ id, data, selected }: NodeProps & { data: Termina
     });
     stream.attach(sessionId);
     const onData = term.onData((d) => stream.send({ type: "input", sessionId, data: d }));
-    const ro = new ResizeObserver(() => { try { fit.fit(); sendResize(); } catch { /* ainda sem layout */ } });
+    // Blindagem: só aplica o tamanho proposto se for são. Dimensões absurdas (célula medida ~0
+    // durante uma transição de zoom/layout) deixariam o PTY com centenas de colunas e embaralhariam a saída.
+    const ro = new ResizeObserver(() => {
+      try {
+        const d = fit.proposeDimensions();
+        if (!d || !Number.isFinite(d.cols) || !Number.isFinite(d.rows)) return;
+        if (d.cols < 2 || d.rows < 1 || d.cols > 1000 || d.rows > 1000) return;
+        if (d.cols !== term.cols || d.rows !== term.rows) term.resize(d.cols, d.rows);
+        sendResize();
+      } catch { /* ainda sem layout */ }
+    });
     ro.observe(host.current!);
     const el = host.current!;
     const focus = () => { if (stateRef.current === "running") stream.send({ type: "acquireLease", sessionId }); data.onFocus(); };
