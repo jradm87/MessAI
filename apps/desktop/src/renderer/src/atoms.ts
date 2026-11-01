@@ -13,14 +13,17 @@ export const themeAtom = atom<"light" | "dark">("dark");
  */
 export const sessStateMapAtom = atom<Record<string, string>>({});
 export const unreadMapAtom = atom<Record<string, number>>({});
+/** #65: nós cujo agente concluiu um turno e ainda não foram olhados (nodeId → ISO de quando assentou). */
+export const finishedMapAtom = atom<Record<string, string>>({});
 
 export const sessStateAtom = atomFamily((id: string) => selectAtom(sessStateMapAtom, (m) => m[id]));
 export const unreadAtom = atomFamily((id: string) => selectAtom(unreadMapAtom, (m) => m[id] ?? 0));
+export const finishedAtom = atomFamily((id: string) => selectAtom(finishedMapAtom, (m) => m[id]));
 
-/** Atenção derivada: não-lidas pendentes ou processo encerrado/perdido. */
+/** Atenção derivada: não-lidas pendentes, agente que concluiu e espera você, ou processo encerrado/perdido. */
 export const attentionAtom = atomFamily((id: string) =>
   atom((get) => {
     const s = get(sessStateAtom(id));
-    return get(unreadAtom(id)) > 0 || s === "exited" || s === "lost";
+    return get(unreadAtom(id)) > 0 || !!get(finishedAtom(id)) || s === "exited" || s === "lost";
   }),
 );

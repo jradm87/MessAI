@@ -3,7 +3,7 @@ import * as pty from "node-pty";
 import xtermHeadless from "@xterm/headless";
 const HeadlessTerminal = xtermHeadless.Terminal;
 type HeadlessTerminal = InstanceType<typeof HeadlessTerminal>;
-import type { Session } from "@messai/contracts";
+import type { Session, TaskFinished } from "@messai/contracts";
 import { decideLease, trimBuffer, tmuxSessionName, tmuxAttachPlan, agentKind, type TerminalPlan, type Result, fail, succeed } from "@messai/domain";
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -18,11 +18,21 @@ type Live = {
   totalBytes: number;
   sequence: number;
   lease?: { clientId: string; expiresAt: string } | undefined;
+  /** Detecção de "tarefa concluída" (#65): um turno abre com input e fecha quando o output assenta. */
+  agent: { isAgent: boolean; agentType: string };
+  turnOpen: boolean;
+  turnBytes: number;
+  idleTimer?: ReturnType<typeof setTimeout> | undefined;
 };
+/** Quiescência para considerar o turno de um agente concluído (agentes animam enquanto pensam). */
+const TURN_IDLE_MS = 1500;
+/** Mínimo de saída num turno para contar como trabalho (ignora um eco/redraw isolado). */
+const TURN_MIN_BYTES = 32;
 
 export type SessionEvents = {
   output: [sessionId: string, sequence: number, data: string];
   session: [session: Session];
+  taskFinished: [event: TaskFinished];
 };
 
 /** Dono dos PTYs. Nunca depende do cliente estar conectado. */
@@ -70,7 +80,8 @@ export class SessionManager extends EventEmitter<SessionEvents> {
       env: plan.env,
     });
     const term = new HeadlessTerminal({ cols: session.cols, rows: session.rows, scrollback: 2000, allowProposedApi: true });
-    const live: Live = { proc, term, chunks: [], totalBytes: 0, sequence: 0 };
+    const k = agentKind(session.command, session.args);
+    const live: Live = { proc, term, chunks: [], totalBytes: 0, sequence: 0, agent: { isAgent: k.isAgent, agentType: k.agentType }, turnOpen: false, turnBytes: 0 };
     this.live.set(session.sessionId, live);
     this.store.updateSession(session.sessionId, { state: "running", pid: proc.pid });
     if (cwd !== wantedCwd) {
@@ -88,6 +99,22 @@ export class SessionManager extends EventEmitter<SessionEvents> {
       live.totalBytes = t.totalBytes;
       term.write(data);
       this.emit("output", session.sessionId, live.sequence, data);
+      // #65: só agentes, e só dentro de um turno (houve input). Reinicia o timer a cada saída; quando
+      // assenta por TURN_IDLE_MS com saída suficiente, o turno terminou → o agente concluiu/espera você.
+      if (live.agent.isAgent && live.turnOpen) {
+        live.turnBytes += Buffer.byteLength(data);
+        if (live.idleTimer) clearTimeout(live.idleTimer);
+        live.idleTimer = setTimeout(() => {
+          live.idleTimer = undefined;
+          if (!live.turnOpen || this.live.get(session.sessionId) !== live) return;
+          live.turnOpen = false;
+          if (live.turnBytes < TURN_MIN_BYTES) { live.turnBytes = 0; return; }
+          live.turnBytes = 0;
+          const s = this.store.getSession(session.sessionId);
+          if (!s || s.state !== "running") return;
+          this.emit("taskFinished", { sessionId: s.sessionId, nodeId: s.nodeId, workspaceId: s.workspaceId, agentType: live.agent.agentType, at: nowIso(), screen: this.screen(s.sessionId) ?? "" });
+        }, TURN_IDLE_MS);
+      }
     });
     proc.onExit(({ exitCode }) => {
       if (this.live.get(session.sessionId) !== live) return; // processo substituído (reatribuição de papel): ignora a saída do antigo
@@ -137,6 +164,7 @@ export class SessionManager extends EventEmitter<SessionEvents> {
     if (!l || !s) return fail("NOT_FOUND", "sessão não encontrada");
     const ok = this.ensureLease(l, s, clientId);
     if (!ok.ok) return ok;
+    l.turnOpen = true; l.turnBytes = 0; // input do usuário abre um turno (#65)
     l.proc.write(data);
     return succeed(undefined);
   }
@@ -176,6 +204,7 @@ export class SessionManager extends EventEmitter<SessionEvents> {
     // Separa o Enter final: TUIs com detecção de paste (Claude Code etc.) tratam o \r do mesmo bloco
     // como quebra de linha do paste, não como submit. Mandando o Enter sozinho depois, ele submete.
     const submit = /[\r\n]$/.test(data);
+    l.turnOpen = true; l.turnBytes = 0; // mensagem de outro agente também abre um turno (#65)
     l.proc.write(submit ? data.replace(/[\r\n]+$/, "") : data);
     if (submit) setTimeout(() => { try { this.live.get(sessionId)?.proc.write("\r"); } catch { /* sessão encerrou */ } }, 120);
     return succeed(undefined);
@@ -240,6 +269,7 @@ export class SessionManager extends EventEmitter<SessionEvents> {
     const l = this.live.get(sessionId);
     if (!keepTmux && this.store.getSession(sessionId)?.persistent) this.tmuxKill(sessionId);
     if (l) {
+      if (l.idleTimer) clearTimeout(l.idleTimer);
       try { l.proc.kill(); } catch { /* já encerrado */ }
       l.term.dispose();
       this.live.delete(sessionId);

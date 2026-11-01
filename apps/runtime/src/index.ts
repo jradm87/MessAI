@@ -21,11 +21,17 @@ const pidPath = join(cfg.dataDir, "runtime.pid");
 const shutdown = async (killAgents = false) => {
   // killAgents=false: mantém as sessões tmux (reinício do runtime; o próximo boot reanexa).
   // killAgents=true: "Encerrar tudo" — mata também os agentes dentro do tmux.
+  // Teto de segurança: `close()` do Fastify espera conexões abertas (WebSocket do app) terminarem e pode
+  // nunca voltar — o runtime viraria um zumbi segurando a porta. Encerra os WS e, no pior caso, sai à força.
+  setTimeout(() => process.exit(0), 2000).unref();
+  // pid file e socket somem JÁ: o processo vai embora de qualquer jeito (gracioso ou pelo teto acima), e um
+  // pid file sobrevivente faria o version-check do app mandar SIGTERM num pid reciclado depois.
+  try { if (existsSync(pidPath)) unlinkSync(pidPath); } catch { /* já foi */ }
+  try { if (existsSync(cfg.socketPath)) unlinkSync(cfg.socketPath); } catch { /* já foi */ }
   if (killAgents) sessions.disposeAllHard(); else sessions.shutdownAll();
+  for (const s of [http, agent]) { try { for (const c of s.websocketServer?.clients ?? []) c.terminate(); } catch { /* sem WS neste servidor */ } }
   await Promise.all([http.close(), agent.close()]);
   store.close();
-  try { if (existsSync(cfg.socketPath)) unlinkSync(cfg.socketPath); } catch { /* já foi */ }
-  try { if (existsSync(pidPath)) unlinkSync(pidPath); } catch { /* já foi */ }
   process.exit(0);
 };
 

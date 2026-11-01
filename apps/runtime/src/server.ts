@@ -244,6 +244,8 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
         const onChat = (message: import("@messai/contracts").ChatMessage) => { if (workspaces.has(message.workspaceId)) push({ type: "chat", message }); };
         svc.on("chat", onChat);
         svc.on("message", onMessage);
+        const onTaskFinished = (event: import("@messai/contracts").TaskFinished) => { if (workspaces.has(event.workspaceId)) push({ type: "taskFinished", event }); };
+        svc.sessions.on("taskFinished", onTaskFinished);
         svc.sessions.on("output", onOutput);
         svc.sessions.on("session", onSession);
         svc.on("workspace", onWorkspace);
@@ -286,7 +288,7 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
         });
         socket.on("close", () => {
           for (const id of attached) svc.sessions.releaseLease(id, clientId);
-          svc.sessions.off("output", onOutput); svc.sessions.off("session", onSession); svc.off("workspace", onWorkspace); svc.off("message", onMessage); svc.off("sidebar", onSidebar); svc.off("chat", onChat);
+          svc.sessions.off("output", onOutput); svc.sessions.off("session", onSession); svc.off("workspace", onWorkspace); svc.off("message", onMessage); svc.sessions.off("taskFinished", onTaskFinished); svc.off("sidebar", onSidebar); svc.off("chat", onChat);
         });
       });
     });

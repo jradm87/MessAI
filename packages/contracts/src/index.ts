@@ -201,6 +201,18 @@ export const Message = Type.Object({
 });
 export type Message = Static<typeof Message>;
 
+// Companheiro (#65): um agente CONCLUIU um turno (recebeu input, trabalhou e assentou). Só para agentes de IA.
+export const TaskFinished = Type.Object({
+  sessionId: Id,
+  nodeId: Id,
+  workspaceId: Id,
+  agentType: Type.String(),
+  at: Type.String(),
+  /** Última tela (viewport) no momento em que assentou — insumo para resumo (#66) e HUD (#67). */
+  screen: Type.String(),
+});
+export type TaskFinished = Static<typeof TaskFinished>;
+
 export const SendMessage = Type.Object({
   to: Type.String({ minLength: 1 }), // nodeId, prefixo de id ou título
   text: Type.String({ minLength: 1, maxLength: 20000 }),
@@ -364,6 +376,7 @@ export const WsServerMessage = Type.Union([
   Type.Object({ type: Type.Literal("sidebar"), sidebar: Sidebar }),
   Type.Object({ type: Type.Literal("chat"), message: ChatMessage }),
   Type.Object({ type: Type.Literal("message"), message: Message }),
+  Type.Object({ type: Type.Literal("taskFinished"), event: TaskFinished }),
   Type.Object({ type: Type.Literal("error"), error: ApiError, sessionId: Type.Optional(Id) }),
 ]);
 export type WsServerMessage = Static<typeof WsServerMessage>;
