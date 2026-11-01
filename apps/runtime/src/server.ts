@@ -23,7 +23,7 @@ function send<T>(reply: FastifyReply, r: Result<T>, okStatus = 200) {
   return reply.status(STATUS[r.error.code]).send({ error: r.error });
 }
 
-export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: boolean }): FastifyInstance {
+export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: boolean; onShutdown?: (killAgents: boolean) => void }): FastifyInstance {
   const app = Fastify({ logger: false, bodyLimit: 40 * 1024 * 1024 });
 
   // Autenticação: token Bearer (ou ?token= para o WS do navegador). Origem só loopback/file.
@@ -39,6 +39,15 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
   });
 
   app.get("/v1/health", async () => ({ ok: true, protocolVersion: PROTOCOL_VERSION, buildVersion: BUILD_VERSION, machineId: cfg.machineId }));
+  // Tela de encerramento do app: o que está rodando agora (terminais/agentes).
+  app.get("/v1/running", async () => ({ sessions: svc.sessions.runningList() }));
+  // Encerrar o runtime. killAgents=true mata também as sessões tmux (agentes); false mantém (reanexa no próximo boot).
+  app.post<{ Body?: { killAgents?: boolean } }>("/v1/shutdown", async (req, reply) => {
+    if (!opts.onShutdown) return reply.status(400).send({ error: { code: "INVALID", message: "shutdown indisponível neste servidor" } });
+    const killAgents = !!(req.body && req.body.killAgents);
+    reply.status(202).send({ ok: true, killAgents });
+    setTimeout(() => opts.onShutdown!(killAgents), 50); // responde antes de sair
+  });
   app.get("/v1/capabilities", async (): Promise<Capabilities> => ({
     protocolVersion: PROTOCOL_VERSION, machineId: cfg.machineId,
     features: ["workspaces", "folders", "sidebar", "files", "attachments", "chat", "roles", "notes.file", "notes.lock", "connections.style", "floors", "nodes.tree", ...(SessionManager.tmuxAvailable() ? ["terminal.tmux"] : []), "nodes.terminal", "nodes.note", "connections", "messages", "drawings", "nodes.text", "terminal.lease", "terminal.snapshot", opts.unix ? "agent.socket" : "client.http"],

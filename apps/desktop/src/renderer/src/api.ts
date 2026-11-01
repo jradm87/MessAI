@@ -1,7 +1,8 @@
 import type { ApiError, TreeEntry, FileContent, FsOp, SearchHit, CreateFloor, LandFloor, LandResult, PatchConnection, Role, CreateRole, PatchRole, ChatMessage, SendChat, Attachment, CreateAttachment, FileEntry, Connection as WsConnection, CreateDrawing, PatchDrawing, GroupDrawings, CreateFolder, CreateNode, CreateWorkspace, Drawing, Folder, Geometry, PatchFolder, PatchWorkspace, Preset, Node, PatchNode, Session, Sidebar, Workspace, WorkspaceSnapshot, WsClientMessage, WsServerMessage } from "@messai/contracts";
 
 export type Connection = { baseUrl: string; wsUrl: string; token: string; homeDir?: string };
-declare global { interface Window { messai: { connection(): Promise<Connection | null>; pickDirectory?: () => Promise<string | null>; pathForFile?: (f: File) => string } } }
+export type RunningEntry = { title: string; agentType: string; isAgent: boolean; workspace: string };
+declare global { interface Window { messai: { connection(): Promise<Connection | null>; pickDirectory?: () => Promise<string | null>; pathForFile?: (f: File) => string; onShutdownPrompt?: (cb: (data: { running: RunningEntry[] }) => void) => void; shutdownDecision?: (action: "background" | "all" | "cancel") => Promise<void> } } }
 
 export class ApiClientError extends Error { constructor(readonly error: ApiError, readonly status: number) { super(error.message); } }
 

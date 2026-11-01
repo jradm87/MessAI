@@ -4,7 +4,7 @@ import xtermHeadless from "@xterm/headless";
 const HeadlessTerminal = xtermHeadless.Terminal;
 type HeadlessTerminal = InstanceType<typeof HeadlessTerminal>;
 import type { Session } from "@messai/contracts";
-import { decideLease, trimBuffer, tmuxSessionName, tmuxAttachPlan, type TerminalPlan, type Result, fail, succeed } from "@messai/domain";
+import { decideLease, trimBuffer, tmuxSessionName, tmuxAttachPlan, agentKind, type TerminalPlan, type Result, fail, succeed } from "@messai/domain";
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
@@ -249,6 +249,25 @@ export class SessionManager extends EventEmitter<SessionEvents> {
   shutdownAll(): void {
     // Sessões tmux continuam vivas: o próximo runtime reanexa.
     for (const id of [...this.live.keys()]) { const p = this.store.getSession(id)?.persistent; this.dispose(id, true); if (p) this.store.updateSession(id, { state: "starting", pid: null }); }
+  }
+
+  /** Encerra TUDO de verdade: mata também as sessões tmux (agentes). Usado pelo "Encerrar tudo". */
+  disposeAllHard(): void {
+    for (const id of [...this.live.keys()]) { this.dispose(id, false); this.store.updateSession(id, { state: "exited", pid: null }); }
+  }
+
+  /** Sessões rodando agora (para a tela de encerramento): título do nó + tipo (agente/shell). */
+  runningList(): { sessionId: string; title: string; agentType: string; isAgent: boolean; workspace: string }[] {
+    const out: { sessionId: string; title: string; agentType: string; isAgent: boolean; workspace: string }[] = [];
+    for (const id of this.live.keys()) {
+      const s = this.store.getSession(id);
+      if (!s || s.state !== "running") continue;
+      const node = this.store.getNode(s.nodeId);
+      const ws = this.store.getWorkspace(s.workspaceId);
+      const k = agentKind(s.command, s.args);
+      out.push({ sessionId: id, title: node?.title ?? "terminal", agentType: k.agentType, isAgent: k.isAgent, workspace: ws?.name ?? "" });
+    }
+    return out;
   }
 
   static blank(partial: Omit<Session, "state" | "createdAt" | "cols" | "rows"> & Partial<Pick<Session, "cols" | "rows">>): Session {

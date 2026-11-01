@@ -25,6 +25,7 @@ import { AddMenu, type AddChoice } from "./AddMenu.js";
 import { Toolbar, type Tool, type DrawStyle } from "./Toolbar.js";
 import { DrawingLayer, type CreateRect } from "./DrawingLayer.js";
 import { NewTerminalDialog, type NewTerminalInput } from "./NewTerminalDialog.js";
+import { ShutdownOverlay } from "./ShutdownOverlay.js";
 
 const nodeTypes: NodeTypes = { terminal: TerminalNode as never, note: NoteNode as never, text: TextNode as never, tree: TreeNode as never };
 const edgeTypes: EdgeTypes = { rope: RopeEdge as never, circuit: CircuitEdge as never };
@@ -539,4 +540,4 @@ function Canvas({ conn }: { conn: Connection }) {
   );
 }
 
-export function App({ conn }: { conn: Connection }) { return <ReactFlowProvider><Canvas conn={conn} /></ReactFlowProvider>; }
+export function App({ conn }: { conn: Connection }) { return <ReactFlowProvider><Canvas conn={conn} /><ShutdownOverlay /></ReactFlowProvider>; }

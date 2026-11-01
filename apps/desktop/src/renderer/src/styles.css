@@ -417,3 +417,22 @@ button.danger:hover { border-color: #ff6b6b; color: #ffb4a8; }
 .bb-zoom .pct { font-size: 12px; min-width: 42px; text-align: center; cursor: pointer; }
 .bb-zoom .tb { width: 24px; height: 24px; }
 .bb-pill.on { border-color: var(--acc); background: #22303f; }
+
+/* Tela de encerramento */
+.shutdown-ov { position: fixed; inset: 0; z-index: 9000; display: flex; align-items: center; justify-content: center; background: rgba(6,6,8,0.66); backdrop-filter: blur(3px); animation: shFade 120ms ease-out; }
+@keyframes shFade { from { opacity: 0; } to { opacity: 1; } }
+.shutdown-box { width: min(440px, 92vw); background: #141418; border: 1px solid var(--line); border-radius: 14px; padding: 20px; box-shadow: 0 18px 60px rgba(0,0,0,0.55); }
+.sh-title { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
+.sh-sub { font-size: 13px; color: var(--mut); margin-bottom: 12px; }
+.sh-list { list-style: none; margin: 0 0 14px; padding: 0; max-height: 220px; overflow: auto; display: flex; flex-direction: column; gap: 4px; }
+.sh-list li { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 6px 8px; background: #1b1b1f; border-radius: 8px; }
+.sh-ic { width: 16px; text-align: center; }
+.sh-tag { font-size: 10px; color: var(--acc); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; }
+.sh-ws { font-size: 11px; color: var(--mut); margin-left: auto; }
+.sh-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.sh-row button { height: 34px; padding: 0 14px; border-radius: 9px; border: 1px solid var(--line); background: #1b1b1f; color: var(--fg); font-size: 13px; cursor: pointer; }
+.sh-row button:disabled { opacity: 0.55; cursor: default; }
+.sh-row .sh-pri { background: var(--acc); border-color: var(--acc); color: #06121f; font-weight: 600; }
+.sh-row .sh-danger { border-color: #5a2630; color: #ff6b7e; }
+.sh-row .sh-danger:hover:not(:disabled) { background: #2a1519; }
+.sh-hint { font-size: 11px; color: var(--mut); margin-top: 12px; line-height: 1.5; }
