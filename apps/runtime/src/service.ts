@@ -1,5 +1,5 @@
 import { AGENT_ENV, type TreeEntry, type FileContent, type FsOp, type SearchHit, type CreateFloor, type LandFloor, type LandResult, type Role, type CreateRole, type PatchRole, type ChatMessage, type SendChat, type Attachment, type CreateAttachment, type FileEntry, type Connection, type CreateConnection, type PatchConnection, type CreateDrawing, type PatchDrawing, type GroupDrawings, type CreateFolder, type CreateNode, type Drawing, type Folder, type Message, type PatchFolder, type SendMessage, type Sidebar, type CreateWorkspace, type Node, type PatchNode, type PatchWorkspace, type Session, type Workspace, type WorkspaceSnapshot, type TaskFinished, type TaskSummary } from "@messai/contracts";
-import type { RuntimeSettings, PatchRuntimeSettings, PresetInput, Skill, CreateSkill, PatchSkill, FindHit, FindKind } from "@messai/contracts";
+import type { RuntimeSettings, PatchRuntimeSettings, PresetInput, Skill, CreateSkill, PatchSkill, FindHit, FindKind, NodeGroup, CreateNodeGroup, PatchNodeGroup } from "@messai/contracts";
 import { listProviders } from "./providers.js";
 import { probeAccounts } from "./accounts.js";
 import { backupName, copyBackupFiles, dataStats, isBackupName, listBackups, validateBackup, validateMoveTarget, writeManifest, type BackupEntry } from "./data.js";
@@ -111,7 +111,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
   snapshot(workspaceId: string): WorkspaceSnapshot | undefined {
     const workspace = this.store.getWorkspace(workspaceId);
     if (!workspace) return undefined;
-    return { workspace, nodes: this.store.listNodes(workspaceId).map((n) => this.syncNoteFromDisk(n)), connections: this.store.listConnections(workspaceId), drawings: this.store.listDrawings(workspaceId) };
+    return { workspace, nodes: this.store.listNodes(workspaceId).map((n) => this.syncNoteFromDisk(n)), connections: this.store.listConnections(workspaceId), drawings: this.store.listDrawings(workspaceId), groups: this.store.listGroups(workspaceId) };
   }
 
   // ---- notas em arquivo .md real ----
@@ -885,6 +885,49 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     return succeed({ revision: rev.value });
   }
 
+  // ---- #78 grupos de nós (contêiner com rótulo/cor; membros movem juntos; grupo vazio some) ----
+  createNodeGroup(workspaceId: string, input: CreateNodeGroup): Result<{ group: NodeGroup; revision: number }> {
+    const w = this.store.getWorkspace(workspaceId);
+    if (!w) return fail("NOT_FOUND", "espaço não encontrado");
+    const rev = checkRevision(w, input.expectedRevision);
+    if (!rev.ok) return rev;
+    const ids = [...new Set(input.nodeIds)].filter((id) => this.store.getNode(id)?.workspaceId === workspaceId);
+    if (!ids.length) return fail("INVALID", "nenhum nó válido para agrupar");
+    const g: NodeGroup = { groupId: newId(), workspaceId, label: (input.label ?? "").trim(), color: input.color ?? "", createdAt: nowIso() };
+    this.store.transaction(() => { this.store.insertGroup(g); this.store.setNodesGroup(ids, g.groupId); this.store.pruneEmptyGroups(workspaceId); this.store.bumpRevision(workspaceId, rev.value); });
+    this.publish(workspaceId);
+    return succeed({ group: g, revision: rev.value });
+  }
+  patchNodeGroup(id: string, input: PatchNodeGroup): Result<{ group: NodeGroup | null; revision: number }> {
+    const g = this.store.getGroup(id);
+    if (!g) return fail("NOT_FOUND", "grupo não encontrado");
+    const w = this.store.getWorkspace(g.workspaceId)!;
+    const rev = checkRevision(w, input.expectedRevision);
+    if (!rev.ok) return rev;
+    const add = (input.addNodeIds ?? []).filter((n) => this.store.getNode(n)?.workspaceId === g.workspaceId);
+    const remove = (input.removeNodeIds ?? []).filter((n) => this.store.getNode(n)?.groupId === id);
+    this.store.transaction(() => {
+      this.store.updateGroup(id, { label: input.label?.trim(), color: input.color });
+      if (add.length) this.store.setNodesGroup(add, id);
+      if (remove.length) this.store.setNodesGroup(remove, null);
+      this.store.pruneEmptyGroups(g.workspaceId);
+      this.store.bumpRevision(g.workspaceId, rev.value);
+    });
+    this.publish(g.workspaceId);
+    return succeed({ group: this.store.getGroup(id) ?? null, revision: rev.value }); // null = ficou vazio e sumiu
+  }
+  /** Desagrupar: o grupo some; os nós ficam onde estão. */
+  deleteNodeGroup(id: string, expectedRevision: number): Result<void> {
+    const g = this.store.getGroup(id);
+    if (!g) return fail("NOT_FOUND", "grupo não encontrado");
+    const w = this.store.getWorkspace(g.workspaceId)!;
+    const rev = checkRevision(w, expectedRevision);
+    if (!rev.ok) return rev;
+    this.store.transaction(() => { this.store.deleteGroup(id); this.store.bumpRevision(g.workspaceId, rev.value); });
+    this.publish(g.workspaceId);
+    return succeed(undefined);
+  }
+
   patchConnection(id: string, input: PatchConnection): Result<Connection> {
     const c = this.store.getConnection(id);
     if (!c) return fail("NOT_FOUND", "conexão não encontrada");
@@ -1044,6 +1087,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const rev = checkRevision(w, input.expectedRevision);
     if (!rev.ok) return rev;
     if (node.kind === "note" && byAgent && node.locked && (input.content !== undefined || input.title !== undefined || input.filePath !== undefined)) return fail("FORBIDDEN", "nota bloqueada: agentes só podem ler");
+    if (typeof input.groupId === "string") { const g = this.store.getGroup(input.groupId); if (!g || g.workspaceId !== node.workspaceId) return fail("NOT_FOUND", "grupo não encontrado neste espaço"); } // #78
     let title = input.title; let titleAuto: boolean | undefined;
     let filePath: string | undefined;
     if (node.kind === "note") {
@@ -1058,7 +1102,8 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       }
     }
     this.store.transaction(() => {
-      this.store.updateNode(nodeId, { title, geometry: input.geometry ? normalizeGeometry(input.geometry) : undefined, content: input.content, locked: input.locked, color: input.color, filePath, titleAuto, icon: input.icon, termTheme: input.termTheme === "system" ? null : input.termTheme });
+      this.store.updateNode(nodeId, { title, geometry: input.geometry ? normalizeGeometry(input.geometry) : undefined, content: input.content, locked: input.locked, color: input.color, filePath, titleAuto, icon: input.icon, termTheme: input.termTheme === "system" ? null : input.termTheme, groupId: input.groupId });
+      if (input.groupId !== undefined) this.store.pruneEmptyGroups(node.workspaceId); // #78 sair de um grupo pode esvaziá-lo
       this.store.bumpRevision(node.workspaceId, rev.value);
     });
     if (node.kind === "note" && input.content !== undefined) this.writeNoteFile(this.store.getNode(nodeId)!, input.content);
@@ -1084,6 +1129,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     this.store.transaction(() => {
       if (node.sessionId) this.store.deleteSession(node.sessionId);
       this.store.deleteNode(nodeId);
+      if (node.groupId) this.store.pruneEmptyGroups(node.workspaceId); // #78
       this.store.bumpRevision(node.workspaceId, rev.value);
     });
     this.publish(node.workspaceId);

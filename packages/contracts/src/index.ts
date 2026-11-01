@@ -75,9 +75,17 @@ export const Node = Type.Object({
   icon: Type.Optional(Type.String()),
   termTheme: Type.Optional(Type.String()),
   skillIds: Type.Optional(Type.Array(Id)), // #57 habilidades anexadas (terminal)
+  groupId: Type.Optional(Id), // #78 grupo de nós
   createdAt: Type.String(),
 });
 export type Node = Static<typeof Node>;
+// #78 — grupo de nós: contêiner com rótulo e cor; os membros movem juntos. Some sozinho quando fica vazio.
+export const NodeGroup = Type.Object({ groupId: Id, workspaceId: Id, label: Type.String(), color: Type.String(), createdAt: Type.String() });
+export type NodeGroup = Static<typeof NodeGroup>;
+export const CreateNodeGroup = Type.Object({ expectedRevision: Type.Integer(), nodeIds: Type.Array(Id, { minItems: 1, maxItems: 200 }), label: Type.Optional(Type.String({ maxLength: 60 })), color: Type.Optional(Type.String({ maxLength: 12 })) });
+export type CreateNodeGroup = Static<typeof CreateNodeGroup>;
+export const PatchNodeGroup = Type.Object({ expectedRevision: Type.Integer(), label: Type.Optional(Type.String({ maxLength: 60 })), color: Type.Optional(Type.String({ maxLength: 12 })), addNodeIds: Type.Optional(Type.Array(Id, { maxItems: 200 })), removeNodeIds: Type.Optional(Type.Array(Id, { maxItems: 200 })) });
+export type PatchNodeGroup = Static<typeof PatchNodeGroup>;
 // #56 — tema do xterm de um terminal (system = segue o tema do app) e alvo do preset (terminal ou chat aberto)
 export const TermTheme = Type.Union([Type.Literal("system"), Type.Literal("dark"), Type.Literal("light"), Type.Literal("custom")]);
 export type TermTheme = Static<typeof TermTheme>;
@@ -193,6 +201,7 @@ export const WorkspaceSnapshot = Type.Object({
   nodes: Type.Array(Node),
   connections: Type.Array(Connection),
   drawings: Type.Array(Drawing),
+  groups: Type.Optional(Type.Array(NodeGroup)), // #78 (opcional para clientes antigos)
 });
 export type WorkspaceSnapshot = Static<typeof WorkspaceSnapshot>;
 
@@ -373,6 +382,8 @@ export const PatchNode = Type.Object({
   termTheme: Type.Optional(Type.Union([TermTheme, Type.Null()])),
   /** #57 Reatribuir habilidades reinicia só o processo do terminal (como o papel). */
   skillIds: Type.Optional(Type.Array(Id, { maxItems: 20 })),
+  /** #78 entrar/sair de um grupo (null sai). */
+  groupId: Type.Optional(Type.Union([Id, Type.Null()])),
 });
 export type PatchNode = Static<typeof PatchNode>;
 

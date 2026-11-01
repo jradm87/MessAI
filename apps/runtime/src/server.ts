@@ -5,7 +5,7 @@ import type { WebSocket } from "ws";
 import {
   BUILD_VERSION, PROTOCOL_VERSION, SendMessage, Ask, CreateConnection, CreateDrawing, CreateNode, CreateWorkspace, DeleteNode, PatchNode, PatchWorkspace, ApplyLayout, WsClientMessage,
   type Capabilities, type WsServerMessage, type ApiError,
- CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, FsOp, PatchRuntimeSettings, PutPresets, CreateSkill, PatchSkill, BackupInput, RestoreInput, MoveDataInput, ResetInput, type PresetInput, type Preset } from "@messai/contracts";
+ CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, FsOp, PatchRuntimeSettings, PutPresets, CreateSkill, PatchSkill, BackupInput, RestoreInput, MoveDataInput, ResetInput, CreateNodeGroup, PatchNodeGroup, type PresetInput, type Preset } from "@messai/contracts";
 import type { Result } from "@messai/domain";
 import { newId, type Config } from "./config.js";
 import type { WorkspaceService } from "./service.js";
@@ -203,6 +203,10 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
     const b = body<PatchDrawing>(PatchDrawing, req.body); if ("code" in b) return invalid(reply, b);
     return send(reply, svc.patchDrawing(req.params.id, b));
   });
+  // #78 — grupos de nós
+  app.post<{ Params: { id: string } }>("/v1/workspaces/:id/groups", async (req, reply) => { const b = body<CreateNodeGroup>(CreateNodeGroup, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.createNodeGroup(req.params.id, b), 201); });
+  app.patch<{ Params: { id: string } }>("/v1/groups/:id", async (req, reply) => { const b = body<PatchNodeGroup>(PatchNodeGroup, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.patchNodeGroup(req.params.id, b)); });
+  app.delete<{ Params: { id: string } }>("/v1/groups/:id", async (req, reply) => { const b = body<DeleteNode>(DeleteNode, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.deleteNodeGroup(req.params.id, b.expectedRevision), 204); });
   app.post<{ Params: { id: string } }>("/v1/workspaces/:id/drawings/group", async (req, reply) => {
     const b = body<GroupDrawings>(GroupDrawings, req.body); if ("code" in b) return invalid(reply, b);
     return send(reply, svc.groupDrawings(req.params.id, b));

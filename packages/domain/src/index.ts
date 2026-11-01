@@ -307,3 +307,32 @@ export function safeRelPath(rel: string): Result<string> {
 }
 /** Conteúdo parece binário? (NUL nos primeiros bytes) */
 export const looksBinary = (head: Uint8Array): boolean => head.subarray(0, 8000).includes(0);
+
+// ---------- #78 grupos de nós + encaixe magnético ----------
+/** Caixa que envolve as geometrias (com folga). */
+export function groupBounds(geoms: Geometry[], pad = 16): Geometry | null {
+  if (!geoms.length) return null;
+  const x1 = Math.min(...geoms.map((g) => g.x)) - pad, y1 = Math.min(...geoms.map((g) => g.y)) - pad;
+  const x2 = Math.max(...geoms.map((g) => g.x + g.w)) + pad, y2 = Math.max(...geoms.map((g) => g.y + g.h)) + pad;
+  return { x: x1, y: y1, w: x2 - x1, h: y2 - y1 };
+}
+export type SnapResult = { x: number; y: number; guides: { vertical: number[]; horizontal: number[] } };
+/**
+ * Encaixe magnético: aproxima a geometria em movimento das bordas/centros dos vizinhos e da grade quando a
+ * distância for menor que `threshold` (em unidades do canvas). Devolve a posição ajustada e as linhas-guia.
+ */
+export function snapGeometry(moving: Geometry, others: Geometry[], opt: { threshold?: number; grid?: number } = {}): SnapResult {
+  const th = opt.threshold ?? 8; const grid = opt.grid ?? 0;
+  const xs: number[] = [], ys: number[] = [];
+  for (const o of others) { xs.push(o.x, o.x + o.w, o.x + o.w / 2); ys.push(o.y, o.y + o.h, o.y + o.h / 2); }
+  const cands = (own: number[], targets: number[]): { delta: number; line: number } | null => {
+    let best: { delta: number; line: number } | null = null;
+    for (const a of own) for (const t of targets) { const d = t - a; if (Math.abs(d) <= th && (!best || Math.abs(d) < Math.abs(best.delta))) best = { delta: d, line: t }; }
+    if (!best && grid > 0) { const a = own[0]!; const t = Math.round(a / grid) * grid; const d = t - a; if (Math.abs(d) <= th) best = { delta: d, line: t }; }
+    return best;
+  };
+  const sx = cands([moving.x, moving.x + moving.w, moving.x + moving.w / 2], xs);
+  const sy = cands([moving.y, moving.y + moving.h, moving.y + moving.h / 2], ys);
+  return { x: moving.x + (sx?.delta ?? 0), y: moving.y + (sy?.delta ?? 0), guides: { vertical: sx ? [sx.line] : [], horizontal: sy ? [sy.line] : [] } };
+}
+
