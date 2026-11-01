@@ -12,9 +12,9 @@
 
 ## Escopo inicial (44 issues) por fase
 
-### Fase 0 — Robustez leve
-- [ ] #90 git/grep assíncronos + cache de git status
-- [ ] #40 alinhar documentação (koba→messai)
+### Fase 0 — Robustez leve ✅
+- [x] #90 git/grep assíncronos + cache de git status — `df6f553`
+- [x] #40 alinhar documentação (koba→messai) — docs em `REA/docs` (NOSSO.md, §6, ADR-0011); repo já limpo
 
 ### Fase 1 — Alto impacto / reuso
 - [ ] #54 Tema claro/escuro/sistema
@@ -42,12 +42,14 @@
 - [ ] #26 Portais · #73 Portais de dispositivo · #30 Editor+git · #28 Hub (dep #87) · #93 (MESS-09) modo isolado
 
 ## Estado atual
-- **Fase atual:** 0
-- **Concluídas:** (nenhuma ainda nesta execução)
-- **Em andamento:** #90
+- **Fase atual:** 1 (alto impacto / reuso)
+- **Concluídas:** #90, #40 (Fase 0 completa)
+- **Em andamento:** #54 (tema claro/escuro/sistema)
 - **Bloqueadas:** (nenhuma)
-- **Commits:** (serão listados aqui)
-- **Testes:** baseline 78 verdes (pré-execução)
+- **Commits (assinados, branch `auto/roadmap`):** `e781477` setup/PROGRESS · `df6f553` #90
+- **Testes:** 79 verdes (78 baseline + 1 regressão #90)
+- **Próximas:** #54 → #68 (#65 → #66 → #67) → Fase 2 (#64 Preferências)
 
 ## Log de execução
-- Setup: branch `auto/roadmap`, assinatura GPG local configurada, baseline de testes 78 verdes.
+- Setup: branch `auto/roadmap`, assinatura GPG local configurada (Good signature verificada), baseline 78 verdes.
+- Fase 0: #90 git/grep async + cache (`df6f553`, 79 testes); #40 docs alinhados (REA: NOSSO.md 16 refs, §6 real + ADR-0011). Ambas fechadas no GitHub com relato.
