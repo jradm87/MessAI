@@ -1,8 +1,16 @@
-import type { ApiError, TreeEntry, FileContent, FsOp, SearchHit, CreateFloor, LandFloor, LandResult, PatchConnection, Role, CreateRole, PatchRole, ChatMessage, SendChat, Attachment, CreateAttachment, FileEntry, Connection as WsConnection, CreateDrawing, PatchDrawing, GroupDrawings, CreateFolder, CreateNode, CreateWorkspace, Drawing, Folder, Geometry, PatchFolder, PatchWorkspace, Preset, Node, PatchNode, Session, Sidebar, Workspace, WorkspaceSnapshot, WsClientMessage, WsServerMessage } from "@messai/contracts";
+import type { ApiError, CompanionConfig, TaskSummary, TreeEntry, FileContent, FsOp, SearchHit, CreateFloor, LandFloor, LandResult, PatchConnection, Role, CreateRole, PatchRole, ChatMessage, SendChat, Attachment, CreateAttachment, FileEntry, Connection as WsConnection, CreateDrawing, PatchDrawing, GroupDrawings, CreateFolder, CreateNode, CreateWorkspace, Drawing, Folder, Geometry, PatchFolder, PatchWorkspace, Preset, Node, PatchNode, Session, Sidebar, Workspace, WorkspaceSnapshot, WsClientMessage, WsServerMessage } from "@messai/contracts";
 
 export type Connection = { baseUrl: string; wsUrl: string; token: string; homeDir?: string };
 export type RunningEntry = { title: string; agentType: string; isAgent: boolean; workspace: string };
-declare global { interface Window { messai: { connection(): Promise<Connection | null>; pickDirectory?: () => Promise<string | null>; pathForFile?: (f: File) => string; onShutdownPrompt?: (cb: (data: { running: RunningEntry[] }) => void) => void; shutdownDecision?: (action: "background" | "all" | "cancel") => Promise<void> } } }
+export type FocusTarget = { workspaceId: string; nodeId: string };
+declare global { interface Window { messai: {
+  connection(): Promise<Connection | null>; pickDirectory?: () => Promise<string | null>; pathForFile?: (f: File) => string;
+  onShutdownPrompt?: (cb: (data: { running: RunningEntry[] }) => void) => void; shutdownDecision?: (action: "background" | "all" | "cancel") => Promise<void>;
+  // #67 — janela flutuante do companheiro (HUD). Os `on*` devolvem a função que remove o ouvinte.
+  hudToggle?: (open?: boolean) => Promise<boolean>; hudState?: () => Promise<boolean>; onHudState?: (cb: (open: boolean) => void) => () => void;
+  hudFocus?: (target: FocusTarget) => Promise<void>; onFocusNode?: (cb: (target: FocusTarget) => void) => () => void;
+  hudDismiss?: (nodeId: string) => Promise<void>; onHudDismiss?: (cb: (nodeId: string) => void) => () => void;
+} } }
 
 export class ApiClientError extends Error { constructor(readonly error: ApiError, readonly status: number) { super(error.message); } }
 
@@ -23,6 +31,8 @@ export class Api {
   health() { return this.req<{ ok: boolean; protocolVersion: number; buildVersion?: number; machineId: string }>("GET", "/v1/health"); }
   agentUsage() { return this.req<{ agents: { id: string; label: string; available: boolean; note?: string; plan?: string; limits?: { label: string; pct: number; resets: string }[]; metrics: { label: string; value: string }[]; models: { name: string; input: number; output: number }[] }[] }>("GET", "/v1/agent-usage"); }
   capabilities() { return this.req<{ features: string[] }>("GET", "/v1/capabilities"); }
+  companion() { return this.req<CompanionConfig>("GET", "/v1/companion"); }
+  summarize(nodeId: string) { return this.req<TaskSummary>("POST", "/v1/companion/summarize", { nodeId }); }
   presets() { return this.req<Preset[]>("GET", "/v1/presets"); }
   listWorkspaces() { return this.req<Workspace[]>("GET", "/v1/workspaces"); }
   createWorkspace(input: CreateWorkspace) { return this.req<Workspace>("POST", "/v1/workspaces", input); }

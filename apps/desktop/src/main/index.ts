@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, screen, shell } from "electron";
 import electronUpdater from "electron-updater";
 import { spawn, execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, openSync, readFileSync, readdirSync, readlinkSync } from "node:fs";
@@ -114,27 +114,74 @@ async function promptShutdown(): Promise<void> {
   mainWin?.webContents.send("mess:shutdown-prompt", { running });
 }
 
-function createWindow(): void {
-  const win = new BrowserWindow({
-    width: 1400, height: 900, title: "MessAI",
-    // Sem throttling em segundo plano: saída de terminal e animações do canvas continuam com a janela oculta/ocluída.
-    webPreferences: { preload: join(here, "../preload/index.cjs"), contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false },
-  });
-  mainWin = win;
-  win.on("close", (e) => { if (!allowClose) { e.preventDefault(); void promptShutdown(); } });
+// Sem throttling em segundo plano: saída de terminal e animações do canvas continuam com a janela oculta/ocluída.
+const WEB_PREFS = { preload: join(here, "../preload/index.cjs"), contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false } as const;
+
+/** Fiação comum às janelas: log do renderer, erro de preload e links externos só com esquema web (MESS-04). */
+function wire(win: BrowserWindow, tag: string): void {
   win.webContents.on("console-message", (e) => {
     if (e.message.includes("ResizeObserver loop")) return; // ruído benigno do xterm/React Flow ao redimensionar
-    console.log(`[renderer:${e.level}] ${e.message} (${e.sourceId}:${e.lineNumber})`);
+    console.log(`[${tag}:${e.level}] ${e.message} (${e.sourceId}:${e.lineNumber})`);
   });
   win.webContents.on("preload-error", (_e, path, err) => console.error("preload-error", path, err));
-  // Abrir link externo só com esquema web (MESS-04): bloqueia file:, javascript:, esquemas customizados e URLs inválidas.
+  // Bloqueia file:, javascript:, esquemas customizados e URLs inválidas.
   win.webContents.setWindowOpenHandler(({ url }) => { try { const u = new URL(url); if (u.protocol === "https:" || u.protocol === "http:") void shell.openExternal(url); } catch { /* URL inválida */ } return { action: "deny" }; });
-  if (process.env["ELECTRON_RENDERER_URL"]) void win.loadURL(process.env["ELECTRON_RENDERER_URL"]);
-  else void win.loadFile(join(here, "../renderer/index.html"));
+}
+/** Carrega o renderer único; `hash` escolhe a rota (ex.: "hud" → janela flutuante). */
+function load(win: BrowserWindow, hash?: string): void {
+  const dev = process.env["ELECTRON_RENDERER_URL"];
+  if (dev) void win.loadURL(hash ? `${dev}#${hash}` : dev);
+  else void win.loadFile(join(here, "../renderer/index.html"), hash ? { hash } : {});
 }
 
+function createWindow(): void {
+  const win = new BrowserWindow({ width: 1400, height: 900, title: "MessAI", webPreferences: WEB_PREFS });
+  mainWin = win;
+  win.on("close", (e) => { if (!allowClose) { e.preventDefault(); void promptShutdown(); } });
+  win.on("closed", () => { mainWin = null; closeHud(); }); // o HUD não vive sem a janela principal
+  wire(win, "renderer");
+  load(win);
+}
+
+// #67 — HUD do companheiro: segunda janela, sem moldura, sempre no topo, fora da barra de tarefas,
+// no canto inferior direito. Renderizada pelo MESMO bundle (rota `#hud`), com WS próprio no runtime.
+let hudWin: BrowserWindow | null = null;
+const HUD_W = 380, HUD_H = 480;
+const hudOpen = () => !!hudWin && !hudWin.isDestroyed();
+const broadcastHud = () => { if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send("mess:hud-state", hudOpen()); };
+function openHud(): void {
+  if (hudOpen()) { hudWin!.showInactive(); return; }
+  const wa = screen.getPrimaryDisplay().workArea;
+  const win = new BrowserWindow({
+    width: HUD_W, height: HUD_H, minWidth: 300, minHeight: 240, x: wa.x + wa.width - HUD_W - 16, y: wa.y + wa.height - HUD_H - 16,
+    title: "MessAI — Companheiro", frame: false, alwaysOnTop: true, skipTaskbar: true, minimizable: false, maximizable: false, fullscreenable: false, show: false,
+    webPreferences: WEB_PREFS,
+  });
+  hudWin = win;
+  win.setAlwaysOnTop(true, "floating");
+  try { win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch { /* WM sem suporte */ }
+  win.once("ready-to-show", () => win.showInactive()); // aparece sem roubar o foco do terminal
+  win.on("closed", () => { hudWin = null; broadcastHud(); });
+  wire(win, "hud");
+  load(win, "hud");
+  broadcastHud();
+}
+function closeHud(): void { if (hudOpen()) hudWin!.close(); }
+
+ipcMain.handle("mess:hud-toggle", (_e, open?: boolean) => { const want = typeof open === "boolean" ? open : !hudOpen(); if (want) openHud(); else closeHud(); return hudOpen(); });
+ipcMain.handle("mess:hud-state", () => hudOpen());
+// "Ir ao terminal" no HUD: traz a janela principal e pede para ela trocar de espaço e selecionar o nó.
+ipcMain.handle("mess:hud-focus", (_e, target: { workspaceId: string; nodeId: string }) => {
+  if (!mainWin || mainWin.isDestroyed() || typeof target?.workspaceId !== "string" || typeof target?.nodeId !== "string") return;
+  if (mainWin.isMinimized()) mainWin.restore();
+  mainWin.show(); mainWin.focus();
+  mainWin.webContents.send("mess:focus-node", { workspaceId: target.workspaceId, nodeId: target.nodeId });
+});
+// Usuário focou o terminal na janela principal: o cartão correspondente sai do HUD.
+ipcMain.handle("mess:hud-dismiss", (_e, nodeId: string) => { if (hudOpen() && typeof nodeId === "string") hudWin!.webContents.send("mess:hud-dismiss", nodeId); });
+
 ipcMain.handle("mess:connection", async (event) => {
-  // Só o renderer da nossa janela recebe a conexão.
+  // Só os renderers das nossas janelas (principal e HUD) recebem a conexão.
   if (event.senderFrame?.url && !event.senderFrame.url.startsWith("file://") && !event.senderFrame.url.startsWith("http://localhost")) return null;
   // A janela já apareceu; aqui esperamos o runtime ficar pronto (token disponível) antes de conectar.
   if (runtimeReady) await runtimeReady;

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Background, BackgroundVariant, MiniMap, ReactFlow, applyNodeChanges, applyEdgeChanges, type EdgeChange, useReactFlow, ReactFlowProvider, useOnViewportChange, type Connection as FlowConnection, type Edge, type EdgeTypes, type Node as FlowNode, type NodeChange, type NodeTypes } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Map as MapIcon, Minus, Plus, Activity, Layers, AlignStartVertical, AlignCenterVertical, AlignEndVertical, AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal, LayoutGrid, Sun, Moon, Monitor } from "lucide-react";
+import { Map as MapIcon, Minus, Plus, Activity, Layers, AlignStartVertical, AlignCenterVertical, AlignEndVertical, AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal, LayoutGrid, Sun, Moon, Monitor, Sparkles } from "lucide-react";
 import { useAtomValue } from "jotai";
 import { themeAtom } from "./atoms.js";
 import { getThemePref, setThemePref, nextTheme, THEME_LABEL, cssVar } from "./theme.js";
@@ -43,7 +43,7 @@ function freeSpot(nodes: { geometry: Geometry }[], size: { w: number; h: number 
 }
 const isTyping = () => { const el = document.activeElement as HTMLElement | null; return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable || el.classList.contains("xterm-helper-textarea")); };
 
-function ZoomBar({ minimap, setMinimap, onUsage, agents, wsName, inFloors, onFloors }: { minimap: boolean; setMinimap: (v: boolean) => void; onUsage: () => void; agents: string[]; wsName?: string; inFloors: boolean; onFloors: () => void }) {
+function ZoomBar({ minimap, setMinimap, onUsage, agents, wsName, inFloors, onFloors, hud, onHud }: { minimap: boolean; setMinimap: (v: boolean) => void; onUsage: () => void; agents: string[]; wsName?: string; inFloors: boolean; onFloors: () => void; hud: boolean; onHud: () => void }) {
   const rf = useReactFlow(); const [z, setZ] = useState(100);
   useOnViewportChange({ onChange: (v) => setZ(Math.round(v.zoom * 100)) });
   useAtomValue(themeAtom); // re-renderiza o botão quando o tema efetivo muda
@@ -54,6 +54,7 @@ function ZoomBar({ minimap, setMinimap, onUsage, agents, wsName, inFloors, onFlo
       {agents.slice(0, 5).map((a) => <button key={a} className="bb-circle" title={`${a} — Agent Usage`} onClick={onUsage}><AgentIcon id={a} size={20} /></button>)}
       {agents.length === 0 && <button className="bb-circle" title="Agent Usage" onClick={onUsage}><Activity size={15} /></button>}
       <button className="bb-circle" title={`Tema: ${THEME_LABEL[pref]} (clique alterna Sistema → Claro → Escuro)`} data-testid="theme-toggle" onClick={() => setThemePref(nextTheme(pref))}><ThemeIcon size={15} /></button>
+      <button className={`bb-circle ${hud ? "on" : ""}`} title={hud ? "Companheiro: fechar janela flutuante" : "Companheiro: abrir janela flutuante (agentes que terminaram, resumo e próximo passo)"} data-testid="hud-toggle" onClick={onHud}><Sparkles size={15} /></button>
       <button className="bb-circle" title="Minimapa (Ctrl+Shift+M)" onClick={() => setMinimap(!minimap)}><MapIcon size={15} /></button>
       <div className="bb-zoom">
         <button className="tb" title="Reduzir (Ctrl+-)" onClick={() => void rf.zoomOut({ duration: 120 })}><Minus size={14} /></button>
@@ -107,7 +108,17 @@ function Canvas({ conn }: { conn: Connection }) {
   const [floorDialog, setFloorDialog] = useState<Workspace | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [usage, setUsage] = useState(false);
+  // #67: estado da janela flutuante do companheiro (vive no processo principal; aqui só espelho + preferência).
+  const [hud, setHud] = useState(false);
+  const HUD_PREF = "mess.hud";
+  useEffect(() => {
+    const m = window.messai;
+    const off = m.onHudState?.((o) => { setHud(o); try { localStorage.setItem(HUD_PREF, o ? "1" : "0"); } catch { /* sem storage */ } });
+    void m.hudState?.().then((o) => { setHud(o); let want = false; try { want = localStorage.getItem(HUD_PREF) === "1"; } catch { /* sem storage */ } if (want && !o) void m.hudToggle?.(true); });
+    return () => off?.();
+  }, []);
   const fittedFor = useRef<string | null>(null); // espaço já enquadrado ao abrir
+  const pendingFocus = useRef<string | null>(null); // nó a selecionar assim que o espaço pedido pelo HUD carregar
   const [renameSig, setRenameSig] = useState<{ id: string; n: number }>({ id: "", n: 0 });
   const bumpRename = (id: string) => setRenameSig((p) => ({ id, n: p.id === id ? p.n + 1 : 1 }));
   const homeDir = conn.homeDir ?? "";
@@ -230,6 +241,20 @@ function Canvas({ conn }: { conn: Connection }) {
     flowRef.current = next; setFlow(next);
     void rf.fitView({ nodes: [{ id }], padding: 0.5, duration: 200, maxZoom: 1.2 });
   };
+  // "Ir ao terminal" vindo do HUD: troca de espaço (se preciso) e seleciona o nó quando ele existir no canvas.
+  useEffect(() => window.messai.onFocusNode?.((t) => {
+    setOverview(null);
+    if (flowRef.current.some((n) => n.id === t.nodeId)) { selectNode(t.nodeId); return; } // já está no espaço certo: seleciona direto
+    pendingFocus.current = t.nodeId; setCurrent(t.workspaceId); // senão troca de espaço; o efeito abaixo seleciona quando o nó aparecer
+  }), []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const id = pendingFocus.current;
+    if (!id || !flow.some((n) => n.id === id)) return;
+    pendingFocus.current = null;
+    // Depois do enquadramento inicial do espaço. Sem cancelar no cleanup: o React Flow dispara mudanças de
+    // dimensão (e portanto `flow`) logo após montar os nós, o que cancelaria a seleção antes de acontecer.
+    setTimeout(() => selectNode(id), 350);
+  }, [flow]); // eslint-disable-line react-hooks/exhaustive-deps
   const startLink = (id: string) => { setLinking(id); toast("Conectar: clique no nó de destino (Esc cancela)"); };
   const finishLink = (targetId: string) => {
     const src = linkingRef.current; setLinking(null); if (!src || !current || src === targetId) return;
@@ -542,7 +567,7 @@ function Canvas({ conn }: { conn: Connection }) {
             onErase={(id) => void mutate((r) => api.deleteDrawing(id, r))}
             onCreateRect={onCreateRect} />
         </ReactFlow>
-        <ZoomBar minimap={minimap} setMinimap={setMinimap} onUsage={() => setUsage(true)} agents={barAgents} {...(curWs ? { wsName: curWs.name } : {})} inFloors={!!overview} onFloors={() => (overview ? setOverview(null) : grd && setOverview(grd.workspaceId))} />
+        <ZoomBar minimap={minimap} setMinimap={setMinimap} onUsage={() => setUsage(true)} agents={barAgents} {...(curWs ? { wsName: curWs.name } : {})} inFloors={!!overview} onFloors={() => (overview ? setOverview(null) : grd && setOverview(grd.workspaceId))} hud={hud} onHud={() => void window.messai.hudToggle?.().then(setHud)} />
         {usage && <AgentUsage api={api} onClose={() => setUsage(false)} />}
       </main>
     </div>

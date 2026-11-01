@@ -458,3 +458,27 @@ button.danger:hover { border-color: var(--danger); color: var(--danger-fg); }
 .sh-row .sh-danger { border-color: var(--danger-line); color: var(--danger); }
 .sh-row .sh-danger:hover:not(:disabled) { background: var(--danger-bg); }
 .sh-hint { font-size: 11px; color: var(--mut); margin-top: 12px; line-height: 1.5; }
+
+/* ===== #67 — HUD flutuante do companheiro (rota #hud, janela própria) ===== */
+:root[data-hud] body, :root[data-hud] #root { background: var(--pop); overflow: hidden; }
+.bb-circle.on { background: var(--acc); color: var(--on-acc); border-color: transparent; }
+.hud { position: fixed; inset: 0; display: flex; flex-direction: column; background: var(--pop); color: var(--fg); border: 1px solid var(--line-2); font-size: 13px; }
+.hud-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); -webkit-app-region: drag; user-select: none; }
+.hud-head .sp { flex: 1; } .hud-head button { -webkit-app-region: no-drag; }
+.hud-count { font-size: 11px; font-weight: 700; background: var(--acc); color: var(--on-acc); border-radius: 9px; padding: 0 6px; line-height: 16px; }
+.hud-list { flex: 1; overflow: auto; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+.hud-empty { margin: auto; text-align: center; color: var(--mut); padding: 20px; line-height: 1.5; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.hud-empty-sub { font-size: 12px; opacity: .8; }
+.hud-card { background: var(--surface-2); border: 1px solid var(--line); border-left: 3px solid var(--acc); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; animation: popIn .14s ease-out; }
+.hud-card.done { border-left-color: var(--ok); }
+.hud-card-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.hud-card-head .t { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.hud-card-head .m { color: var(--mut); font-size: 11px; white-space: nowrap; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
+.hud-sum { margin: 0; line-height: 1.4; }
+.hud-next { margin: 0; display: flex; gap: 6px; align-items: flex-start; background: var(--chip); border-radius: 6px; padding: 5px 8px; font-size: 12px; line-height: 1.35; }
+.hud-next svg { flex: none; margin-top: 2px; }
+.hud-screen { margin: 0; font-family: ui-monospace, "JetBrains Mono", monospace; font-size: 11px; line-height: 1.35; color: var(--mut); white-space: pre-wrap; word-break: break-word; max-height: 96px; overflow: hidden; }
+.hud-wait { font-size: 11px; color: var(--mut); font-style: italic; }
+.hud-actions { display: flex; gap: 6px; } .hud-actions button { font-size: 12px; padding: 3px 8px; }
+.hud-foot { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-top: 1px solid var(--line); color: var(--mut); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hud-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--mut); } .hud-dot.on { background: var(--ok); }

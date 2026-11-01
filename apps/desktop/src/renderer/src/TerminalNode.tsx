@@ -88,6 +88,7 @@ export function TerminalNode({ id, data, selected }: NodeProps & { data: Termina
       // Olhou o terminal: o "concluiu, precisa de você" (#65) deste nó foi atendido.
       store.set(finishedMapAtom, (p) => { if (!(id in p)) return p; const n = { ...p }; delete n[id]; return n; });
       store.set(summaryMapAtom, (p) => { if (!(id in p)) return p; const n = { ...p }; delete n[id]; return n; });
+      void window.messai.hudDismiss?.(id); // #67: o cartão some também da janela flutuante
       data.onFocus();
     };
     el.addEventListener("focusin", focus);
