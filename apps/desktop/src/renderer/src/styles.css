@@ -482,3 +482,21 @@ button.danger:hover { border-color: var(--danger); color: var(--danger-fg); }
 .hud-actions { display: flex; gap: 6px; } .hud-actions button { font-size: 12px; padding: 3px 8px; }
 .hud-foot { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-top: 1px solid var(--line); color: var(--mut); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hud-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--mut); } .hud-dot.on { background: var(--ok); }
+
+/* ===== #64 — janela de Preferências ===== */
+.prefs-modal { width: 820px; max-width: 94%; padding: 14px 16px 16px; }
+.prefs-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; } .prefs-head h2 { margin: 0; } .prefs-head .sp { flex: 1; }
+.prefs-body { display: grid; grid-template-columns: 200px 1fr; gap: 14px; min-height: 440px; max-height: 70vh; }
+.prefs-nav { display: flex; flex-direction: column; gap: 2px; border-right: 1px solid var(--line); padding-right: 10px; overflow: auto; }
+.prefs-nav .mi { display: flex; align-items: center; gap: 9px; padding: 7px 9px; border-radius: 7px; cursor: pointer; font-size: 13px; color: var(--fg); }
+.prefs-nav .mi svg { opacity: .8; } .prefs-nav .mi:hover { background: var(--btn); } .prefs-nav .mi.on { background: var(--sel); }
+.prefs-pane { overflow: auto; padding-right: 6px; display: flex; flex-direction: column; gap: 14px; }
+.prefs-title { margin: 2px 0 0; font-size: 15px; }
+.pf-section { display: flex; flex-direction: column; gap: 8px; } .pf-section h3 { margin: 0; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--mut); }
+.pf-field { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 8px 10px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; }
+.pf-lbl { display: flex; flex-direction: column; gap: 2px; font-size: 13px; } .pf-lbl small { color: var(--mut); font-size: 11px; }
+.pf-ctl { flex: none; display: flex; align-items: center; gap: 8px; }
+.pf-soon { padding: 12px 14px; border: 1px dashed var(--line-2); border-radius: 8px; color: var(--mut); font-size: 12.5px; line-height: 1.5; }
+.seg { display: inline-flex; background: var(--pop-2); border: 1px solid var(--line); border-radius: 8px; padding: 2px; gap: 2px; }
+.seg button { display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; padding: 4px 10px; border-radius: 6px; font-size: 12px; color: var(--fg); }
+.seg button:hover { background: var(--hover-2); } .seg button.on { background: var(--acc); color: var(--on-acc); }

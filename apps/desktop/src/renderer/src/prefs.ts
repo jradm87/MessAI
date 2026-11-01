@@ -1,0 +1,46 @@
+import { useSyncExternalStore } from "react";
+
+/**
+ * #64 — preferências de UI por usuário, num único JSON em localStorage (`mess.prefs`).
+ * Tipadas pelos DEFAULTS: chave desconhecida é descartada, tipo errado volta ao padrão.
+ * O que precisa valer entre sessões/máquinas (config do runtime) NÃO mora aqui.
+ */
+export const PREFS_KEY = "mess.prefs";
+export const DEFAULTS = {
+  prefsTab: "general", // última aba aberta na janela de Preferências
+} as const;
+export type Prefs = { -readonly [K in keyof typeof DEFAULTS]: (typeof DEFAULTS)[K] extends string ? string : (typeof DEFAULTS)[K] extends number ? number : boolean };
+export type PrefKey = keyof Prefs;
+
+/** Faz o parse tolerante do JSON salvo: mescla com os padrões, ignora lixo. */
+export function parsePrefs(raw: string | null | undefined): Prefs {
+  const out: Record<string, unknown> = { ...DEFAULTS };
+  if (!raw) return out as Prefs;
+  let j: unknown;
+  try { j = JSON.parse(raw); } catch { return out as Prefs; }
+  if (!j || typeof j !== "object" || Array.isArray(j)) return out as Prefs;
+  for (const [k, v] of Object.entries(j as Record<string, unknown>)) {
+    if (!(k in DEFAULTS)) continue; // chave que não existe mais (ou nunca existiu)
+    if (typeof v !== typeof (DEFAULTS as Record<string, unknown>)[k]) continue; // tipo errado: fica o padrão
+    out[k] = v;
+  }
+  return out as Prefs;
+}
+
+let current: Prefs | null = null;
+const listeners = new Set<() => void>();
+const read = (): Prefs => { if (!current) { let raw: string | null = null; try { raw = localStorage.getItem(PREFS_KEY); } catch { /* sem storage */ } current = parsePrefs(raw); } return current; };
+
+export function getPrefs(): Prefs { return read(); }
+export function getPref<K extends PrefKey>(k: K): Prefs[K] { return read()[k]; }
+export function setPref<K extends PrefKey>(k: K, v: Prefs[K]): void {
+  const next = { ...read(), [k]: v };
+  current = next;
+  try { localStorage.setItem(PREFS_KEY, JSON.stringify(next)); } catch { /* sem storage: vale só nesta sessão */ }
+  for (const l of listeners) l();
+}
+export function onPrefs(fn: () => void): () => void { listeners.add(fn); return () => { listeners.delete(fn); }; }
+/** Hook: re-renderiza quando a chave muda (em qualquer lugar do app). */
+export function usePref<K extends PrefKey>(k: K): Prefs[K] { return useSyncExternalStore(onPrefs, () => read()[k], () => DEFAULTS[k] as Prefs[K]); }
+/** Só para testes: esquece o cache em memória. */
+export function _resetPrefsForTests(): void { current = null; }

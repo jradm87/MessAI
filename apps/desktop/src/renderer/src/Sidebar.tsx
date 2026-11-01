@@ -5,6 +5,7 @@ import { WsIcon } from "./wsicons.js";
 
 export type SidebarActions = {
   select: (id: string) => void;
+  settings: () => void;
   newWorkspace: (folderId?: string) => void;
   editWorkspace: (w: Workspace) => void;
   deleteWorkspace: (w: Workspace) => void;
@@ -109,7 +110,7 @@ export function Sidebar({ data, current, collapsed, machine, act }: { data: Side
         <button title="Nova pasta" onClick={() => act.newFolder("folder")}><FolderPlus size={14} />{!collapsed && " Pasta"}</button>
         <button title="Novo grupo" onClick={() => act.newFolder("group")}><Minus size={14} />{!collapsed && " Grupo"}</button>
         <span className="sp" />
-        <button className="tb" title="Configurações (em breve)" disabled><Settings size={15} /></button>
+        <button className="tb" title="Preferências (Ctrl+,)" data-testid="settings" onClick={() => act.settings()}><Settings size={15} /></button>
       </div>
       {ctx && (
         <div className="menu-backdrop fixed" onMouseDown={() => setCtx(null)} onContextMenu={(e) => { e.preventDefault(); setCtx(null); }}>

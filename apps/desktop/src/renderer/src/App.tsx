@@ -29,6 +29,7 @@ import { Toolbar, type Tool, type DrawStyle } from "./Toolbar.js";
 import { DrawingLayer, type CreateRect } from "./DrawingLayer.js";
 import { NewTerminalDialog, type NewTerminalInput } from "./NewTerminalDialog.js";
 import { ShutdownOverlay } from "./ShutdownOverlay.js";
+import { Preferences } from "./Preferences.js";
 
 const nodeTypes: NodeTypes = { terminal: TerminalNode as never, note: NoteNode as never, text: TextNode as never, tree: TreeNode as never };
 const edgeTypes: EdgeTypes = { rope: RopeEdge as never, circuit: CircuitEdge as never };
@@ -108,6 +109,7 @@ function Canvas({ conn }: { conn: Connection }) {
   const [floorDialog, setFloorDialog] = useState<Workspace | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [usage, setUsage] = useState(false);
+  const [prefsOpen, setPrefsOpen] = useState(false); // #64 janela de Preferências
   // #67: estado da janela flutuante do companheiro (vive no processo principal; aqui só espelho + preferência).
   const [hud, setHud] = useState(false);
   const HUD_PREF = "mess.hud";
@@ -405,6 +407,7 @@ function Canvas({ conn }: { conn: Connection }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const ctrl = e.ctrlKey || e.metaKey;
+      if (ctrl && e.key === ",") { e.preventDefault(); setPrefsOpen((v) => !v); return; } // #64 Preferências
       if (ctrl && e.shiftKey && e.key.toLowerCase() === "n") { e.preventDefault(); setWsDialog({}); return; }
       if (ctrl && !e.shiftKey && e.key.toLowerCase() === "b" && !isTyping()) { e.preventDefault(); setSideMini((v) => !v); return; } // dentro do terminal Ctrl+B é o prefixo do tmux
       if (ctrl && e.shiftKey && (e.key === "\\" || e.key === "|")) { e.preventDefault(); if (overview) setOverview(null); else { const g = groundOf(current); if (g) setOverview(g.workspaceId); else toast("Selecione um espaço"); } return; }
@@ -476,6 +479,7 @@ function Canvas({ conn }: { conn: Connection }) {
   };
   const sideActions = {
     select: (id: string) => setCurrent(id),
+    settings: () => setPrefsOpen(true),
     newWorkspace: (folderId?: string) => setWsDialog(folderId ? { folderId } : {}),
     editWorkspace: (w: Workspace) => setWsDialog({ edit: w }),
     deleteWorkspace: (w: Workspace) => { if (confirm(`Apagar "${w.name}" e encerrar seus processos?`)) void run(api.deleteWorkspace(w.workspaceId).then(() => { if (current === w.workspaceId) setCurrent(null); })); },
@@ -560,6 +564,7 @@ function Canvas({ conn }: { conn: Connection }) {
         {floorDialog && <FloorDialog ground={floorDialog} onSubmit={(i) => void submitFloor(floorDialog, i)} onClose={() => setFloorDialog(null)} />}
         {overview && groundOf(overview) && <FloorOverview ground={groundOf(overview)!} floors={side.workspaces.filter((w) => w.parentId === overview)} current={current} terminals={side.terminals} api={api}
           onOpen={(id) => { setCurrent(id); setOverview(null); }} onNew={() => { setFloorDialog(groundOf(overview)!); }} onClose={() => setOverview(null)} onChanged={() => void refreshList()} onError={toast} />}
+        {prefsOpen && <Preferences onClose={() => setPrefsOpen(false)} />}
         {rolesDialog && <RolesDialog api={api} workspaceCwd={snap?.workspace.cwd ?? ""} onClose={() => setRolesDialog(false)} onChanged={() => void loadRoles()} />}
         <ReactFlow nodes={flow} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onNodeDragStart={onNodeDragStart} onNodeDragStop={onNodeDragStop} onEdgesChange={onEdgesChange} onConnect={onConnect} onEdgesDelete={onEdgesDelete}
           onNodeClick={(_, n) => { if (linkingRef.current) finishLink(n.id); }} onPaneClick={() => { if (linkingRef.current) setLinking(null); if (selDrawingsRef.current.size) setSelDrawings(new Set()); }}
