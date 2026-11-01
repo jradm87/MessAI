@@ -6,6 +6,9 @@ import type { Api, UiPrefsState } from "./api.js";
 import { PrefsTerminal } from "./PrefsTerminal.js";
 import { PrefsAgents, type OpenTerminal } from "./PrefsAgents.js";
 import { PrefsShortcuts } from "./PrefsShortcuts.js";
+import { PrefsUpdates } from "./PrefsUpdates.js";
+import { PrefsAbout } from "./PrefsAbout.js";
+import type { AppInfo } from "./diagnostics.js";
 
 /**
  * #64 — janela de Preferências em abas (engrenagem da barra lateral / Ctrl+,).
@@ -96,6 +99,8 @@ export type PreferencesProps = {
 export function Preferences({ api, onClose, onPresetsChanged, workspaceCwd, onRolesChanged, onOpenTerminal, onOpenUsage }: PreferencesProps) {
   const saved = usePref("prefsTab");
   const tab: PrefTabId = isTab(saved) ? saved : "general";
+  const [appInfo, setAppInfo] = useState<AppInfo | null>(null); // #61/#63
+  useEffect(() => { void window.messai.appInfo?.().then(setAppInfo).catch(() => {}); }, []);
   const pick = (id: PrefTabId) => setPref("prefsTab", id);
   useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); onClose(); } }; window.addEventListener("keydown", k, true); return () => window.removeEventListener("keydown", k, true); }, [onClose]);
   const cur = PREF_TABS.find((t) => t.id === tab)!;
@@ -104,10 +109,10 @@ export function Preferences({ api, onClose, onPresetsChanged, workspaceCwd, onRo
     : tab === "agents" ? <PrefsAgents api={api} workspaceCwd={workspaceCwd ?? ""} onRolesChanged={onRolesChanged ?? (() => {})} onOpenTerminal={onOpenTerminal ?? (() => {})} onOpenUsage={onOpenUsage ?? (() => {})} />
     : tab === "shortcuts" ? <PrefsShortcuts />
     : tab === "remote" ? <Soon issue={59} what="controle remoto e pareamento (depende do hub #28)" />
-    : tab === "updates" ? <Soon issue={61} what="canal e verificação de atualizações" />
+    : tab === "updates" ? <PrefsUpdates appVersion={appInfo?.version ?? "…"} buildVersion={appInfo?.buildVersion ?? 0} />
     : tab === "data" ? <Soon issue={62} what="local dos dados, uso, backups e apagar" />
     : tab === "opensource" ? <Soon issue={60} what="avisos de terceiros e licenças" />
-    : <Soon issue={63} what="versão, diagnóstico, reportar problema e créditos" />;
+    : <PrefsAbout api={api} appInfo={appInfo} />;
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
       <div className="modal prefs-modal" data-testid="prefs" onMouseDown={(e) => e.stopPropagation()}>

@@ -550,3 +550,9 @@ button.danger:hover { border-color: var(--danger); color: var(--danger-fg); }
 .ks-combo { min-width: 120px; font-family: ui-monospace, monospace; font-size: 12px; padding: 3px 10px; background: var(--chip); border: 1px solid var(--line); }
 .ks-combo.over { border-color: var(--acc); } .ks-combo.cap { background: var(--acc); color: var(--on-acc); border-color: transparent; animation: blink 1s steps(1) infinite; }
 .ks-row .tb { width: 24px; height: 24px; } .ks-row .tb:disabled { opacity: .3; }
+/* ===== #61 Atualizações · #63 Sobre ===== */
+.upd-bar { height: 6px; border-radius: 3px; background: var(--chip); overflow: hidden; } .upd-bar span { display: block; height: 100%; background: var(--acc); transition: width .2s; }
+.about-head { align-items: flex-start; } .about-logo { font-size: 26px; font-weight: 700; letter-spacing: -.03em; }
+.about-desc { min-height: 70px; }
+.about-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; } .about-opts .switch-row { margin: 4px 0; }
+.about-report { margin: 0; max-height: 240px; overflow: auto; font-size: 11px; line-height: 1.4; background: var(--input); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; white-space: pre-wrap; }

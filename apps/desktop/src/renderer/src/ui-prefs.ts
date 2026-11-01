@@ -5,7 +5,7 @@ export function applyCursor(web: boolean): void { document.documentElement.datas
 export function syncUiPrefs(): void {
   const p = getPrefs();
   applyCursor(p.webCursor);
-  void window.messai.setUiPrefs?.({ powerMode: p.powerMode, confirmExit: p.confirmExit, closeToTray: p.closeToTray });
+  void window.messai.setUiPrefs?.({ powerMode: p.powerMode, confirmExit: p.confirmExit, closeToTray: p.closeToTray, updateAuto: p.updateAuto });
 }
 /** Aplica agora e a cada mudança; devolve o cancelamento. */
 export function initUiPrefs(): () => void { syncUiPrefs(); return onPrefs(syncUiPrefs); }

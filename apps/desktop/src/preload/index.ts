@@ -21,4 +21,14 @@ contextBridge.exposeInMainWorld("messai", {
   uiPrefsState: (): Promise<unknown> => ipcRenderer.invoke("mess:ui-prefs-state"),
   // #38 — abrir pasta (restrito a ~/.messai no processo principal)
   openPath: (p: string): Promise<string> => ipcRenderer.invoke("mess:openPath", p),
+  // #61 — auto-update
+  updateState: (): Promise<unknown> => ipcRenderer.invoke("mess:update-state"),
+  updateCheck: (): Promise<unknown> => ipcRenderer.invoke("mess:update-check"),
+  updateInstall: (): Promise<void> => ipcRenderer.invoke("mess:update-install"),
+  onUpdateState: (cb: (s: unknown) => void) => on<unknown>("mess:update-state", cb),
+  // #63 — Sobre
+  appInfo: (): Promise<unknown> => ipcRenderer.invoke("mess:app-info"),
+  openExternal: (url: string): Promise<boolean> => ipcRenderer.invoke("mess:open-external", url),
+  runtimeLogTail: (lines: number): Promise<string> => ipcRenderer.invoke("mess:runtime-log-tail", lines),
+  saveText: (suggestedName: string, text: string): Promise<string | null> => ipcRenderer.invoke("mess:save-text", suggestedName, text),
 });

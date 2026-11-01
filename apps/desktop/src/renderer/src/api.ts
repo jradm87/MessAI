@@ -14,8 +14,13 @@ declare global { interface Window { messai: {
   setUiPrefs?: (p: UiPrefs) => Promise<UiPrefsState>; uiPrefsState?: () => Promise<UiPrefsState>;
   // #38 — abre uma pasta DENTRO de ~/.messai no gerenciador de arquivos; devolve "" ou a mensagem de erro
   openPath?: (p: string) => Promise<string>;
+  // #61 — auto-update
+  updateState?: () => Promise<UpdateState>; updateCheck?: () => Promise<UpdateState>; updateInstall?: () => Promise<void>; onUpdateState?: (cb: (s: UpdateState) => void) => () => void;
+  // #63 — Sobre
+  appInfo?: () => Promise<import("./diagnostics.js").AppInfo>; openExternal?: (url: string) => Promise<boolean>; runtimeLogTail?: (lines: number) => Promise<string>; saveText?: (suggestedName: string, text: string) => Promise<string | null>;
 } } }
-export type UiPrefs = { powerMode: string; confirmExit: boolean; closeToTray: boolean };
+export type UiPrefs = { powerMode: string; confirmExit: boolean; closeToTray: boolean; updateAuto?: boolean };
+export type UpdateState = { supported: boolean; status: "unsupported" | "idle" | "checking" | "available" | "not-available" | "downloading" | "downloaded" | "error"; version?: string; percent?: number; error?: string; lastCheck?: string; current: string };
 export type UiPrefsState = UiPrefs & { powerBlocking: boolean };
 
 export class ApiClientError extends Error { constructor(readonly error: ApiError, readonly status: number) { super(error.message); } }

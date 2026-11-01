@@ -7,6 +7,7 @@ import { join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BUILD_VERSION } from "@messai/contracts";
 import { parsePowerMode, shouldBlock, type PowerMode } from "./power.js";
+import { applyUpdateEvent, friendlyUpdateError, initialUpdateState, type UpdateState } from "./updates.js";
 
 const DATA_DIR = process.env["MESS_DATA_DIR"] ?? join(homedir(), ".messai");
 const PORT = Number(process.env["MESS_PORT"] ?? 47821);
@@ -231,11 +232,47 @@ ipcMain.handle("mess:ui-prefs", (_e, p: { powerMode?: unknown; confirmExit?: unk
   uiPrefs.powerMode = parsePowerMode(p?.powerMode);
   if (typeof p?.confirmExit === "boolean") uiPrefs.confirmExit = p.confirmExit;
   if (typeof p?.closeToTray === "boolean") uiPrefs.closeToTray = p.closeToTray;
+  if (typeof (p as { updateAuto?: unknown })?.updateAuto === "boolean") { updateAuto = (p as { updateAuto: boolean }).updateAuto; syncUpdateTimer(); } // #61
   syncAgentsPoll(); applyPower();
   if (!uiPrefs.closeToTray && tray && mainWin && !mainWin.isDestroyed() && mainWin.isVisible()) { tray.destroy(); tray = null; } // só mantém o ícone enquanto a opção vale
   return uiState();
 });
 ipcMain.handle("mess:ui-prefs-state", () => uiState());
+
+// #61 — estado do auto-update + verificação periódica (6 h) quando a preferência "verificar automaticamente" está ligada.
+let upd: UpdateState = initialUpdateState(app.getVersion(), app.isPackaged);
+let updateAuto = true; let updateTimer: ReturnType<typeof setInterval> | undefined; let firstCheckDone = false;
+function setUpd(ev: Parameters<typeof applyUpdateEvent>[1]): void { upd = applyUpdateEvent(upd, ev); if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send("mess:update-state", upd); }
+async function checkUpdates(): Promise<UpdateState> {
+  if (!app.isPackaged) return upd;
+  try { await electronUpdater.autoUpdater.checkForUpdates(); } catch (e) { setUpd({ type: "error", message: friendlyUpdateError(e instanceof Error ? e.message : String(e)), at: new Date().toISOString() }); }
+  return upd;
+}
+function syncUpdateTimer(): void {
+  if (updateAuto && app.isPackaged) { if (!firstCheckDone) { firstCheckDone = true; void checkUpdates(); } if (!updateTimer) updateTimer = setInterval(() => void checkUpdates(), 6 * 3_600_000); }
+  else if (updateTimer) { clearInterval(updateTimer); updateTimer = undefined; }
+}
+ipcMain.handle("mess:update-state", () => upd);
+ipcMain.handle("mess:update-check", () => checkUpdates());
+ipcMain.handle("mess:update-install", () => { if (app.isPackaged && upd.status === "downloaded") { allowClose = true; electronUpdater.autoUpdater.quitAndInstall(); } });
+
+// #63 — Sobre: info do app, abrir link externo (web ou mailto), cauda do runtime.log, salvar texto.
+ipcMain.handle("mess:app-info", () => ({ name: "MessAI", version: app.getVersion(), buildVersion: BUILD_VERSION, electron: process.versions.electron, node: process.versions.node, chrome: process.versions.chrome, platform: process.platform, arch: process.arch, dataDir: DATA_DIR, packaged: app.isPackaged }));
+ipcMain.handle("mess:open-external", async (_e, url: unknown) => {
+  if (typeof url !== "string") return false;
+  try { const u = new URL(url); if (u.protocol !== "https:" && u.protocol !== "http:" && u.protocol !== "mailto:") return false; await shell.openExternal(url); return true; } catch { return false; }
+});
+ipcMain.handle("mess:runtime-log-tail", (_e, lines: unknown) => {
+  const n = Math.max(1, Math.min(2000, typeof lines === "number" ? Math.floor(lines) : 200));
+  try { const all = readFileSync(join(DATA_DIR, "runtime.log"), "utf8").split("\n"); return all.slice(-n).join("\n"); } catch { return ""; }
+});
+ipcMain.handle("mess:save-text", async (_e, suggested: unknown, text: unknown) => {
+  if (typeof text !== "string") return null;
+  const name = typeof suggested === "string" && suggested && !suggested.includes("/") ? suggested : "messai.txt";
+  const r = await dialog.showSaveDialog({ defaultPath: join(homedir(), name) });
+  if (r.canceled || !r.filePath) return null;
+  writeFileSync(r.filePath, text, "utf8"); return r.filePath;
+});
 
 // Bandeja (só quando "Fechar para a bandeja" está ligado e a janela foi escondida).
 let tray: Tray | null = null;
@@ -290,17 +327,21 @@ app.whenReady().then(() => {
   // Janela primeiro (aparece na hora); runtime garantido em paralelo. O mess:connection aguarda runtimeReady.
   runtimeReady = ensureRuntime().catch((e) => { console.error(e); });
   createWindow();
-  // Auto-update (só no app empacotado): checa o GitHub releases e baixa em segundo plano.
-  // Tolerante: aceita pré-lançamento, não deixa logs barulhentos, e NUNCA derruba/suja o console
-  // quando não há release estável ou falta o latest-linux.yml (ex.: 406 "find latest version").
+  // Auto-update (#61): só no app empacotado. Estado numa máquina pura (updates.ts); a UI de Preferências → Atualizações
+  // lê/assina o estado. Tolerante: aceita pré-lançamento, sem logs barulhentos, e erro de rede/sem release vira texto curto.
   if (app.isPackaged) {
     const up = electronUpdater.autoUpdater;
     up.allowPrerelease = true; // a v0.0.1 é pré-lançamento
     up.autoDownload = true;
     up.logger = null;
-    up.on("error", () => { /* sem rede / sem release estável: ignorar silenciosamente */ });
-    up.checkForUpdatesAndNotify().catch(() => { /* idem: nada a atualizar */ });
+    up.on("checking-for-update", () => setUpd({ type: "checking" }));
+    up.on("update-available", (i) => setUpd({ type: "available", version: i.version }));
+    up.on("update-not-available", () => setUpd({ type: "not-available", at: new Date().toISOString() }));
+    up.on("download-progress", (pr) => setUpd({ type: "progress", percent: pr.percent }));
+    up.on("update-downloaded", (i) => setUpd({ type: "downloaded", version: i.version, at: new Date().toISOString() }));
+    up.on("error", (e) => setUpd({ type: "error", message: friendlyUpdateError(e?.message ?? String(e)), at: new Date().toISOString() }));
   }
+  syncUpdateTimer();
 });
 app.on("window-all-closed", () => app.quit()); // o runtime continua vivo
 // Ajuda de desenvolvimento: `kill -USR2 <pid>` traz a janela para frente.
