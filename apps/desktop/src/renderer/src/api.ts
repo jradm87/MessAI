@@ -1,4 +1,4 @@
-import type { ApiError, CompanionConfig, RuntimeSettings, PatchRuntimeSettings, PresetInput, Skill, CreateSkill, PatchSkill, TaskSummary, TreeEntry, FileContent, FsOp, SearchHit, CreateFloor, LandFloor, LandResult, PatchConnection, Role, CreateRole, PatchRole, ChatMessage, SendChat, Attachment, CreateAttachment, FileEntry, Connection as WsConnection, CreateDrawing, PatchDrawing, GroupDrawings, CreateFolder, CreateNode, CreateWorkspace, Drawing, Folder, Geometry, PatchFolder, PatchWorkspace, Preset, Node, PatchNode, Session, Sidebar, Workspace, WorkspaceSnapshot, WsClientMessage, WsServerMessage } from "@messai/contracts";
+import type { ApiError, CompanionConfig, NodeGroup, CreateNodeGroup, PatchNodeGroup, RuntimeSettings, PatchRuntimeSettings, PresetInput, Skill, CreateSkill, PatchSkill, TaskSummary, TreeEntry, FileContent, FsOp, SearchHit, CreateFloor, LandFloor, LandResult, PatchConnection, Role, CreateRole, PatchRole, ChatMessage, SendChat, Attachment, CreateAttachment, FileEntry, Connection as WsConnection, CreateDrawing, PatchDrawing, GroupDrawings, CreateFolder, CreateNode, CreateWorkspace, Drawing, Folder, Geometry, PatchFolder, PatchWorkspace, Preset, Node, PatchNode, Session, Sidebar, Workspace, WorkspaceSnapshot, WsClientMessage, WsServerMessage } from "@messai/contracts";
 
 export type Connection = { baseUrl: string; wsUrl: string; token: string; homeDir?: string };
 export type RunningEntry = { title: string; agentType: string; isAgent: boolean; workspace: string };
@@ -95,6 +95,10 @@ export class Api {
   deleteConnection(id: string, expectedRevision: number) { return this.req<void>("DELETE", `/v1/connections/${id}`, { expectedRevision }); }
   createDrawing(wsId: string, input: CreateDrawing) { return this.req<Drawing>("POST", `/v1/workspaces/${wsId}/drawings`, input); }
   patchDrawing(id: string, input: PatchDrawing) { return this.req<Drawing>("PATCH", `/v1/drawings/${id}`, input); }
+  // #78 grupos de nós
+  createNodeGroup(wsId: string, input: CreateNodeGroup) { return this.req<{ group: NodeGroup; revision: number }>("POST", `/v1/workspaces/${wsId}/groups`, input); }
+  patchNodeGroup(id: string, input: PatchNodeGroup) { return this.req<{ group: NodeGroup | null; revision: number }>("PATCH", `/v1/groups/${id}`, input); }
+  deleteNodeGroup(id: string, expectedRevision: number) { return this.req<void>("DELETE", `/v1/groups/${id}`, { expectedRevision }); }
   groupDrawings(wsId: string, input: GroupDrawings) { return this.req<{ revision: number }>("POST", `/v1/workspaces/${wsId}/drawings/group`, input); }
   deleteDrawing(id: string, expectedRevision: number) { return this.req<void>("DELETE", `/v1/drawings/${id}`, { expectedRevision }); }
   roles() { return this.req<Role[]>("GET", "/v1/roles"); }

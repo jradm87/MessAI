@@ -19,7 +19,10 @@ export type Op =
   | { type: "createDrawing"; ref: string; spec: DrawingSpec }
   | { type: "deleteDrawing"; id: string }
   | { type: "patchDrawing"; id: string; points: [number, number][] }
-  | { type: "groupDrawings"; ids: string[]; grouped: boolean };
+  | { type: "groupDrawings"; ids: string[]; grouped: boolean }
+  | { type: "createGroup"; ref: string; spec: { nodeIds: string[]; label: string; color: string } } // #78
+  | { type: "deleteGroup"; id: string }
+  | { type: "patchGroup"; id: string; patch: { label?: string; color?: string } };
 export type Entry = { label: string; forward: Op[]; inverse: Op[]; key?: string; at: number };
 export type Executor = (op: Op) => Promise<string | void>; // devolve o id real quando cria algo
 
@@ -80,7 +83,7 @@ export class History {
     for (const op of ops) {
       const r = this.resolveOp(op);
       const made = await this.exec(r);
-      if ((op.type === "createNode" || op.type === "createConnection" || op.type === "createDrawing") && typeof made === "string") this.alias(op.ref, made);
+      if ((op.type === "createNode" || op.type === "createConnection" || op.type === "createDrawing" || op.type === "createGroup") && typeof made === "string") this.alias(op.ref, made);
     }
   }
   /** Traduz ids pelo remap antes de executar. */
@@ -94,6 +97,8 @@ export class History {
       case "createConnection": return { ...op, spec: { ...op.spec, sourceNodeId: R(op.spec.sourceNodeId), targetNodeId: R(op.spec.targetNodeId) } };
       case "groupDrawings": return { ...op, ids: op.ids.map(R) };
       case "createDrawing": return op.spec.groupId ? { ...op, spec: { ...op.spec, groupId: R(op.spec.groupId) } } : op;
+      case "createGroup": return { ...op, spec: { ...op.spec, nodeIds: op.spec.nodeIds.map(R) } };
+      case "deleteGroup": case "patchGroup": return { ...op, id: R(op.id) };
       default: return op;
     }
   }

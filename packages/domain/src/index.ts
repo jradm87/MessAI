@@ -323,16 +323,17 @@ export type SnapResult = { x: number; y: number; guides: { vertical: number[]; h
  */
 export function snapGeometry(moving: Geometry, others: Geometry[], opt: { threshold?: number; grid?: number } = {}): SnapResult {
   const th = opt.threshold ?? 8; const grid = opt.grid ?? 0;
-  const xs: number[] = [], ys: number[] = [];
-  for (const o of others) { xs.push(o.x, o.x + o.w, o.x + o.w / 2); ys.push(o.y, o.y + o.h, o.y + o.h / 2); }
-  const cands = (own: number[], targets: number[]): { delta: number; line: number } | null => {
-    let best: { delta: number; line: number } | null = null;
-    for (const a of own) for (const t of targets) { const d = t - a; if (Math.abs(d) <= th && (!best || Math.abs(d) < Math.abs(best.delta))) best = { delta: d, line: t }; }
-    if (!best && grid > 0) { const a = own[0]!; const t = Math.round(a / grid) * grid; const d = t - a; if (Math.abs(d) <= th) best = { delta: d, line: t }; }
-    return best;
+  // Bordas encaixam em bordas e centros em centros (nunca centro em borda: seria surpreendente e disputa com o encaixe de borda).
+  const ex: number[] = [], cx: number[] = [], ey: number[] = [], cy: number[] = [];
+  for (const o of others) { ex.push(o.x, o.x + o.w); cx.push(o.x + o.w / 2); ey.push(o.y, o.y + o.h); cy.push(o.y + o.h / 2); }
+  const best = (pairs: [own: number, targets: number[]][], gridAnchor: number): { delta: number; line: number } | null => {
+    let b: { delta: number; line: number } | null = null;
+    for (const [a, targets] of pairs) for (const t of targets) { const d = t - a; if (Math.abs(d) <= th && (!b || Math.abs(d) < Math.abs(b.delta))) b = { delta: d, line: t }; }
+    if (!b && grid > 0) { const t = Math.round(gridAnchor / grid) * grid; const d = t - gridAnchor; if (Math.abs(d) <= th) b = { delta: d, line: t }; }
+    return b;
   };
-  const sx = cands([moving.x, moving.x + moving.w, moving.x + moving.w / 2], xs);
-  const sy = cands([moving.y, moving.y + moving.h, moving.y + moving.h / 2], ys);
+  const sx = best([[moving.x, ex], [moving.x + moving.w, ex], [moving.x + moving.w / 2, cx]], moving.x);
+  const sy = best([[moving.y, ey], [moving.y + moving.h, ey], [moving.y + moving.h / 2, cy]], moving.y);
   return { x: moving.x + (sx?.delta ?? 0), y: moving.y + (sy?.delta ?? 0), guides: { vertical: sx ? [sx.line] : [], horizontal: sy ? [sy.line] : [] } };
 }
 

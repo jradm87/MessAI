@@ -35,8 +35,8 @@ export const ACTIONS: ActionDef[] = [
   { id: "history.undo", label: "Desfazer", group: "Edição", combo: C("z", "c"), note: "No terminal, Ctrl+Z é do shell (suspender)" },
   { id: "history.redo", label: "Refazer", group: "Edição", combo: C("z", "cs"), note: "Ctrl+Y também vale fora de inputs" },
   { id: "delete", label: "Excluir selecionados", group: "Edição", combo: C("w", "c"), note: "Delete/Backspace também valem fora de inputs" },
-  { id: "drawings.group", label: "Agrupar desenhos", group: "Edição", combo: C("g", "c") },
-  { id: "drawings.ungroup", label: "Desagrupar desenhos", group: "Edição", combo: C("g", "cs") },
+  { id: "drawings.group", label: "Agrupar seleção (nós ou desenhos)", group: "Edição", combo: C("g", "c") },
+  { id: "drawings.ungroup", label: "Desagrupar seleção (nós ou desenhos)", group: "Edição", combo: C("g", "cs") },
   { id: "tool.select", label: "Ferramenta: selecionar", group: "Ferramentas", combo: C("v") },
   { id: "tool.terminal", label: "Ferramenta: terminal", group: "Ferramentas", combo: C("t") },
   { id: "tool.note", label: "Ferramenta: nota", group: "Ferramentas", combo: C("n") },
@@ -44,6 +44,7 @@ export const ACTIONS: ActionDef[] = [
   { id: "tool.tree", label: "Ferramenta: árvore de arquivos", group: "Ferramentas", combo: C("f") },
   { id: "tool.draw", label: "Ferramenta: desenhar", group: "Ferramentas", combo: C("b") },
   { id: "tool.pan", label: "Ferramenta: mover a vista", group: "Ferramentas", combo: C("h") },
+  { id: "snap.toggle", label: "Encaixe magnético (ligar/desligar)", group: "Ferramentas", combo: C("m"), note: "Segurar Alt ao arrastar também encaixa, quando o gerenciador de janelas não captura Alt" },
   { id: "draw.thinner", label: "Traço mais fino", group: "Ferramentas", combo: C("[") },
   { id: "draw.thicker", label: "Traço mais grosso", group: "Ferramentas", combo: C("]") },
 ];

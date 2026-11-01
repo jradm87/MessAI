@@ -18,6 +18,10 @@ describe("grupos de nós e encaixe magnético (#78)", () => {
     expect(snapGeometry({ x: 700, y: 700, w: 50, h: 50 }, [other])).toMatchObject({ x: 700, y: 700, guides: { vertical: [], horizontal: [] } });
     // o candidato mais próximo vence
     expect(snapGeometry({ x: 102, y: 500, w: 50, h: 50 }, [other, { x: 95, y: 0, w: 10, h: 10 }]).x).toBe(100);
+    // centro NÃO encaixa em borda: centro em 302 (x=277,w=50) perto da borda direita 300 do vizinho → nada
+    expect(snapGeometry({ x: 277, y: 500, w: 50, h: 50 }, [other]).x).toBe(277);
+    // borda esquerda a 5 da borda do vizinho e centro a 4 de uma borda de outro: vence o encaixe de borda (único válido)
+    expect(snapGeometry({ x: 265, y: 500, w: 260, h: 50 }, [{ x: 0, y: 0, w: 260, h: 10 }, { x: 399, y: 0, w: 10, h: 10 }]).x).toBe(260);
   });
   it("grade: sem vizinho perto, encaixa na grade quando pedido", () => {
     expect(snapGeometry({ x: 101, y: 46, w: 10, h: 10 }, [], { grid: 48 })).toMatchObject({ x: 96, y: 48 });

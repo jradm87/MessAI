@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Background, BackgroundVariant, MiniMap, ReactFlow, applyNodeChanges, applyEdgeChanges, type EdgeChange, useReactFlow, ReactFlowProvider, useOnViewportChange, type Connection as FlowConnection, type Edge, type EdgeTypes, type Node as FlowNode, type NodeChange, type NodeTypes } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Map as MapIcon, Minus, Plus, Activity, Layers, AlignStartVertical, AlignCenterVertical, AlignEndVertical, AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal, LayoutGrid, Sun, Moon, Monitor, Sparkles, Undo2, Redo2 } from "lucide-react";
+import { Map as MapIcon, Minus, Plus, Activity, Layers, AlignStartVertical, AlignCenterVertical, AlignEndVertical, AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal, LayoutGrid, Sun, Moon, Monitor, Sparkles, Undo2, Redo2, Magnet } from "lucide-react";
 import { useAtomValue } from "jotai";
 import { themeAtom } from "./atoms.js";
 import { getThemePref, setThemePref, nextTheme, THEME_LABEL, cssVar } from "./theme.js";
-import { BUILD_VERSION, type Role, type Drawing, type Folder, type Geometry, type Node, type Preset, type Sidebar as SidebarData, type Skill, type TermTheme, type Workspace, type WorkspaceSnapshot } from "@messai/contracts";
-import { gridLayout, alignGeometries, type AlignMode } from "@messai/domain";
+import { BUILD_VERSION, type Role, type Drawing, type Folder, type Geometry, type Node, type NodeGroup, type Preset, type Sidebar as SidebarData, type Skill, type TermTheme, type Workspace, type WorkspaceSnapshot } from "@messai/contracts";
+import { gridLayout, alignGeometries, type AlignMode, snapGeometry } from "@messai/domain";
 import { Sidebar } from "./Sidebar.js";
 import { WorkspaceDialog, type WorkspaceInput } from "./WorkspaceDialog.js";
 import { RolesDialog } from "./RolesDialog.js";
@@ -33,6 +33,7 @@ import { Preferences } from "./Preferences.js";
 import { setPref, usePref } from "./prefs.js";
 import { ACTION_BY_ID, comboFromEvent, effectiveCombo, sameCombo, type Keymap } from "./keymap.js";
 import { History, plural, type ConnSpec, type DrawingSpec, type NodeSpec, type Op } from "./undo.js";
+import { GroupLayer, type Guides } from "./GroupLayer.js";
 import { useHint, useKeymap } from "./shortcuts.js";
 
 const nodeTypes: NodeTypes = { terminal: TerminalNode as never, note: NoteNode as never, text: TextNode as never, tree: TreeNode as never };
@@ -55,7 +56,8 @@ function ZoomBar({ minimap, setMinimap, onUsage, agents, wsName, inFloors, onFlo
   useAtomValue(themeAtom); // re-renderiza o botão quando o tema efetivo muda
   const pref = getThemePref(); const ThemeIcon = pref === "light" ? Sun : pref === "dark" ? Moon : Monitor;
   // #38 Agent Usage: desligado em Preferências → Agentes → Uso some da barra; provedores escondidos também
-  const hMini = useHint("minimap.toggle"); const hIn = useHint("zoom.in"); const hOut = useHint("zoom.out"); // #58 tooltips seguem o keymap
+  const hMini = useHint("minimap.toggle"); const hIn = useHint("zoom.in"); const hOut = useHint("zoom.out"); const hMagnet = useHint("snap.toggle"); // #58 tooltips seguem o keymap
+  const magnetOn = usePref("snapMagnetic"); // #78
   const usageOn = usePref("usageEnabled"); const hidden = new Set(usePref("usageDisabled").split(",").filter(Boolean));
   const shownAgents = usageOn ? agents.filter((a) => !hidden.has(a)) : [];
   return (
@@ -64,6 +66,7 @@ function ZoomBar({ minimap, setMinimap, onUsage, agents, wsName, inFloors, onFlo
       {shownAgents.slice(0, 5).map((a) => <button key={a} className="bb-circle" title={`${a} — Agent Usage`} data-testid="bb-agent" onClick={onUsage}><AgentIcon id={a} size={20} /></button>)}
       {usageOn && shownAgents.length === 0 && <button className="bb-circle" title="Agent Usage" data-testid="bb-usage" onClick={onUsage}><Activity size={15} /></button>}
       <button className="bb-circle" title={`Tema: ${THEME_LABEL[pref]} (clique alterna Sistema → Claro → Escuro)`} data-testid="theme-toggle" onClick={() => setThemePref(nextTheme(pref))}><ThemeIcon size={15} /></button>
+      <button className={`bb-circle ${magnetOn ? "on" : ""}`} title={`Encaixe magnético ao arrastar: ${magnetOn ? "ligado" : "desligado"}${hMagnet}`} data-testid="snap-toggle" onClick={() => setPref("snapMagnetic", !magnetOn)}><Magnet size={15} /></button>
       <button className="bb-circle" title={history.canUndo ? `Desfazer: ${history.undoLabel} (Ctrl+Z)` : "Nada para desfazer"} disabled={!history.canUndo} data-testid="undo" onClick={history.onUndo}><Undo2 size={15} /></button>
       <button className="bb-circle" title={history.canRedo ? `Refazer: ${history.redoLabel} (Ctrl+Shift+Z)` : "Nada para refazer"} disabled={!history.canRedo} data-testid="redo" onClick={history.onRedo}><Redo2 size={15} /></button>
       <button className={`bb-circle ${hud ? "on" : ""}`} title={hud ? "Companheiro: fechar janela flutuante" : "Companheiro: abrir janela flutuante (agentes que terminaram, resumo e próximo passo)"} data-testid="hud-toggle" onClick={onHud}><Sparkles size={15} /></button>
@@ -190,6 +193,33 @@ function Canvas({ conn }: { conn: Connection }) {
   // ===== #77 desfazer/refazer: uma pilha por espaço; operações descritas como dados (undo.ts) e executadas aqui contra a API =====
   const histories = useRef(new Map<string, History>());
   const snapRef = useRef<WorkspaceSnapshot | null>(snap); snapRef.current = snap; // os handlers de teclado capturam closures antigas: leem o snapshot pela ref
+  // #78 encaixe magnético: liga/desliga pelo botão ímã (ou tecla M, pref `snapMagnetic`); segurar Alt durante o arrasto também
+  // vale, mas no Linux o gerenciador de janelas costuma capturar Alt+arrastar (e Shift/Ctrl são do React Flow) — por isso o toggle.
+  const altRef = useRef(false);
+  const magnet = usePref("snapMagnetic"); const magnetRef = useRef(magnet); magnetRef.current = magnet;
+  const snappedRef = useRef(new Map<string, { x: number; y: number }>()); // posição encaixada por nó durante o arrasto (o onNodeDragStop lê daqui)
+  const [guides, setGuides] = useState<Guides>({ vertical: [], horizontal: [] });
+  useEffect(() => { const d = (e: KeyboardEvent) => { if (e.key === "Alt") altRef.current = true; }; const u = (e: KeyboardEvent) => { if (e.key === "Alt") altRef.current = false; }; const blur = () => { altRef.current = false; }; window.addEventListener("keydown", d, true); window.addEventListener("keyup", u, true); window.addEventListener("blur", blur); return () => { window.removeEventListener("keydown", d, true); window.removeEventListener("keyup", u, true); window.removeEventListener("blur", blur); }; }, []);
+  const groupsOf = (): NodeGroup[] => snapRef.current?.groups ?? [];
+  const membersOf = (groupId: string): string[] => (snapRef.current?.nodes ?? []).filter((n) => n.groupId === groupId).map((n) => n.nodeId);
+  const selectNodes = (ids: string[]) => { const set = new Set(ids); const next = flowRef.current.map((n) => ({ ...n, selected: set.has(n.id) })); flowRef.current = next; setFlow(next); };
+  /** Agrupa os nós selecionados (≥2) com inversa; devolve false se não havia o que agrupar. */
+  const groupSelectedNodes = async (): Promise<boolean> => {
+    const ids = flowRef.current.filter((n) => n.selected).map((n) => n.id); if (ids.length < 2 || !current) return false;
+    try { const r = await runOp((rev) => api.createNodeGroup(current, { expectedRevision: rev, nodeIds: ids })); rec({ label: `agrupar ${plural(ids.length, "nó", "nós")}`, forward: [{ type: "createGroup", ref: r.group.groupId, spec: { nodeIds: ids, label: "", color: "" } }], inverse: [{ type: "deleteGroup", id: r.group.groupId }] }); toast(`Grupo criado com ${ids.length} nós — duplo clique no rótulo para nomear`); } catch { /* já avisou */ }
+    return true;
+  };
+  const ungroup = async (groupId: string) => {
+    const g = groupsOf().find((x) => x.groupId === groupId); if (!g) return;
+    const members = membersOf(groupId);
+    try { await runOp((rev) => api.deleteNodeGroup(groupId, rev)); rec({ label: "desagrupar", forward: [{ type: "deleteGroup", id: groupId }], inverse: [{ type: "createGroup", ref: groupId, spec: { nodeIds: members, label: g.label, color: g.color } }] }); } catch { /* já avisou */ }
+  };
+  const patchGroup = (groupId: string, patch: { label?: string; color?: string }) => {
+    const g = groupsOf().find((x) => x.groupId === groupId); if (!g) return;
+    const inverse: { label?: string; color?: string } = {}; if (patch.label !== undefined) inverse.label = g.label; if (patch.color !== undefined) inverse.color = g.color;
+    void mutate((r) => api.patchNodeGroup(groupId, { expectedRevision: r, ...patch }));
+    rec({ label: patch.label !== undefined ? "renomear grupo" : "cor do grupo", forward: [{ type: "patchGroup", id: groupId, patch }], inverse: [{ type: "patchGroup", id: groupId, patch: inverse }] });
+  };
   const [histTick, setHistTick] = useState(0); // re-render dos botões/rótulos
   const bump = () => setHistTick((t) => t + 1);
   /** Como `mutate`, mas PROPAGA o erro (a pilha precisa saber que falhou) e devolve o que a API respondeu. */
@@ -215,6 +245,9 @@ function Canvas({ conn }: { conn: Connection }) {
       case "deleteDrawing": await runOp((rev) => api.deleteDrawing(op.id, rev)); return;
       case "patchDrawing": await runOp((rev) => api.patchDrawing(op.id, { expectedRevision: rev, points: op.points })); return;
       case "groupDrawings": await runOp((rev) => api.groupDrawings(wsId, { expectedRevision: rev, drawingIds: op.ids, grouped: op.grouped })); return;
+      case "createGroup": { const r = await runOp((rev) => api.createNodeGroup(wsId, { expectedRevision: rev, nodeIds: op.spec.nodeIds, label: op.spec.label, color: op.spec.color })); return r.group.groupId; }
+      case "deleteGroup": await runOp((rev) => api.deleteNodeGroup(op.id, rev)); return;
+      case "patchGroup": await runOp((rev) => api.patchNodeGroup(op.id, { expectedRevision: rev, ...op.patch })); return;
     }
   };
   const hist = (wsId = current): History => { const id = wsId ?? "__none__"; let h = histories.current.get(id); if (!h) { h = new History(execOp(id)); histories.current.set(id, h); } return h; };
@@ -294,6 +327,7 @@ function Canvas({ conn }: { conn: Connection }) {
         ...(old?.selected ? { selected: true } : {}),
         data: n.kind === "terminal" ? { title: n.title, sessionId: n.sessionId!, api, stream, onDelete: del, onRename: rename,
             ...(n.icon ? { icon: n.icon } : {}), ...(n.color ? { color: n.color } : {}), ...(n.termTheme ? { termTheme: n.termTheme } : {}), // #56 aparência do nó
+            ...(n.groupId ? { groupId: n.groupId } : {}), // #78
             onAppearance: (p: { icon?: string | null; color?: string | null; termTheme?: TermTheme | null }) => patchRec(n, p, "aparência do terminal"), editSignal: renameSig.id === n.nodeId ? renameSig.n : 0, ...extras,
             composerOpen: composerFor === n.nodeId, onComposerClose: () => setComposerFor(null), workspaceId: snap.workspace.workspaceId,
             chatOpen: chatFor === n.nodeId, onChatClose: () => setChatFor(null),
@@ -303,11 +337,11 @@ function Canvas({ conn }: { conn: Connection }) {
             onResume: () => void api.restart(n.nodeId).catch(() => {}),
             onFocus: () => { focusedTerm.current = n.nodeId; if (composerRef.current && composerRef.current !== n.nodeId) setComposerFor(n.nodeId); },
             targets: snap.nodes.filter((o) => o.nodeId !== n.nodeId && o.kind !== "text").map((o) => ({ id: o.nodeId, kind: o.kind as "terminal" | "note", title: o.title, connected: (snap.connections ?? []).some((c) => (c.sourceNodeId === n.nodeId && c.targetNodeId === o.nodeId) || (c.targetNodeId === n.nodeId && c.sourceNodeId === o.nodeId)) })) }
-          : n.kind === "note" ? { title: n.title, content: n.content ?? "", editSignal: renameSig.id === n.nodeId ? renameSig.n : 0, locked: !!n.locked, ...(n.color ? { color: n.color } : {}), ...(n.filePath ? { filePath: n.filePath } : {}), onChange: change, onDelete: del, onRename: rename, ...extras,
+          : n.kind === "note" ? { title: n.title, content: n.content ?? "", editSignal: renameSig.id === n.nodeId ? renameSig.n : 0, locked: !!n.locked, ...(n.groupId ? { groupId: n.groupId } : {}), ...(n.color ? { color: n.color } : {}), ...(n.filePath ? { filePath: n.filePath } : {}), onChange: change, onDelete: del, onRename: rename, ...extras,
               onLock: (locked: boolean) => patchRec(n, { locked }, locked ? "bloquear nota" : "desbloquear nota"),
               onColor: (color: string | null) => patchRec(n, { color }, "cor da nota"),
               onMove: () => void window.messai.pickDirectory?.().then((d) => { if (d) void mutate((r) => api.patchNode(n.nodeId, { expectedRevision: r, filePath: `${d}/${n.title.replace(/[\\/:*?"<>|]+/g, " ").trim() || "nota"}.md` })); }) }
-          : n.kind === "tree" ? { title: n.title, content: n.content ?? "", editSignal: renameSig.id === n.nodeId ? renameSig.n : 0, workspaceId: snap.workspace.workspaceId, api, onChange: change, onDelete: del, onRename: rename, ...extras,
+          : n.kind === "tree" ? { title: n.title, content: n.content ?? "", editSignal: renameSig.id === n.nodeId ? renameSig.n : 0, workspaceId: snap.workspace.workspaceId, api, ...(n.groupId ? { groupId: n.groupId } : {}), onChange: change, onDelete: del, onRename: rename, ...extras,
               onOpenNote: (rel: string) => void mutate((r) => api.createNode(snap.workspace.workspaceId, { expectedRevision: r, kind: "note", geometry: { x: n.geometry.x + n.geometry.w + 40, y: n.geometry.y, w: 360, h: 260 }, filePath: `${snap.workspace.cwd}/${rel}` })),
               onPreview: (rel: string) => setPreview(rel), toast }
           : { content: n.content ?? "", onChange: change, onDelete: del, onRaise: extras.onRaise, editSignal: renameSig.id === n.nodeId ? renameSig.n : 0 },
@@ -366,8 +400,31 @@ function Canvas({ conn }: { conn: Connection }) {
   const onNodesChange = useCallback((changes: NodeChange[]) => {
     // Updater funcional: aplica as mudanças sempre sobre o estado MAIS recente (flowRef pode estar atrasado),
     // senão um resize/arrasto sobrescreve a lista com uma versão antiga e os outros nós "somem" da tela.
+    // #78 (1) selecionar um nó de grupo seleciona o grupo inteiro (assim o React Flow arrasta todos juntos);
+    //     (2) com Alt pressionado, a posição arrastada encaixa em vizinhos/grade (snapGeometry) e as guias aparecem.
+    let eff: NodeChange[] = changes;
+    const sels = changes.filter((c): c is Extract<NodeChange, { type: "select" }> => c.type === "select" && c.selected);
+    if (sels.length) {
+      const extra: NodeChange[] = []; const have = new Set(changes.filter((c) => c.type === "select").map((c) => (c as { id: string }).id));
+      for (const c of sels) { const gid = snapRef.current?.nodes.find((n) => n.nodeId === c.id)?.groupId; if (!gid) continue; for (const m of membersOf(gid)) if (!have.has(m)) { have.add(m); extra.push({ type: "select", id: m, selected: true }); } }
+      if (extra.length) eff = [...changes, ...extra];
+    }
+    // Vale para as mudanças durante o arrasto E para a final (dragging=false, que o React Flow emite a partir da posição do
+    // ponteiro): o onNodeDragStop lê a posição encaixada de snappedRef, porque o nodeLookup interno ainda não re-renderizou.
+    const moving = eff.filter((c): c is Extract<NodeChange, { type: "position" }> => c.type === "position" && !!c.position);
+    if (moving.length && (altRef.current || magnetRef.current) && snapRef.current) {
+      const lead = moving[0]!; const ids = new Set(moving.map((c) => c.id));
+      const sn = snapRef.current.nodes.find((n) => n.nodeId === lead.id);
+      if (sn) {
+        const others = snapRef.current.nodes.filter((n) => !ids.has(n.nodeId)).map((n) => n.geometry);
+        const zoom = rf.getZoom(); const res = snapGeometry({ x: lead.position!.x, y: lead.position!.y, w: sn.geometry.w, h: sn.geometry.h }, others, { threshold: 8 / Math.max(zoom, 0.2), grid: 48 });
+        const dx = res.x - lead.position!.x, dy = res.y - lead.position!.y;
+        eff = eff.map((c) => { if (c.type !== "position" || !c.position || !ids.has(c.id)) return c; const pos = { x: c.position.x + dx, y: c.position.y + dy }; snappedRef.current.set(c.id, pos); return { ...c, position: pos }; });
+        setGuides(lead.dragging ? res.guides : { vertical: [], horizontal: [] });
+      }
+    } else if (moving.length) { for (const c of moving) snappedRef.current.set(c.id, c.position!); if (moving.some((c) => c.dragging === false)) setGuides({ vertical: [], horizontal: [] }); }
     let next: FlowNode[] = [];
-    setFlow((cur) => { next = applyNodeChanges(changes, cur); flowRef.current = next; return next; });
+    setFlow((cur) => { next = applyNodeChanges(eff, cur); flowRef.current = next; return next; });
     let missingOnEnd = false; // resize terminou com o nó já fora do snap/flow (ex.: deletado no meio)
     // Posição NÃO é tratada aqui: no arrasto rápido o React Flow coalesce as mudanças de posição e a
     // última pode vir atrasada/na origem. Usamos onNodeDragStop (posição final autoritativa). Aqui só o resize.
@@ -401,16 +458,31 @@ function Canvas({ conn }: { conn: Connection }) {
   const onNodeDragStop = useCallback((_: unknown, node: FlowNode, nodes: FlowNode[]) => {
     dragging.current = false;
     const moved = nodes.length ? nodes : [node]; // multi-seleção: todos os arrastados
+    setGuides({ vertical: [], horizontal: [] });
+    // #78: membros do grupo do nó arrastado que (por qualquer motivo) não vieram na seleção acompanham o mesmo delta.
+    // #78 posição final: a última aplicada pelo onNodesChange e, com o ímã ligado, o encaixe recalculado AQUI (o último pointermove
+    // pode ser coalescido pelo navegador e nunca virar mudança de posição; recalcular na soltura garante a borda exata).
+    const rawPos = (nd: FlowNode) => snappedRef.current.get(nd.id) ?? nd.position;
+    let fix = { dx: 0, dy: 0 };
+    if ((altRef.current || magnetRef.current) && snap) {
+      const sn0 = snap.nodes.find((x) => x.nodeId === node.id); const ids = new Set(moved.map((m) => m.id));
+      if (sn0) { const p0 = rawPos(node); const res = snapGeometry({ x: p0.x, y: p0.y, w: sn0.geometry.w, h: sn0.geometry.h }, snap.nodes.filter((n) => !ids.has(n.nodeId)).map((n) => n.geometry), { threshold: 8 / Math.max(rf.getZoom(), 0.2), grid: 48 }); fix = { dx: res.x - p0.x, dy: res.y - p0.y }; }
+      if (fix.dx || fix.dy) setFlow((cur) => { const n2 = cur.map((n) => (ids.has(n.id) ? { ...n, position: { x: n.position.x + fix.dx, y: n.position.y + fix.dy } } : n)); flowRef.current = n2; return n2; });
+    }
+    const posOf = (nd: FlowNode) => { const p = rawPos(nd); return { x: p.x + fix.dx, y: p.y + fix.dy }; };
+    const lead = snap?.nodes.find((x) => x.nodeId === node.id);
+    if (lead?.groupId) { const dx = Math.round(posOf(node).x) - lead.geometry.x, dy = Math.round(posOf(node).y) - lead.geometry.y; const inMove = new Set(moved.map((m) => m.id)); for (const m of membersOf(lead.groupId)) { if (inMove.has(m)) continue; const f = flowRef.current.find((x) => x.id === m); if (f) moved.push({ ...f, position: { x: f.position.x + dx, y: f.position.y + dy } }); } }
     void (async () => {
       let missing = false; const before: { nodeId: string; geometry: Geometry }[] = []; const after: { nodeId: string; geometry: Geometry }[] = [];
       for (const nd of moved) {
         const sn = snap?.nodes.find((x) => x.nodeId === nd.id);
         if (sn) {
-          const g = { ...sn.geometry, x: Math.round(nd.position.x), y: Math.round(nd.position.y) };
+          const g = { ...sn.geometry, x: Math.round(posOf(nd).x), y: Math.round(posOf(nd).y) };
           if (g.x !== sn.geometry.x || g.y !== sn.geometry.y) { before.push({ nodeId: nd.id, geometry: sn.geometry }); after.push({ nodeId: nd.id, geometry: g }); }
           await mutate((r) => api.patchNode(nd.id, { expectedRevision: r, geometry: g })); // sequencial: sem colisão de revisão
         } else missing = true;
       }
+      snappedRef.current.clear();
       if (after.length) rec({ label: `mover ${plural(after.length, "nó", "nós")}`, forward: [{ type: "layout", moves: after }], inverse: [{ type: "layout", moves: before }] }); // #77: arrasto múltiplo = uma etapa
       if (missing) setSnap((s) => (s ? { ...s } : s));
     })();
@@ -541,13 +613,17 @@ function Canvas({ conn }: { conn: Connection }) {
       if (is("view.fit")) { e.preventDefault(); const sel = flowRef.current.filter((n) => n.selected); void rf.fitView(sel.length ? { nodes: sel, padding: 0.3, duration: 250 } : { padding: 0.15, duration: 250 }); return; }
       if (is("node.duplicate")) { e.preventDefault(); void duplicateSelected(); return; }
       if (is("arrange.grid")) { e.preventDefault(); arrangeGrid(); return; } // Ctrl+Shift+T não é entrada de terminal; vale mesmo com o xterm focado
-      if (is("drawings.group") || is("drawings.ungroup")) { // agrupar / desagrupar desenhos
-        e.preventDefault(); const ids = [...selDrawingsRef.current]; if (!current || !ids.length) return;
+      if (is("drawings.group") || is("drawings.ungroup")) { // agrupar / desagrupar: nós selecionados primeiro (#78), senão desenhos
+        e.preventDefault();
+        if (is("drawings.ungroup")) { const grouped = flowRef.current.find((n) => n.selected && snapRef.current?.nodes.find((x) => x.nodeId === n.id)?.groupId); if (grouped) { void ungroup(snapRef.current!.nodes.find((x) => x.nodeId === grouped.id)!.groupId!); return; } }
+        else if (flowRef.current.filter((n) => n.selected).length >= 2) { void groupSelectedNodes(); return; }
+        const ids = [...selDrawingsRef.current]; if (!current || !ids.length) { if (!is("drawings.ungroup")) toast("Selecione 2+ nós ou desenhos para agrupar"); return; }
         if (is("drawings.ungroup")) { void mutate((r) => api.groupDrawings(current, { expectedRevision: r, drawingIds: ids, grouped: false })); rec({ label: "desagrupar desenhos", forward: [{ type: "groupDrawings", ids, grouped: false }], inverse: [{ type: "groupDrawings", ids, grouped: true }] }); }
         else if (ids.length >= 2) { void mutate((r) => api.groupDrawings(current, { expectedRevision: r, drawingIds: ids, grouped: true })); rec({ label: "agrupar desenhos", forward: [{ type: "groupDrawings", ids, grouped: true }], inverse: [{ type: "groupDrawings", ids, grouped: false }] }); }
         else toast("Selecione 2+ desenhos para agrupar");
         return;
       }
+      if (is("snap.toggle")) { e.preventDefault(); setPref("snapMagnetic", !magnetRef.current); toast(magnetRef.current ? "Encaixe magnético desligado" : "Encaixe magnético ligado (bordas/centros dos vizinhos e grade)"); return; } // #78
       if (is("history.undo")) { e.preventDefault(); void undo(); return; } // #77
       if (is("history.redo") || (ctrl && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "y" && !typing)) { e.preventDefault(); void redo(); return; }
       if (is("delete")) { e.preventDefault(); deleteSelected(); return; }
@@ -673,6 +749,7 @@ function Canvas({ conn }: { conn: Connection }) {
           onNodesDelete={() => {}} onBeforeDelete={async ({ nodes: ns, edges: es }) => ({ nodes: [], edges: ns.length ? [] : es })}>
           <Background variant={BackgroundVariant.Lines} gap={48} size={1} color={cssVar("--grid") || "#2c2c30"} />
           {minimap && <MiniMap pannable zoomable />}
+          <GroupLayer groups={snap?.groups ?? []} flow={flow} guides={guides} onSelect={(gid) => selectNodes(membersOf(gid))} onRename={(gid, label) => patchGroup(gid, { label })} onColor={(gid, color) => patchGroup(gid, { color })} onUngroup={(gid) => void ungroup(gid)} />
           <DrawingLayer tool={tool} style={style} drawings={drawings}
             selected={selDrawings} onSelect={selectDrawing} onMovePoints={moveDrawing}
             onDraw={(d) => current && void mutate(async (r) => { const made = await api.createDrawing(current, { expectedRevision: r, ...d }); rec({ label: "desenhar", forward: [{ type: "createDrawing", ref: made.drawingId, spec: drawSpec(made) }], inverse: [{ type: "deleteDrawing", id: made.drawingId }] }); })}

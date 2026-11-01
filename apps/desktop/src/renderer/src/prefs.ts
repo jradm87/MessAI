@@ -30,7 +30,9 @@ export const DEFAULTS = {
   // #58 Atalhos: JSON { acaoId: combo | null } só com o que difere do padrão (ver keymap.ts)
   keymap: "",
   // #61 Atualizações
-  updateAuto: true, // verificar ao abrir e a cada 6 h (só no app empacotado)
+  updateAuto: true,
+  // #78 encaixe magnético ao arrastar (botão ímã / tecla M); Alt segurado também vale quando o WM não captura
+  snapMagnetic: false,
 } as const;
 export type Prefs = { -readonly [K in keyof typeof DEFAULTS]: (typeof DEFAULTS)[K] extends string ? string : (typeof DEFAULTS)[K] extends number ? number : boolean };
 export type PrefKey = keyof Prefs;
