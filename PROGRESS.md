@@ -16,9 +16,9 @@
 - [x] #90 git/grep assíncronos + cache de git status — `df6f553`
 - [x] #40 alinhar documentação (koba→messai) — docs em `REA/docs` (NOSSO.md, §6, ADR-0011); repo já limpo
 
-### Fase 1 — Alto impacto / reuso
+### Fase 1 — Alto impacto / reuso ✅
 - [x] #54 Tema claro/escuro/sistema — `a498555` (visual pendente de conferência humana)
-- [ ] #68 Companheiro (epic) · [x] #65 detectar fim — `6d7fb11` · [x] #66 resumo via Ollama — `8393b0a` · [ ] #67 HUD flutuante
+- [x] #68 Companheiro (epic) · [x] #65 detectar fim — `6d7fb11` · [x] #66 resumo via Ollama — `8393b0a` · [x] #67 HUD flutuante — `f396041` + fechamento de escopo (Aplicar próximo passo, posição lembrada, Ollama falso no e2e); e2e Electron real 3/3; aparência/posição em multi-monitor pendentes de conferência humana
 
 ### Fase 2 — Preferências (#64 epic)
 - [ ] #64 shell · #55 Geral · #56 Terminal · #57 Agentes (+#38 Usage) · #58 Atalhos · #61 Atualizações · #62 Dados · #63 Sobre · #60 Código aberto (UI) · #59 stub remoto
@@ -42,15 +42,16 @@
 - [ ] #26 Portais · #73 Portais de dispositivo · #30 Editor+git · #28 Hub (dep #87) · #93 (MESS-09) modo isolado
 
 ## Estado atual
-- **Fase atual:** 1 (alto impacto / reuso)
-- **Concluídas:** #90, #40 (Fase 0) · #54 · #65 · #66
-- **Em andamento:** #67 (companheiro: janela flutuante / HUD)
+- **Fase atual:** 2 (Preferências, epic #64)
+- **Concluídas:** #90, #40 (Fase 0) · #54 · #65 · #66 · #67 · #68 (Fase 1)
+- **Em andamento:** #64 (shell da janela de Preferências em abas)
 - **Bloqueadas:** (nenhuma)
-- **Commits (assinados, branch `auto/roadmap`):** `e781477` setup · `df6f553` #90 · `01f125c` progress · `a498555` #54 · `09b424f` progress · `6d7fb11` #65 · `bde3e91` progress · `8393b0a` #66
-- **Testes:** 93 verdes (85 + 7 unit + 1 Ollama real; +1 degradação dentro do companion)
-- **Próximas:** #67 (fecha #68) → Fase 2 (#64 Preferências)
+- **Commits (assinados, branch `auto/roadmap`):** `e781477` setup · `df6f553` #90 · `01f125c` progress · `a498555` #54 · `09b424f` progress · `6d7fb11` #65 · `bde3e91` progress · `8393b0a` #66 · `24b28ea` progress · `f396041` #67
+- **Testes:** 99 verdes na suíte determinística (`packages apps tests/integration`) + e2e `tests/e2e/hud.test.ts` 3/3 (Electron real, roda fora do CI)
+- **Próximas:** #64 → #55 → #56 → #57 (+#38) → #58 → #61 → #62 → #63 → #60 (aba UI); #59 stub
 - **Nota:** shutdown do runtime endurecido (zumbi segurando porta) — achado pelo teste do #65.
 
 ## Log de execução
 - Setup: branch `auto/roadmap`, assinatura GPG local configurada (Good signature verificada), baseline 78 verdes.
 - Fase 0: #90 git/grep async + cache (`df6f553`, 79 testes); #40 docs alinhados (REA: NOSSO.md 16 refs, §6 real + ADR-0011). Ambas fechadas no GitHub com relato.
+- Fase 1: #54 tema (`a498555`); companheiro #65 (`6d7fb11`, achou e corrigiu zumbi de shutdown), #66 Ollama (`8393b0a`, degradação testada + modelo real), #67 HUD (`f396041`, e2e Electron real). Pegadinha registrada: `app.close()` do Playwright pendura por causa da tela de encerramento — o e2e sai por `app.exit(0)` no processo principal.

@@ -3,7 +3,7 @@ import { ArrowRight, Sparkles, Trash2, X } from "lucide-react";
 import type { CompanionConfig } from "@messai/contracts";
 import { Api, Stream, type Connection } from "./api.js";
 import { AgentIcon, agentKind } from "./agentIcons.js";
-import { awaitingSummary, EMPTY_HUD, hudReduce, relTime, screenTail } from "./hud-model.js";
+import { awaitingSummary, EMPTY_HUD, hudReduce, relTime, screenTail, type HudCard } from "./hud-model.js";
 
 /**
  * #67 — janela flutuante do companheiro (segunda BrowserWindow, sempre no topo).
@@ -52,6 +52,17 @@ export function Hud({ conn }: { conn: Connection }) {
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 15_000); return () => clearInterval(t); }, []);
 
   const go = (workspaceId: string, nodeId: string) => { void window.messai.hudFocus?.({ workspaceId, nodeId }); dispatch({ type: "dismiss", nodeId }); };
+  // "Aplicar próximo passo": manda a sugestão como input do usuário ao agente (mesmo caminho do compositor),
+  // segurando a lease só durante o envio para não disputar o terminal com a janela principal.
+  const apply = (c: HudCard) => {
+    if (!c.nextStep) return;
+    stream.attach(c.sessionId);
+    stream.send({ type: "acquireLease", sessionId: c.sessionId });
+    stream.send({ type: "input", sessionId: c.sessionId, data: `${c.nextStep}\r` });
+    stream.send({ type: "releaseLease", sessionId: c.sessionId });
+    stream.detach(c.sessionId);
+    dispatch({ type: "dismiss", nodeId: c.nodeId });
+  };
   const available = !!companion?.available;
 
   return (
@@ -86,6 +97,7 @@ export function Hud({ conn }: { conn: Connection }) {
             {awaitingSummary(c, available, now) && <div className="hud-wait">resumindo com {companion?.model}…</div>}
             <div className="hud-actions">
               <button className="pri" onClick={() => go(c.workspaceId, c.nodeId)}>Ir ao terminal</button>
+              {c.nextStep && <button title={`Enviar ao agente: ${c.nextStep}`} data-testid="hud-apply" onClick={() => apply(c)}>Aplicar próximo passo</button>}
               <button onClick={() => dispatch({ type: "dismiss", nodeId: c.nodeId })}>Dispensar</button>
             </div>
           </div>

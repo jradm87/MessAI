@@ -6,7 +6,7 @@ import type { TaskFinished, TaskSummary } from "@messai/contracts";
  * Sem React/DOM aqui: tudo testável em unidade.
  */
 export type HudCard = {
-  nodeId: string; workspaceId: string; agentType: string; at: string; screen: string;
+  sessionId: string; nodeId: string; workspaceId: string; agentType: string; at: string; screen: string;
   summary?: string; nextStep?: string; model?: string;
   title?: string; workspace?: string;
 };
@@ -26,7 +26,7 @@ export function hudReduce(state: HudState, ev: HudEvent): HudState {
   switch (ev.type) {
     case "finished": {
       const prev = state.cards.find((c) => c.nodeId === ev.event.nodeId);
-      const card: HudCard = { nodeId: ev.event.nodeId, workspaceId: ev.event.workspaceId, agentType: ev.event.agentType, at: ev.event.at, screen: ev.event.screen };
+      const card: HudCard = { sessionId: ev.event.sessionId, nodeId: ev.event.nodeId, workspaceId: ev.event.workspaceId, agentType: ev.event.agentType, at: ev.event.at, screen: ev.event.screen };
       if (prev?.title) card.title = prev.title;
       if (prev?.workspace) card.workspace = prev.workspace;
       return { cards: [card, ...state.cards.filter((c) => c.nodeId !== ev.event.nodeId)].slice(0, HUD_MAX) };

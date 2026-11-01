@@ -9,7 +9,7 @@ import "./styles.css";
 
 // #67: o mesmo bundle serve a janela principal e a flutuante; a rota é o hash (`index.html#hud`).
 const isHud = window.location.hash === "#hud";
-if (isHud) document.documentElement.dataset["hud"] = "1";
+if (isHud) { document.documentElement.dataset["hud"] = "1"; document.title = "MessAI — Companheiro"; }
 
 // Tema antes do primeiro render (sem flash): aplica `data-theme` já aqui e espelha no átomo para quem reage (xterm).
 initTheme();

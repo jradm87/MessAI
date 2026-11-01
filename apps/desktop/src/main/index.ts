@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, screen, shell } from "electron";
 import electronUpdater from "electron-updater";
 import { spawn, execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, openSync, readFileSync, readdirSync, readlinkSync } from "node:fs";
+import { existsSync, mkdirSync, openSync, readFileSync, readdirSync, readlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -149,15 +149,31 @@ let hudWin: BrowserWindow | null = null;
 const HUD_W = 380, HUD_H = 480;
 const hudOpen = () => !!hudWin && !hudWin.isDestroyed();
 const broadcastHud = () => { if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send("mess:hud-state", hudOpen()); };
+const HUD_BOUNDS = join(DATA_DIR, "hud.json");
+/** Posição/tamanho salvos, só se ainda caem num monitor existente (multi-monitor / monitor desligado). */
+function savedHudBounds(): { x: number; y: number; width: number; height: number } | null {
+  try {
+    const b = JSON.parse(readFileSync(HUD_BOUNDS, "utf8")) as { x: number; y: number; width: number; height: number };
+    if (![b.x, b.y, b.width, b.height].every((n) => Number.isFinite(n))) return null;
+    const wa = screen.getDisplayMatching(b).workArea;
+    const visible = b.x + b.width > wa.x + 40 && b.x < wa.x + wa.width - 40 && b.y >= wa.y - 10 && b.y < wa.y + wa.height - 40;
+    return visible ? b : null;
+  } catch { return null; }
+}
 function openHud(): void {
   if (hudOpen()) { hudWin!.showInactive(); return; }
   const wa = screen.getPrimaryDisplay().workArea;
+  const bounds = savedHudBounds() ?? { width: HUD_W, height: HUD_H, x: wa.x + wa.width - HUD_W - 16, y: wa.y + wa.height - HUD_H - 16 };
   const win = new BrowserWindow({
-    width: HUD_W, height: HUD_H, minWidth: 300, minHeight: 240, x: wa.x + wa.width - HUD_W - 16, y: wa.y + wa.height - HUD_H - 16,
+    ...bounds, minWidth: 300, minHeight: 240,
     title: "MessAI — Companheiro", frame: false, alwaysOnTop: true, skipTaskbar: true, minimizable: false, maximizable: false, fullscreenable: false, show: false,
     webPreferences: WEB_PREFS,
   });
   hudWin = win;
+  // Lembra onde o usuário deixou a janela (debounce; `move`/`resize` são os eventos que existem no Linux).
+  let saveT: ReturnType<typeof setTimeout> | undefined;
+  const save = () => { clearTimeout(saveT); saveT = setTimeout(() => { try { if (!win.isDestroyed()) writeFileSync(HUD_BOUNDS, JSON.stringify(win.getBounds())); } catch { /* disco cheio/sem permissão: só não lembra */ } }, 300); };
+  win.on("move", save); win.on("resize", save);
   win.setAlwaysOnTop(true, "floating");
   try { win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch { /* WM sem suporte */ }
   win.once("ready-to-show", () => win.showInactive()); // aparece sem roubar o foco do terminal

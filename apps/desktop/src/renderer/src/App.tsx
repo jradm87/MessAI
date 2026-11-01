@@ -114,9 +114,16 @@ function Canvas({ conn }: { conn: Connection }) {
   useEffect(() => {
     const m = window.messai;
     const off = m.onHudState?.((o) => { setHud(o); try { localStorage.setItem(HUD_PREF, o ? "1" : "0"); } catch { /* sem storage */ } });
-    void m.hudState?.().then((o) => { setHud(o); let want = false; try { want = localStorage.getItem(HUD_PREF) === "1"; } catch { /* sem storage */ } if (want && !o) void m.hudToggle?.(true); });
+    void m.hudState?.().then(async (o) => {
+      setHud(o); if (o) return;
+      let want = false; try { want = localStorage.getItem(HUD_PREF) === "1"; } catch { /* sem storage */ }
+      if (!want) return;
+      const c = await api.companion().catch(() => null);
+      if (c && !c.enabled) return; // companheiro desligado (MESS_COMPANION=0): não reabre sozinho; o toggle manual continua valendo
+      void m.hudToggle?.(true);
+    });
     return () => off?.();
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const fittedFor = useRef<string | null>(null); // espaço já enquadrado ao abrir
   const pendingFocus = useRef<string | null>(null); // nó a selecionar assim que o espaço pedido pelo HUD carregar
   const [renameSig, setRenameSig] = useState<{ id: string; n: number }>({ id: "", n: 0 });

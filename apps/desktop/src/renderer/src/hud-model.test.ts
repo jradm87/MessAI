@@ -64,7 +64,7 @@ describe("helpers do HUD", () => {
   });
   it("awaitingSummary: só com companheiro disponível, sem resumo e turno recente", () => {
     const now = Date.parse("2026-11-01T12:00:00Z");
-    const card = { nodeId: "a", workspaceId: "w", agentType: "codex", at: "2026-11-01T11:59:30Z", screen: "" };
+    const card = { sessionId: "s", nodeId: "a", workspaceId: "w", agentType: "codex", at: "2026-11-01T11:59:30Z", screen: "" };
     expect(awaitingSummary(card, true, now)).toBe(true);
     expect(awaitingSummary(card, false, now)).toBe(false);
     expect(awaitingSummary({ ...card, summary: "ok" }, true, now)).toBe(false);
