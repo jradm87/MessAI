@@ -104,8 +104,8 @@ describe("agentKind", () => {
   it("distingue CLI de IA de shell cru", () => {
     expect(agentKind("claude", ["--flag"])).toMatchObject({ isAgent: true, agentType: "claudeCode" });
     expect(agentKind("/usr/bin/codex", [])).toMatchObject({ isAgent: true, agentType: "codex" });
-    expect(agentKind("gemini", [])).toMatchObject({ isAgent: true, agentType: "geminiCLI" });
     expect(agentKind("opencode", [])).toMatchObject({ isAgent: true, agentType: "openCode" });
+    expect(agentKind("agy", [])).toMatchObject({ isAgent: true, agentType: "antigravityCLI" }); // antigravity = binário agy
     expect(agentKind("fish", [])).toMatchObject({ isAgent: false, agentType: "genericShell" });
     expect(agentKind("/bin/bash", ["-l"]).isAgent).toBe(false);
     expect(agentKind("cat", []).isAgent).toBe(false);

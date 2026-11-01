@@ -161,9 +161,8 @@ export type AgentKind = { isAgent: boolean; agentType: string; label: string };
 const AGENT_BINS: { re: RegExp; type: string; label: string }[] = [
   { re: /(^|[\s/])claude([\s/-]|$)/, type: "claudeCode", label: "claude" },
   { re: /(^|[\s/])codex([\s/-]|$)/, type: "codex", label: "codex" },
-  { re: /(^|[\s/])gemini([\s/-]|$)/, type: "geminiCLI", label: "gemini" },
   { re: /(^|[\s/])opencode([\s/-]|$)/, type: "openCode", label: "opencode" },
-  { re: /(^|[\s/])antigravity([\s/-]|$)/, type: "antigravityCLI", label: "antigravity" },
+  { re: /(^|[\s/])(antigravity|agy)([\s/-]|$)/, type: "antigravityCLI", label: "antigravity" }, // binário: agy
   { re: /(^|[\s/])aider([\s/-]|$)/, type: "aider", label: "aider" },
 ];
 export function agentKind(command: string, args: string[] = []): AgentKind {

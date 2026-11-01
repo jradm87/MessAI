@@ -58,8 +58,7 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
     { id: "claude", label: "Claude Code", command: "claude", args: ["--append-system-prompt", AGENT_HINT] },
     { id: "codex", label: "Codex", command: "codex", args: [] as string[] },
     { id: "opencode", label: "OpenCode", command: "opencode", args: [] as string[] },
-    { id: "gemini", label: "Gemini CLI", command: "gemini", args: [] as string[] },
-    { id: "antigravity", label: "Antigravity", command: "antigravity", args: [] as string[] },
+    { id: "antigravity", label: "Antigravity", command: "agy", args: [] as string[] }, // o binário é `agy`
   ];
   const onPath = (cmd: string): boolean => {
     if (cmd.includes("/")) { try { accessSync(cmd, constants.X_OK); return true; } catch { return false; } }
