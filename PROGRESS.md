@@ -20,8 +20,8 @@
 - [x] #54 Tema claro/escuro/sistema — `a498555` (visual pendente de conferência humana)
 - [x] #68 Companheiro (epic) · [x] #65 detectar fim — `6d7fb11` · [x] #66 resumo via Ollama — `8393b0a` · [x] #67 HUD flutuante — `f396041` + fechamento de escopo (Aplicar próximo passo, posição lembrada, Ollama falso no e2e); e2e Electron real 3/3; aparência/posição em multi-monitor pendentes de conferência humana
 
-### Fase 2 — Preferências (#64 epic)
-- [x] #64 shell (janela em abas, engrenagem + Ctrl+,, `prefs.ts`, aba Geral com tema; epic fica aberto até as abas) · [x] #55 Geral — `c152e06` (idioma espera #51; Canvas/Notificações/Environments/Git têm issues próprias) · [x] #56 Terminal — `53bf1bf` (runtime) + `5a79039` (desktop) · [x] #57 Agentes (+#38 Usage) — `f031e87` + `a074656` · [x] #58 Atalhos — `c0af29a` · [x] #61 Atualizações — `f90d4db` · [ ] #62 Dados · [x] #63 Sobre — `f90d4db` · [x] #60 Código aberto (UI) — `65b020a` · #59 stub remoto
+### Fase 2 — Preferências (#64 epic) ✅ (exceto #59 stub → Fase 8)
+- [x] #64 shell (janela em abas, engrenagem + Ctrl+,, `prefs.ts`, aba Geral com tema; epic fica aberto até as abas) · [x] #55 Geral — `c152e06` (idioma espera #51; Canvas/Notificações/Environments/Git têm issues próprias) · [x] #56 Terminal — `53bf1bf` (runtime) + `5a79039` (desktop) · [x] #57 Agentes (+#38 Usage) — `f031e87` + `a074656` · [x] #58 Atalhos — `c0af29a` · [x] #61 Atualizações — `f90d4db` · [x] #62 Dados — `3b439f9` + `6e00459` · [x] #63 Sobre — `f90d4db` · [x] #60 Código aberto (UI) — `65b020a` · #59 stub remoto
 
 ### Fase 3 — Canvas / UX
 - [ ] #41 FTS5 · #77 Undo/redo · #78 Grupos+snap · #69 Busca global · #42 Fluidez · #47 Presença · #71 Partituras · #74 Fichários
@@ -42,14 +42,14 @@
 - [ ] #26 Portais · #73 Portais de dispositivo · #30 Editor+git · #28 Hub (dep #87) · #93 (MESS-09) modo isolado
 
 ## Estado atual
-- **Fase atual:** 2 (Preferências, epic #64)
+- **Fase atual:** 3 (Canvas / UX)
 - **Concluídas:** #90, #40 (Fase 0) · #54 · #65 · #66 · #67 · #68 (Fase 1)
-- **Em andamento:** #62 Dados (última aba; fecha a Fase 2 / epic #64, com #59 como stub)
+- **Em andamento:** #41 (fundação FTS5 no SQLite) → #77 Undo/redo → #78 → #69 → #42 → #47 → #71 → #74
 - **Bloqueadas:** (nenhuma)
 - **Dívida (parcialmente paga):** `tests/e2e/pilot.test.ts` (fora do CI) estava 0/12 — assumia que o 1º espaço era o da UI (hoje existe o espaço padrão) e usava `app.close()` (pendura na tela de encerramento). Corrigido o que era drift de infra → **14/18**. Restam 4 (nota formatada, cabo/circuito, visão geral de andares, árvore de arquivos), a revisitar junto das issues de canvas da Fase 3.
-- **Commits (assinados, branch `auto/roadmap`):** `e781477` setup · `df6f553` #90 · `01f125c` progress · `a498555` #54 · `09b424f` progress · `6d7fb11` #65 · `bde3e91` progress · `8393b0a` #66 · `24b28ea` progress · `f396041` #67 · `037e003` #67 escopo · `f719476` #64 shell · `c152e06` #55 · `9bfac0d` progress · `53bf1bf` #56 runtime · `5a79039` #56 desktop · `d8391fa` progress · `f031e87` #57 runtime · `a074656` #57 desktop · `6f1e147` progress · `a9654c2` e2e piloto · `c0af29a` #58 · `2e96d9d` progress · `f90d4db` #61+#63 · `10148f9` progress · `65b020a` #60
-- **Testes:** 138 verdes na suíte determinística (`packages apps tests/integration`) + e2e Electron real fora do CI: `hud.test.ts` 3/3, `prefs.test.ts` 4/4, `terminal-prefs.test.ts` 3/3, `agents-prefs.test.ts` 3/3, `shortcuts.test.ts` 2/2, `about-updates.test.ts` 2/2, `pilot.test.ts` 14/18
-- **Próximas:** #64 → #55 → #56 → #57 (+#38) → #58 → #61 → #62 → #63 → #60 (aba UI); #59 stub
+- **Commits (assinados, branch `auto/roadmap`):** `e781477` setup · `df6f553` #90 · `01f125c` progress · `a498555` #54 · `09b424f` progress · `6d7fb11` #65 · `bde3e91` progress · `8393b0a` #66 · `24b28ea` progress · `f396041` #67 · `037e003` #67 escopo · `f719476` #64 shell · `c152e06` #55 · `9bfac0d` progress · `53bf1bf` #56 runtime · `5a79039` #56 desktop · `d8391fa` progress · `f031e87` #57 runtime · `a074656` #57 desktop · `6f1e147` progress · `a9654c2` e2e piloto · `c0af29a` #58 · `2e96d9d` progress · `f90d4db` #61+#63 · `10148f9` progress · `65b020a` #60 · `5a054c6` progress · `3b439f9` #62 runtime · `6e00459` #62 desktop
+- **Testes:** 148 verdes na suíte determinística (`packages apps tests/integration`) + e2e Electron real fora do CI: `hud.test.ts` 3/3, `prefs.test.ts` 4/4, `terminal-prefs.test.ts` 3/3, `agents-prefs.test.ts` 3/3, `shortcuts.test.ts` 2/2, `about-updates.test.ts` 3/3, `data-prefs.test.ts` 3/3, `pilot.test.ts` 14/18
+- **Próximas (Fase 3):** #41 → #77 → #78 → #69 → #42 → #47 → #71 → #74 (e revisitar os 4 casos do e2e piloto)
 - **Nota:** shutdown do runtime endurecido (zumbi segurando porta) — achado pelo teste do #65.
 - **Nota:** achado pelo e2e do #56: modal ficava atrás da barra inferior (z-index) — corrigido em `5a79039`. CI verde em `c152e06`, `9bfac0d`, `53bf1bf`.
 - **Nota:** CI passou a rodar em `auto/**` a partir de `c152e06` (antes só `main`); BUILD_VERSION=17 — o app troca o runtime 16 sozinho ao abrir.
@@ -57,4 +57,5 @@
 ## Log de execução
 - Setup: branch `auto/roadmap`, assinatura GPG local configurada (Good signature verificada), baseline 78 verdes.
 - Fase 0: #90 git/grep async + cache (`df6f553`, 79 testes); #40 docs alinhados (REA: NOSSO.md 16 refs, §6 real + ADR-0011). Ambas fechadas no GitHub com relato.
+- Fase 2: Preferências completa — #64 shell, #55, #56, #56/#57 (+#38), #58, #61, #63, #60, #62; achados: modal atrás da barra inferior, e2e piloto desatualizado (14/18).
 - Fase 1: #54 tema (`a498555`); companheiro #65 (`6d7fb11`, achou e corrigiu zumbi de shutdown), #66 Ollama (`8393b0a`, degradação testada + modelo real), #67 HUD (`f396041`, e2e Electron real). Pegadinha registrada: `app.close()` do Playwright pendura por causa da tela de encerramento — o e2e sai por `app.exit(0)` no processo principal.
