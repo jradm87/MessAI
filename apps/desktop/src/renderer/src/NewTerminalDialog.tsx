@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
 import { SquareTerminal } from "lucide-react";
 import { AgentIcon } from "./agentIcons.js";
-import type { Preset, Role } from "@messai/contracts";
+import type { Preset, PresetTarget, Role, TermTheme } from "@messai/contracts";
+import { WS_COLORS, WS_ICONS, WsIcon } from "./wsicons.js";
+import { TermPreview } from "./PrefsTerminal.js";
 
-export type NewTerminalInput = { title: string; command?: string; cwd?: string; presetId?: string; roleId?: string; persistent?: boolean };
+export type NewTerminalInput = { title: string; command?: string; cwd?: string; presetId?: string; roleId?: string; persistent?: boolean; icon?: string; color?: string; termTheme?: TermTheme; target?: PresetTarget };
+const THEMES: { id: TermTheme; label: string }[] = [{ id: "system", label: "Sistema" }, { id: "dark", label: "Escuro" }, { id: "light", label: "Claro" }, { id: "custom", label: "Custom" }];
 const ICON: Record<string, React.ReactNode> = { claude: <AgentIcon id="claude" size={26} />, codex: <AgentIcon id="codex" size={26} />, antigravity: <AgentIcon id="antigravity" size={26} />, opencode: <AgentIcon id="opencode" size={26} />, gemini: <AgentIcon id="gemini" size={26} />, shell: <SquareTerminal size={26} /> };
 
 /** Diálogo "Novo terminal": Início rápido + Detalhes (nome, comando, diretório). Aparência e Papel ficam para depois. */
@@ -16,9 +19,11 @@ export function NewTerminalDialog({ presets, roles, defaultCwd, onCreate, onClos
   const [command, setCommand] = useState(first ? [first.command, ...first.args.filter((a) => !a.startsWith("--append-system-prompt") && !a.includes("MessAI"))].join(" ") : "");
   const [cwd, setCwd] = useState(defaultCwd);
   const [tab, setTab] = useState<"details" | "appearance" | "role">("details");
+  // #56 aparência: começa com a do preset; o usuário pode mudar antes de criar
+  const [icon, setIcon] = useState(first?.icon ?? ""); const [color, setColor] = useState(first?.color ?? ""); const [theme, setTheme] = useState<TermTheme>(first?.theme ?? "system"); const [target, setTarget] = useState<PresetTarget>(first?.target ?? "terminal");
   useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); }; window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, [onClose]);
-  const pick = (p: Preset) => { setSel(p); setTitle(p.label); setCommand(p.command); };
-  const submit = () => onCreate({ title: title.trim() || (sel?.label ?? "Terminal"), ...(command.trim() ? { command: command.trim() } : {}), ...(cwd.trim() ? { cwd: cwd.trim() } : {}), ...(sel ? { presetId: sel.id } : {}), ...(roleId ? { roleId } : {}), ...(persistent ? { persistent: true } : {}) });
+  const pick = (p: Preset) => { setSel(p); setTitle(p.label); setCommand(p.command); setIcon(p.icon); setColor(p.color); setTheme(p.theme); setTarget(p.target); };
+  const submit = () => onCreate({ title: title.trim() || (sel?.label ?? "Terminal"), icon, color, termTheme: theme, target, ...(command.trim() ? { command: command.trim() } : {}), ...(cwd.trim() ? { cwd: cwd.trim() } : {}), ...(sel ? { presetId: sel.id } : {}), ...(roleId ? { roleId } : {}), ...(persistent ? { persistent: true } : {}) });
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
       <div className="modal" onMouseDown={(e) => e.stopPropagation()} onKeyDown={(e) => { if (e.key === "Enter" && (e.target as HTMLElement).tagName !== "TEXTAREA") submit(); }}>
@@ -27,7 +32,7 @@ export function NewTerminalDialog({ presets, roles, defaultCwd, onCreate, onClos
         <div className="quick">
           {presets.map((p) => (
             <button key={p.id} className={`qs ${sel?.id === p.id ? "on" : ""} ${p.available ? "" : "off"}`} disabled={!p.available} title={p.available ? p.command : `${p.command} não encontrado no PATH`} onClick={() => pick(p)}>
-              <span className="ic">{ICON[p.id] ?? <SquareTerminal size={26} />}</span><span>{p.label}</span>
+              <span className="ic" style={p.color ? { color: p.color } : undefined}>{p.icon ? <WsIcon icon={p.icon} color={p.color || "currentColor"} size={26} /> : ICON[p.id] ?? <SquareTerminal size={26} />}</span><span>{p.label}</span>
             </button>
           ))}
         </div>
@@ -54,7 +59,25 @@ export function NewTerminalDialog({ presets, roles, defaultCwd, onCreate, onClos
             {roleId && <div className="mut role-preview">{roles.find((r) => r.roleId === roleId)?.instructions.slice(0, 300) || "(sem instruções)"}</div>}
             <div><button type="button" onClick={onManageRoles}>Gerenciar responsabilidades…</button></div>
           </div>
-        ) : <div className="form mut">Em breve: ícone, cor, tema e fonte por terminal.</div>}
+        ) : (
+          <div className="form" data-testid="nt-appearance">
+            <div className="lbl">Ícone <span className="mut">(vazio = ícone do agente)</span></div>
+            <div className="icon-grid">
+              <button type="button" className={`ig ${icon === "" ? "on" : ""}`} title="automático" onClick={() => setIcon("")}><SquareTerminal size={18} /></button>
+              {Object.entries(WS_ICONS).map(([k, I]) => <button key={k} type="button" className={`ig ${icon === k ? "on" : ""}`} title={k} onClick={() => setIcon(k)}><I size={18} /></button>)}
+            </div>
+            <div className="lbl">Cor</div>
+            <div className="color-row">
+              <button type="button" className={`sw lg ${color === "" ? "on" : ""}`} style={{ background: "var(--surface-2)" }} title="sem cor" onClick={() => setColor("")} />
+              {WS_COLORS.map((c) => <button key={c} type="button" className={`sw lg ${color === c ? "on" : ""}`} style={{ background: c }} title={c} onClick={() => setColor(c)} />)}
+            </div>
+            <div className="lbl">Abrir como</div>
+            <div className="seg">{(["terminal", "chat"] as PresetTarget[]).map((t) => <button key={t} type="button" className={target === t ? "on" : ""} onClick={() => setTarget(t)}>{t === "terminal" ? "Terminal" : "Terminal + chat"}</button>)}</div>
+            <div className="lbl">Tema do terminal <span className="mut">(fonte e padding ficam em Preferências → Terminal)</span></div>
+            <div className="seg" data-testid="nt-theme">{THEMES.map((t) => <button key={t.id} type="button" className={theme === t.id ? "on" : ""} onClick={() => setTheme(t.id)}>{t.label}</button>)}</div>
+            <TermPreview theme={theme} />
+          </div>
+        )}
         <div className="actions"><button onClick={onClose}>Cancelar</button><button className="pri" onClick={submit}>Criar</button></div>
       </div>
     </div>

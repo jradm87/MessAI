@@ -5,7 +5,7 @@ import { Map as MapIcon, Minus, Plus, Activity, Layers, AlignStartVertical, Alig
 import { useAtomValue } from "jotai";
 import { themeAtom } from "./atoms.js";
 import { getThemePref, setThemePref, nextTheme, THEME_LABEL, cssVar } from "./theme.js";
-import { BUILD_VERSION, type Role, type Drawing, type Folder, type Geometry, type Preset, type Sidebar as SidebarData, type Workspace, type WorkspaceSnapshot } from "@messai/contracts";
+import { BUILD_VERSION, type Role, type Drawing, type Folder, type Geometry, type Preset, type Sidebar as SidebarData, type TermTheme, type Workspace, type WorkspaceSnapshot } from "@messai/contracts";
 import { gridLayout, alignGeometries, type AlignMode } from "@messai/domain";
 import { Sidebar } from "./Sidebar.js";
 import { WorkspaceDialog, type WorkspaceInput } from "./WorkspaceDialog.js";
@@ -213,7 +213,9 @@ function Canvas({ conn }: { conn: Connection }) {
         position: keepLocal ? old.position : { x: n.geometry.x, y: n.geometry.y },
         style: keepLocal && old.style ? old.style : { width: n.geometry.w, height: n.geometry.h },
         ...(old?.selected ? { selected: true } : {}),
-        data: n.kind === "terminal" ? { title: n.title, sessionId: n.sessionId!, api, stream, onDelete: del, onRename: rename, editSignal: renameSig.id === n.nodeId ? renameSig.n : 0, ...extras,
+        data: n.kind === "terminal" ? { title: n.title, sessionId: n.sessionId!, api, stream, onDelete: del, onRename: rename,
+            ...(n.icon ? { icon: n.icon } : {}), ...(n.color ? { color: n.color } : {}), ...(n.termTheme ? { termTheme: n.termTheme } : {}), // #56 aparência do nó
+            onAppearance: (p: { icon?: string | null; color?: string | null; termTheme?: TermTheme | null }) => void mutate((r) => api.patchNode(n.nodeId, { expectedRevision: r, ...p })), editSignal: renameSig.id === n.nodeId ? renameSig.n : 0, ...extras,
             composerOpen: composerFor === n.nodeId, onComposerClose: () => setComposerFor(null), workspaceId: snap.workspace.workspaceId,
             chatOpen: chatFor === n.nodeId, onChatClose: () => setChatFor(null),
             ...(n.roleId && roles.find((r) => r.roleId === n.roleId) ? { role: roles.find((r) => r.roleId === n.roleId)! } : {}), roles,
@@ -344,7 +346,11 @@ function Canvas({ conn }: { conn: Connection }) {
     const preset = presets.find((p) => p.id === i.presetId);
     const cmdParts = i.command ? i.command.split(/\s+/) : undefined;
     const usePreset = preset && (!i.command || i.command === preset.command);
-    void mutate(async (r) => { await api.createNode(current, { expectedRevision: r, kind: "terminal", geometry, title: i.title, ...(usePreset ? { command: preset.command, args: preset.args } : cmdParts ? { command: cmdParts[0]!, args: cmdParts.slice(1) } : {}), ...(i.cwd ? { cwd: i.cwd } : {}), ...(i.roleId ? { roleId: i.roleId } : {}), ...(i.persistent ? { persistent: true } : {}) }); ensureVisible(geometry); });
+    // #56 aparência: o que veio do diálogo vence; senão, a do preset. Preset "terminal + chat" abre o chat ao criar.
+    const icon = i.icon ?? preset?.icon ?? ""; const color = i.color ?? preset?.color ?? ""; const termTheme = i.termTheme ?? preset?.theme ?? "system";
+    const look = { ...(icon ? { icon } : {}), ...(color ? { color } : {}), ...(termTheme !== "system" ? { termTheme } : {}) };
+    const target = i.target ?? preset?.target ?? "terminal";
+    void mutate(async (r) => { const made = await api.createNode(current, { expectedRevision: r, kind: "terminal", geometry, title: i.title, ...look, ...(usePreset ? { command: preset.command, args: preset.args } : cmdParts ? { command: cmdParts[0]!, args: cmdParts.slice(1) } : {}), ...(i.cwd ? { cwd: i.cwd } : {}), ...(i.roleId ? { roleId: i.roleId } : {}), ...(i.persistent ? { persistent: true } : {}) }); ensureVisible(geometry); if (target === "chat") setTimeout(() => openChat(made.node.nodeId), 300); });
     setTool("select");
   };
   const createSimple = (kind: "note" | "text" | "tree", geometry: Geometry) => {
@@ -558,13 +564,13 @@ function Canvas({ conn }: { conn: Connection }) {
         {stale && <div className="banner">O runtime em execução é de uma versão anterior ao app. Reinicie o runtime para usar os recursos novos (isso encerra os shells dele; eles ficam como "lost" e podem ser reiniciados).</div>}
         {!current && <div className="empty">Crie um espaço com o botão + da barra lateral ou Ctrl+Shift+N.</div>}
         {wsDialog && <WorkspaceDialog {...(wsDialog.edit ? { edit: wsDialog.edit } : {})} {...(wsDialog.folderId ? { defaultFolderId: wsDialog.folderId } : {})} defaultCwd={homeDir} folders={side.folders} onSubmit={(i) => void submitWs(i)} onClose={() => setWsDialog(null)} />}
-        {menu && <AddMenu presets={presets} x={menu.x} y={menu.y} onClose={() => setMenu(null)} onPick={(c) => add(c, menu.at)} />}
-        {dialog && <NewTerminalDialog presets={presets} roles={roles} defaultCwd={snap?.workspace.cwd || homeDir} onClose={() => { setDialog(null); setTool("select"); }} onCreate={(i) => createTerminal(dialog.rect, i)} onManageRoles={() => setRolesDialog(true)} tmux={features.includes("terminal.tmux")} />}
+        {menu && <AddMenu presets={presets.filter((p) => p.enabled)}x={menu.x} y={menu.y} onClose={() => setMenu(null)} onPick={(c) => add(c, menu.at)} />}
+        {dialog && <NewTerminalDialog presets={presets.filter((p) => p.enabled)}roles={roles} defaultCwd={snap?.workspace.cwd || homeDir} onClose={() => { setDialog(null); setTool("select"); }} onCreate={(i) => createTerminal(dialog.rect, i)} onManageRoles={() => setRolesDialog(true)} tmux={features.includes("terminal.tmux")} />}
         {preview && snap && <FilePreview api={api} workspaceId={snap.workspace.workspaceId} path={preview} onClose={() => setPreview(null)} onOpenNote={(rel) => { setPreview(null); void mutate((r) => api.createNode(snap.workspace.workspaceId, { expectedRevision: r, kind: "note", geometry: { ...freeSpot(snap.nodes, { w: 360, h: 260 }), w: 360, h: 260 }, filePath: `${snap.workspace.cwd}/${rel}` })); }} />}
         {floorDialog && <FloorDialog ground={floorDialog} onSubmit={(i) => void submitFloor(floorDialog, i)} onClose={() => setFloorDialog(null)} />}
         {overview && groundOf(overview) && <FloorOverview ground={groundOf(overview)!} floors={side.workspaces.filter((w) => w.parentId === overview)} current={current} terminals={side.terminals} api={api}
           onOpen={(id) => { setCurrent(id); setOverview(null); }} onNew={() => { setFloorDialog(groundOf(overview)!); }} onClose={() => setOverview(null)} onChanged={() => void refreshList()} onError={toast} />}
-        {prefsOpen && <Preferences api={api} onClose={() => setPrefsOpen(false)} />}
+        {prefsOpen && <Preferences api={api} onClose={() => setPrefsOpen(false)} onPresetsChanged={() => void api.presets().then(setPresets).catch(() => {})} />}
         {rolesDialog && <RolesDialog api={api} workspaceCwd={snap?.workspace.cwd ?? ""} onClose={() => setRolesDialog(false)} onChanged={() => void loadRoles()} />}
         <ReactFlow nodes={flow} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onNodeDragStart={onNodeDragStart} onNodeDragStop={onNodeDragStop} onEdgesChange={onEdgesChange} onConnect={onConnect} onEdgesDelete={onEdgesDelete}
           onNodeClick={(_, n) => { if (linkingRef.current) finishLink(n.id); }} onPaneClick={() => { if (linkingRef.current) setLinking(null); if (selDrawingsRef.current.size) setSelDrawings(new Set()); }}

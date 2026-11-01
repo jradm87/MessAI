@@ -3,6 +3,7 @@ import { Bot, Database, Download, Info, Keyboard, Monitor, Moon, Radio, Scale, S
 import { getThemePref, onTheme, setThemePref, THEME_LABEL, type ThemePref } from "./theme.js";
 import { setPref, usePref } from "./prefs.js";
 import type { Api, UiPrefsState } from "./api.js";
+import { PrefsTerminal } from "./PrefsTerminal.js";
 
 /**
  * #64 — janela de Preferências em abas (engrenagem da barra lateral / Ctrl+,).
@@ -85,14 +86,14 @@ function GeneralTab({ api }: { api: Api }) {
   </>);
 }
 
-export function Preferences({ api, onClose }: { api: Api; onClose: () => void }) {
+export function Preferences({ api, onClose, onPresetsChanged }: { api: Api; onClose: () => void; onPresetsChanged?: () => void }) {
   const saved = usePref("prefsTab");
   const tab: PrefTabId = isTab(saved) ? saved : "general";
   const pick = (id: PrefTabId) => setPref("prefsTab", id);
   useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); onClose(); } }; window.addEventListener("keydown", k, true); return () => window.removeEventListener("keydown", k, true); }, [onClose]);
   const cur = PREF_TABS.find((t) => t.id === tab)!;
   const body = tab === "general" ? <GeneralTab api={api} />
-    : tab === "terminal" ? <Soon issue={56} what="presets de início rápido editáveis, aparência e avançado do terminal" />
+    : tab === "terminal" ? <PrefsTerminal api={api} onPresetsChanged={onPresetsChanged ?? (() => {})} />
     : tab === "agents" ? <Soon issue={57} what="papéis, skills, contas e uso dos agentes" />
     : tab === "shortcuts" ? <Soon issue={58} what="atalhos de teclado personalizáveis" />
     : tab === "remote" ? <Soon issue={59} what="controle remoto e pareamento (depende do hub #28)" />

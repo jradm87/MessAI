@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { Preset } from "@messai/contracts";
+import { WsIcon } from "./wsicons.js";
 
 export type AddChoice = { kind: "note" } | { kind: "tree" } | { kind: "terminal"; preset?: Preset; command?: string };
 
@@ -30,7 +31,7 @@ export function AddMenu({ presets, onPick, onClose, x, y }: { presets: Preset[];
             {presets.map((p) => (
               <div key={p.id} className={`mi ${p.available ? "" : "off"}`} title={p.available ? p.command : `${p.command} não encontrado no PATH`}
                 onClick={() => p.available && onPick({ kind: "terminal", preset: p })}>
-                {p.label}{p.available ? "" : " · indisponível"}
+                {p.icon ? <WsIcon icon={p.icon} color={p.color || "currentColor"} size={14} /> : p.color ? <span className="sw" style={{ background: p.color, width: 10, height: 10 }} /> : null} {p.label}{p.available ? "" : " · indisponível"}
               </div>
             ))}
           </div>

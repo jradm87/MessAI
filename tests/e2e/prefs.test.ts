@@ -66,9 +66,13 @@ describe("Preferências (#64)", () => {
     expect(await page.getAttribute('[data-testid="theme-toggle"]', "title")).toContain("Claro");
     await page.click('[data-testid="theme-dark"]');
     await page.waitForFunction(() => document.documentElement.getAttribute("data-theme") === "dark");
-    // o botão da barra inferior também alimenta o seletor (mesma preferência)
+    // o botão da barra inferior também alimenta o seletor (mesma preferência) — com o modal aberto a barra fica coberta, então fecha antes
+    await page.keyboard.press("Control+,");
+    await page.waitForSelector('[data-testid="prefs"]', { state: "detached" });
     await page.click('[data-testid="theme-toggle"]'); // Escuro → Sistema
-    await page.waitForFunction(() => document.querySelector('[data-testid="theme-system"]')?.getAttribute("aria-checked") === "true");
+    await page.waitForFunction(() => localStorage.getItem("mess.theme") === "system");
+    await page.keyboard.press("Control+,");
+    await page.waitForSelector('[data-testid="theme-system"][aria-checked="true"]');
     await page.keyboard.press("Control+,");
     await page.waitForSelector('[data-testid="prefs"]', { state: "detached" });
   }, 20_000);

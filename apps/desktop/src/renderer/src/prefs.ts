@@ -13,6 +13,16 @@ export const DEFAULTS = {
   powerMode: "never", // evitar suspensão: never | agents | always
   confirmExit: true, // tela de encerramento ao fechar a janela
   closeToTray: false, // fechar a janela esconde na bandeja (runtime e agentes seguem)
+  // #56 Terminal (aparência global do xterm; o tema por nó, quando definido, vence)
+  termTheme: "system", // system | dark | light | custom
+  termCustom: "", // JSON da paleta custom (ver term-theme.ts)
+  termFont: "", // família na frente da pilha padrão; "" = padrão
+  termFontSize: 14,
+  termPadX: 6, // igual ao padding histórico do .term
+  termPadY: 6,
+  termMemLimit: true, // limitar histórico (scrollback) por terminal
+  termScrollback: 2000,
+  termCopyOnSelect: false,
 } as const;
 export type Prefs = { -readonly [K in keyof typeof DEFAULTS]: (typeof DEFAULTS)[K] extends string ? string : (typeof DEFAULTS)[K] extends number ? number : boolean };
 export type PrefKey = keyof Prefs;

@@ -1,4 +1,4 @@
-import type { ApiError, CompanionConfig, RuntimeSettings, PatchRuntimeSettings, TaskSummary, TreeEntry, FileContent, FsOp, SearchHit, CreateFloor, LandFloor, LandResult, PatchConnection, Role, CreateRole, PatchRole, ChatMessage, SendChat, Attachment, CreateAttachment, FileEntry, Connection as WsConnection, CreateDrawing, PatchDrawing, GroupDrawings, CreateFolder, CreateNode, CreateWorkspace, Drawing, Folder, Geometry, PatchFolder, PatchWorkspace, Preset, Node, PatchNode, Session, Sidebar, Workspace, WorkspaceSnapshot, WsClientMessage, WsServerMessage } from "@messai/contracts";
+import type { ApiError, CompanionConfig, RuntimeSettings, PatchRuntimeSettings, PresetInput, TaskSummary, TreeEntry, FileContent, FsOp, SearchHit, CreateFloor, LandFloor, LandResult, PatchConnection, Role, CreateRole, PatchRole, ChatMessage, SendChat, Attachment, CreateAttachment, FileEntry, Connection as WsConnection, CreateDrawing, PatchDrawing, GroupDrawings, CreateFolder, CreateNode, CreateWorkspace, Drawing, Folder, Geometry, PatchFolder, PatchWorkspace, Preset, Node, PatchNode, Session, Sidebar, Workspace, WorkspaceSnapshot, WsClientMessage, WsServerMessage } from "@messai/contracts";
 
 export type Connection = { baseUrl: string; wsUrl: string; token: string; homeDir?: string };
 export type RunningEntry = { title: string; agentType: string; isAgent: boolean; workspace: string };
@@ -40,6 +40,8 @@ export class Api {
   patchSettings(p: PatchRuntimeSettings) { return this.req<RuntimeSettings>("PATCH", "/v1/settings", p); }
   summarize(nodeId: string) { return this.req<TaskSummary>("POST", "/v1/companion/summarize", { nodeId }); }
   presets() { return this.req<Preset[]>("GET", "/v1/presets"); }
+  putPresets(presets: PresetInput[]) { return this.req<Preset[]>("PUT", "/v1/presets", { presets }); }
+  resetPresets() { return this.req<Preset[]>("POST", "/v1/presets/reset"); }
   listWorkspaces() { return this.req<Workspace[]>("GET", "/v1/workspaces"); }
   createWorkspace(input: CreateWorkspace) { return this.req<Workspace>("POST", "/v1/workspaces", input); }
   patchWorkspace(id: string, input: PatchWorkspace) { return this.req<Workspace>("PATCH", `/v1/workspaces/${id}`, input); }
