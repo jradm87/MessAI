@@ -5,6 +5,7 @@ import { setPref, usePref } from "./prefs.js";
 import type { Api, UiPrefsState } from "./api.js";
 import { PrefsTerminal } from "./PrefsTerminal.js";
 import { PrefsAgents, type OpenTerminal } from "./PrefsAgents.js";
+import { PrefsShortcuts } from "./PrefsShortcuts.js";
 
 /**
  * #64 — janela de Preferências em abas (engrenagem da barra lateral / Ctrl+,).
@@ -101,7 +102,7 @@ export function Preferences({ api, onClose, onPresetsChanged, workspaceCwd, onRo
   const body = tab === "general" ? <GeneralTab api={api} />
     : tab === "terminal" ? <PrefsTerminal api={api} onPresetsChanged={onPresetsChanged ?? (() => {})} />
     : tab === "agents" ? <PrefsAgents api={api} workspaceCwd={workspaceCwd ?? ""} onRolesChanged={onRolesChanged ?? (() => {})} onOpenTerminal={onOpenTerminal ?? (() => {})} onOpenUsage={onOpenUsage ?? (() => {})} />
-    : tab === "shortcuts" ? <Soon issue={58} what="atalhos de teclado personalizáveis" />
+    : tab === "shortcuts" ? <PrefsShortcuts />
     : tab === "remote" ? <Soon issue={59} what="controle remoto e pareamento (depende do hub #28)" />
     : tab === "updates" ? <Soon issue={61} what="canal e verificação de atualizações" />
     : tab === "data" ? <Soon issue={62} what="local dos dados, uso, backups e apagar" />

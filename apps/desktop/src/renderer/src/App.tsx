@@ -31,6 +31,8 @@ import { NewTerminalDialog, type NewTerminalInput } from "./NewTerminalDialog.js
 import { ShutdownOverlay } from "./ShutdownOverlay.js";
 import { Preferences } from "./Preferences.js";
 import { setPref, usePref } from "./prefs.js";
+import { ACTION_BY_ID, comboFromEvent, effectiveCombo, sameCombo, type Keymap } from "./keymap.js";
+import { useHint, useKeymap } from "./shortcuts.js";
 
 const nodeTypes: NodeTypes = { terminal: TerminalNode as never, note: NoteNode as never, text: TextNode as never, tree: TreeNode as never };
 const edgeTypes: EdgeTypes = { rope: RopeEdge as never, circuit: CircuitEdge as never };
@@ -51,6 +53,7 @@ function ZoomBar({ minimap, setMinimap, onUsage, agents, wsName, inFloors, onFlo
   useAtomValue(themeAtom); // re-renderiza o botão quando o tema efetivo muda
   const pref = getThemePref(); const ThemeIcon = pref === "light" ? Sun : pref === "dark" ? Moon : Monitor;
   // #38 Agent Usage: desligado em Preferências → Agentes → Uso some da barra; provedores escondidos também
+  const hMini = useHint("minimap.toggle"); const hIn = useHint("zoom.in"); const hOut = useHint("zoom.out"); // #58 tooltips seguem o keymap
   const usageOn = usePref("usageEnabled"); const hidden = new Set(usePref("usageDisabled").split(",").filter(Boolean));
   const shownAgents = usageOn ? agents.filter((a) => !hidden.has(a)) : [];
   return (
@@ -60,11 +63,11 @@ function ZoomBar({ minimap, setMinimap, onUsage, agents, wsName, inFloors, onFlo
       {usageOn && shownAgents.length === 0 && <button className="bb-circle" title="Agent Usage" data-testid="bb-usage" onClick={onUsage}><Activity size={15} /></button>}
       <button className="bb-circle" title={`Tema: ${THEME_LABEL[pref]} (clique alterna Sistema → Claro → Escuro)`} data-testid="theme-toggle" onClick={() => setThemePref(nextTheme(pref))}><ThemeIcon size={15} /></button>
       <button className={`bb-circle ${hud ? "on" : ""}`} title={hud ? "Companheiro: fechar janela flutuante" : "Companheiro: abrir janela flutuante (agentes que terminaram, resumo e próximo passo)"} data-testid="hud-toggle" onClick={onHud}><Sparkles size={15} /></button>
-      <button className="bb-circle" title="Minimapa (Ctrl+Shift+M)" onClick={() => setMinimap(!minimap)}><MapIcon size={15} /></button>
+      <button className="bb-circle" title={`Minimapa${hMini}`} onClick={() => setMinimap(!minimap)}><MapIcon size={15} /></button>
       <div className="bb-zoom">
-        <button className="tb" title="Reduzir (Ctrl+-)" onClick={() => void rf.zoomOut({ duration: 120 })}><Minus size={14} /></button>
+        <button className="tb" title={`Reduzir${hOut}`} onClick={() => void rf.zoomOut({ duration: 120 })}><Minus size={14} /></button>
         <span className="pct" onClick={() => void rf.zoomTo(1, { duration: 150 })} title="100%">{z}%</span>
-        <button className="tb" title="Ampliar (Ctrl++)" onClick={() => void rf.zoomIn({ duration: 120 })}><Plus size={14} /></button>
+        <button className="tb" title={`Ampliar${hIn}`} onClick={() => void rf.zoomIn({ duration: 120 })}><Plus size={14} /></button>
       </div>
     </div>
   );
@@ -114,6 +117,7 @@ function Canvas({ conn }: { conn: Connection }) {
   const [preview, setPreview] = useState<string | null>(null);
   const [usage, setUsage] = useState(false);
   const [prefsOpen, setPrefsOpen] = useState(false); // #64 janela de Preferências
+  const keymap = useKeymap(); const keymapRef = useRef<Keymap>(keymap); keymapRef.current = keymap; // #58 atalhos editáveis
   // #67: estado da janela flutuante do companheiro (vive no processo principal; aqui só espelho + preferência).
   const [hud, setHud] = useState(false);
   const HUD_PREF = "mess.hud";
@@ -421,61 +425,63 @@ function Canvas({ conn }: { conn: Connection }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const ctrl = e.ctrlKey || e.metaKey;
-      if (ctrl && e.key === ",") { e.preventDefault(); setPrefsOpen((v) => !v); return; } // #64 Preferências
-      if (ctrl && e.shiftKey && e.key.toLowerCase() === "n") { e.preventDefault(); setWsDialog({}); return; }
-      if (ctrl && !e.shiftKey && e.key.toLowerCase() === "b" && !isTyping()) { e.preventDefault(); setSideMini((v) => !v); return; } // dentro do terminal Ctrl+B é o prefixo do tmux
-      if (ctrl && e.shiftKey && (e.key === "\\" || e.key === "|")) { e.preventDefault(); if (overview) setOverview(null); else { const g = groundOf(current); if (g) setOverview(g.workspaceId); else toast("Selecione um espaço"); } return; }
-      if (ctrl && e.shiftKey && e.key.toLowerCase() === "p") {
+      // #58: cada ação casa pelo keymap (padrão do catálogo ou override do usuário); ações sem `whileTyping` são ignoradas com foco em input/terminal.
+      const combo = comboFromEvent(e); const typing = isTyping();
+      const is = (id: string) => { const a = ACTION_BY_ID.get(id)!; return !(typing && !a.whileTyping) && sameCombo(effectiveCombo(id, keymapRef.current), combo); };
+      if (is("prefs.toggle")) { e.preventDefault(); setPrefsOpen((v) => !v); return; } // #64 Preferências
+      if (is("ws.new")) { e.preventDefault(); setWsDialog({}); return; }
+      if (is("sidebar.toggle")) { e.preventDefault(); setSideMini((v) => !v); return; } // dentro do terminal Ctrl+B é o prefixo do tmux
+      if (is("floors.overview")) { e.preventDefault(); if (overview) setOverview(null); else { const g = groundOf(current); if (g) setOverview(g.workspaceId); else toast("Selecione um espaço"); } return; }
+      if (is("composer.toggle")) {
         e.preventDefault(); if (composerRef.current) { setComposerFor(null); return; }
         const sel = pickTerminal(); if (sel) setComposerFor(sel); else toast("Nenhum terminal para compor"); return;
       }
-      if (ctrl && !e.shiftKey && e.key.toLowerCase() === "j") {
+      if (is("chat.toggle")) {
         e.preventDefault(); if (chatRef.current) { setChatFor(null); return; }
         const sel = pickTerminal(); if (sel) openChat(sel); else toast("Nenhum terminal para o chat"); return;
       }
-      if (ctrl && e.key.toLowerCase() === "l" && !isTyping()) { /* no terminal Ctrl+L limpa a tela */ e.preventDefault(); const sel = flowRef.current.filter((n) => n.selected); if (sel.length === 1) startLink(sel[0]!.id); else toast("Selecione um nó para conectar"); return; }
-      if (ctrl && e.key === "Tab") { e.preventDefault(); const ns = flowRef.current; if (!ns.length) return; const i = ns.findIndex((n) => n.selected); const j = (i + (e.shiftKey ? -1 : 1) + ns.length) % ns.length; selectNode(ns[j]!.id); return; }
-      if (ctrl && e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+      if (is("link.start")) { /* no terminal Ctrl+L limpa a tela */ e.preventDefault(); const sel = flowRef.current.filter((n) => n.selected); if (sel.length === 1) startLink(sel[0]!.id); else toast("Selecione um nó para conectar"); return; }
+      if (is("node.next") || is("node.prev")) { e.preventDefault(); const ns = flowRef.current; if (!ns.length) return; const i = ns.findIndex((n) => n.selected); const j = (i + (is("node.prev") ? -1 : 1) + ns.length) % ns.length; selectNode(ns[j]!.id); return; }
+      if (is("wire.next") || is("wire.prev")) {
         e.preventDefault(); const sel = flowRef.current.find((n) => n.selected); if (!sel) return;
         const nb = neighbors(sel.id); if (!nb.length) { toast("Este nó não tem conexões"); return; }
-        wireIdx.current = (wireIdx.current + (e.key === "ArrowRight" ? 1 : -1) + nb.length) % nb.length; selectNode(nb[wireIdx.current]!); return;
+        wireIdx.current = (wireIdx.current + (is("wire.next") ? 1 : -1) + nb.length) % nb.length; selectNode(nb[wireIdx.current]!); return;
       }
-      if (ctrl && e.shiftKey && e.key.toLowerCase() === "a") {
+      if (is("attention.select")) {
         e.preventDefault(); const att = flowRef.current.filter((n) => store.get(attentionAtom(n.id)));
         if (!att.length) { toast("Nenhum terminal precisa de atenção"); return; }
         const i = att.findIndex((n) => n.selected); selectNode(att[(i + 1) % att.length]!.id); return;
       }
-      if (ctrl && e.altKey && e.key.toLowerCase() === "a") { e.preventDefault(); const att = flowRef.current.filter((n) => store.get(attentionAtom(n.id))); toast(att.length ? `Esperando: ${att.map((n) => String((n.data as { title?: string }).title ?? "texto")).join(", ")}` : "Nenhum terminal precisa de atenção"); return; }
-      if (ctrl && !e.shiftKey && (e.key === "ArrowUp" || e.key === "ArrowDown" || ((e.key === "[" || e.key === "]") && !isTyping()))) { // Ctrl+[ no terminal é Esc
+      if (is("attention.list")) { e.preventDefault(); const att = flowRef.current.filter((n) => store.get(attentionAtom(n.id))); toast(att.length ? `Esperando: ${att.map((n) => String((n.data as { title?: string }).title ?? "texto")).join(", ")}` : "Nenhum terminal precisa de atenção"); return; }
+      if (is("ws.prev") || is("ws.next") || (ctrl && !e.shiftKey && !e.altKey && (e.key === "[" || e.key === "]") && !typing)) { // Ctrl+[ / Ctrl+] são apelidos fixos (no terminal Ctrl+[ é Esc)
         e.preventDefault(); const ws = sideRef.current.workspaces; if (ws.length < 2) return;
-        const i = ws.findIndex((w) => w.workspaceId === current); const d = e.key === "ArrowUp" || e.key === "[" ? -1 : 1;
+        const i = ws.findIndex((w) => w.workspaceId === current); const d = is("ws.prev") || e.key === "[" ? -1 : 1;
         setCurrent(ws[(i + d + ws.length) % ws.length]!.workspaceId); return;
       }
-      if (ctrl && !e.shiftKey && e.key.toLowerCase() === "t") { e.preventDefault(); if (current) { const c = viewCenter(); setDialog({ rect: { x: c.x - 320, y: c.y - 190, ...SIZE.terminal } }); } return; }
-      if (ctrl && e.shiftKey && e.key.toLowerCase() === "d") { e.preventDefault(); if (current) { const c = viewCenter(); createSimple("note", { x: c.x - 130, y: c.y - 80, ...SIZE.note }); } return; }
-      if (ctrl && e.shiftKey && e.key.toLowerCase() === "m") { e.preventDefault(); setMinimap((v) => !v); return; }
-      if (ctrl && (e.key === "=" || e.key === "+")) { e.preventDefault(); void rf.zoomIn({ duration: 120 }); return; }
-      if (ctrl && e.key === "-") { e.preventDefault(); void rf.zoomOut({ duration: 120 }); return; }
-      if (ctrl && e.key === "\\") { e.preventDefault(); const sel = flowRef.current.filter((n) => n.selected); void rf.fitView(sel.length ? { nodes: sel, padding: 0.3, duration: 250 } : { padding: 0.15, duration: 250 }); return; }
-      if (ctrl && !e.shiftKey && e.key.toLowerCase() === "d" && !isTyping()) { e.preventDefault(); void duplicateSelected(); return; }
-      if (ctrl && e.shiftKey && e.key.toLowerCase() === "t") { e.preventDefault(); arrangeGrid(); return; } // Ctrl+Shift+T não é entrada de terminal; vale mesmo com o xterm focado
-      if (ctrl && e.key.toLowerCase() === "g" && !isTyping()) { // agrupar / desagrupar desenhos
+      if (is("terminal.new")) { e.preventDefault(); if (current) { const c = viewCenter(); setDialog({ rect: { x: c.x - 320, y: c.y - 190, ...SIZE.terminal } }); } return; }
+      if (is("note.new")) { e.preventDefault(); if (current) { const c = viewCenter(); createSimple("note", { x: c.x - 130, y: c.y - 80, ...SIZE.note }); } return; }
+      if (is("minimap.toggle")) { e.preventDefault(); setMinimap((v) => !v); return; }
+      if (is("zoom.in")) { e.preventDefault(); void rf.zoomIn({ duration: 120 }); return; }
+      if (is("zoom.out")) { e.preventDefault(); void rf.zoomOut({ duration: 120 }); return; }
+      if (is("view.fit")) { e.preventDefault(); const sel = flowRef.current.filter((n) => n.selected); void rf.fitView(sel.length ? { nodes: sel, padding: 0.3, duration: 250 } : { padding: 0.15, duration: 250 }); return; }
+      if (is("node.duplicate")) { e.preventDefault(); void duplicateSelected(); return; }
+      if (is("arrange.grid")) { e.preventDefault(); arrangeGrid(); return; } // Ctrl+Shift+T não é entrada de terminal; vale mesmo com o xterm focado
+      if (is("drawings.group") || is("drawings.ungroup")) { // agrupar / desagrupar desenhos
         e.preventDefault(); const ids = [...selDrawingsRef.current]; if (!current || !ids.length) return;
-        if (e.shiftKey) void mutate((r) => api.groupDrawings(current, { expectedRevision: r, drawingIds: ids, grouped: false }));
+        if (is("drawings.ungroup")) void mutate((r) => api.groupDrawings(current, { expectedRevision: r, drawingIds: ids, grouped: false }));
         else if (ids.length >= 2) void mutate((r) => api.groupDrawings(current, { expectedRevision: r, drawingIds: ids, grouped: true }));
         else toast("Selecione 2+ desenhos para agrupar");
         return;
       }
-      if (ctrl && e.key.toLowerCase() === "w" && !isTyping()) { e.preventDefault(); deleteSelected(); return; }
+      if (is("delete")) { e.preventDefault(); deleteSelected(); return; }
       if ((e.key === "Delete" || e.key === "Backspace") && !isTyping() && (flowRef.current.some((n) => n.selected) || selDrawingsRef.current.size > 0)) { e.preventDefault(); void deleteSelected(); return; }
       if (e.key === "Escape" && linkingRef.current) { setLinking(null); return; }
       if (e.key === "Escape" && overview) { setOverview(null); return; }
-      if (isTyping() || ctrl || e.altKey) return;
-      const k = e.key.toLowerCase();
-      const map: Record<string, Tool> = { v: "select", t: "terminal", n: "note", l: "text", f: "tree", b: "draw", h: "pan" };
-      if (map[k]) { setTool(map[k]!); if (k === "b") setStyle((s) => ({ ...s, kind: s.kind === "erase" ? "pen" : s.kind })); return; }
-      if (k === "[") setStyle((s) => ({ ...s, width: Math.max(1, s.width - 1) }));
-      if (k === "]") setStyle((s) => ({ ...s, width: Math.min(24, s.width + 1) }));
+      if (typing) return;
+      const tools: [string, Tool][] = [["tool.select", "select"], ["tool.terminal", "terminal"], ["tool.note", "note"], ["tool.text", "text"], ["tool.tree", "tree"], ["tool.draw", "draw"], ["tool.pan", "pan"]];
+      for (const [id, tool] of tools) if (is(id)) { e.preventDefault(); setTool(tool); if (tool === "draw") setStyle((s) => ({ ...s, kind: s.kind === "erase" ? "pen" : s.kind })); return; }
+      if (is("draw.thinner")) setStyle((s) => ({ ...s, width: Math.max(1, s.width - 1) }));
+      if (is("draw.thicker")) setStyle((s) => ({ ...s, width: Math.min(24, s.width + 1) }));
       if (e.key === "Escape") { setTool("select"); setMenu(null); setLinking(null); }
     };
     // Fase de captura: o xterm cancela a propagação das teclas que trata; os atalhos globais precisam vê-las antes.

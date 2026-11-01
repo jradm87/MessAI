@@ -542,3 +542,11 @@ button.danger:hover { border-color: var(--danger); color: var(--danger-fg); }
 .sk-head { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; cursor: default; }
 .sk-count { margin-left: 4px; font-size: 10px; font-weight: 700; color: var(--acc); }
 .role-menu .mi input[type=checkbox] { margin: 0 4px 0 0; pointer-events: none; }
+/* ===== #58 — Preferências → Atalhos ===== */
+.ks-top { align-items: center; } .ks-top .roles-search { flex: 1; margin: 0; }
+.ks-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 10px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; }
+.ks-row.conf { border-color: var(--danger-line); } .ks-row.conf small { color: var(--danger-fg); }
+.ks-typing { margin-left: 6px; font-size: 11px; opacity: .7; }
+.ks-combo { min-width: 120px; font-family: ui-monospace, monospace; font-size: 12px; padding: 3px 10px; background: var(--chip); border: 1px solid var(--line); }
+.ks-combo.over { border-color: var(--acc); } .ks-combo.cap { background: var(--acc); color: var(--on-acc); border-color: transparent; animation: blink 1s steps(1) infinite; }
+.ks-row .tb { width: 24px; height: 24px; } .ks-row .tb:disabled { opacity: .3; }

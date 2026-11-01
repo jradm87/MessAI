@@ -2,6 +2,7 @@ import { useMemo, useState, type DragEvent } from "react";
 import { ChevronDown, ChevronRight, Plus, Settings, FolderPlus, Folder as FolderIcon, FolderOpen, Minus, GitBranch, Layers, Terminal } from "lucide-react";
 import type { Folder, Sidebar as SidebarData, Workspace } from "@messai/contracts";
 import { WsIcon } from "./wsicons.js";
+import { useHint } from "./shortcuts.js";
 
 export type SidebarActions = {
   select: (id: string) => void;
@@ -23,6 +24,7 @@ type Ctx = { x: number; y: number; ws?: Workspace; folder?: Folder };
 
 /** Barra lateral: filtro, botão +, WORKSPACES com pastas/subpastas recolhíveis, grupos (divisores) e rodapé. */
 export function Sidebar({ data, current, collapsed, machine, act }: { data: SidebarData; current: string | null; collapsed: boolean; machine: string; act: SidebarActions }) {
+  const hNew = useHint("ws.new"); const hPrefs = useHint("prefs.toggle"); // #58
   const [filter, setFilter] = useState("");
   const [ctx, setCtx] = useState<Ctx | null>(null);
   const [over, setOver] = useState<string | null>(null);
@@ -98,7 +100,7 @@ export function Sidebar({ data, current, collapsed, machine, act }: { data: Side
       {!collapsed && <div className="machine">máquina {machine}</div>}
       <div className="side-top">
         {!collapsed && <input className="filter" placeholder="Filtrar" value={filter} onChange={(e) => setFilter(e.target.value)} data-testid="ws-filter" />}
-        <button className="tb" title="Novo espaço (Ctrl+Shift+N)" data-testid="ws-new" onClick={() => act.newWorkspace()}><Plus size={16} /></button>
+        <button className="tb" title={`Novo espaço${hNew}`} data-testid="ws-new" onClick={() => act.newWorkspace()}><Plus size={16} /></button>
       </div>
       {!collapsed && <div className="sec">WORKSPACES</div>}
       <ul className={`tree ${over === null && over !== undefined ? "" : ""}`} data-testid="ws-tree">
@@ -110,7 +112,7 @@ export function Sidebar({ data, current, collapsed, machine, act }: { data: Side
         <button title="Nova pasta" onClick={() => act.newFolder("folder")}><FolderPlus size={14} />{!collapsed && " Pasta"}</button>
         <button title="Novo grupo" onClick={() => act.newFolder("group")}><Minus size={14} />{!collapsed && " Grupo"}</button>
         <span className="sp" />
-        <button className="tb" title="Preferências (Ctrl+,)" data-testid="settings" onClick={() => act.settings()}><Settings size={15} /></button>
+        <button className="tb" title={`Preferências${hPrefs}`} data-testid="settings" onClick={() => act.settings()}><Settings size={15} /></button>
       </div>
       {ctx && (
         <div className="menu-backdrop fixed" onMouseDown={() => setCtx(null)} onContextMenu={(e) => { e.preventDefault(); setCtx(null); }}>
