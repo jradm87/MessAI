@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import type { ChatMessage, Connection, Drawing, Folder, Message, Node, Role, Session, Workspace } from "@messai/contracts";
+import type { ChatMessage, Connection, Drawing, Folder, Message, Node, Role, Session, Workspace, Skill } from "@messai/contracts";
 
 const MIGRATIONS: string[] = [
   `CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -61,6 +61,10 @@ const MIGRATIONS: string[] = [
   `ALTER TABLE sessions ADD COLUMN resume_id TEXT;`, // id de sessão do CLI de IA, para retomar após reboot
   `ALTER TABLE nodes ADD COLUMN icon TEXT;
    ALTER TABLE nodes ADD COLUMN term_theme TEXT;`, // #56 aparência do terminal (preset / edição no nó)
+  `CREATE TABLE IF NOT EXISTS skills (
+     skill_id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', instructions TEXT NOT NULL DEFAULT '',
+     created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+   ALTER TABLE nodes ADD COLUMN skill_ids TEXT;`, // #57 habilidades (JSON de ids por nó)
 ];
 type DrwRow = { drawing_id: string; workspace_id: string; kind: Drawing["kind"]; points: string; color: string; width: number; created_at: string; group_id: string | null };
 const drwFrom = (r: DrwRow): Drawing => ({ drawingId: r.drawing_id, workspaceId: r.workspace_id, kind: r.kind, points: JSON.parse(r.points) as Drawing["points"], color: r.color, width: r.width, createdAt: r.created_at, ...(r.group_id ? { groupId: r.group_id } : {}) });
@@ -74,7 +78,10 @@ type ChatRow = { chat_id: string; workspace_id: string; node_id: string; thread:
 const chatFrom = (r: ChatRow): ChatMessage => ({ chatId: r.chat_id, workspaceId: r.workspace_id, nodeId: r.node_id, thread: r.thread, role: r.role, text: r.text, createdAt: r.created_at });
 type FolderRow = { folder_id: string; name: string; kind: Folder["kind"]; parent_id: string | null; sort_order: number; collapsed: number; created_at: string };
 const folderFrom = (r: FolderRow): Folder => ({ folderId: r.folder_id, name: r.name, kind: r.kind, sortOrder: r.sort_order, collapsed: r.collapsed === 1, createdAt: r.created_at, ...(r.parent_id ? { parentId: r.parent_id } : {}) });
-type NodeRow = { node_id: string; workspace_id: string; kind: Node["kind"]; title: string; x: number; y: number; w: number; h: number; session_id: string | null; content: string | null; created_at: string; role_id: string | null; locked: number; color: string | null; icon: string | null; term_theme: string | null; file_path: string | null; title_auto: number };
+type NodeRow = { node_id: string; workspace_id: string; kind: Node["kind"]; title: string; x: number; y: number; w: number; h: number; session_id: string | null; content: string | null; created_at: string; role_id: string | null; locked: number; color: string | null; icon: string | null; term_theme: string | null; skill_ids: string | null; file_path: string | null; title_auto: number };
+type SkillRow = { skill_id: string; name: string; description: string; instructions: string; created_at: string; updated_at: string };
+const skillFrom = (r: SkillRow): Skill => ({ skillId: r.skill_id, name: r.name, description: r.description, instructions: r.instructions, createdAt: r.created_at, updatedAt: r.updated_at });
+const parseIds = (raw: string | null): string[] | undefined => { if (!raw) return undefined; try { const j = JSON.parse(raw) as unknown; return Array.isArray(j) && j.length ? j.filter((x): x is string => typeof x === "string") : undefined; } catch { return undefined; } };
 type RoleRow = { role_id: string; name: string; badge: string; instructions: string; created_at: string; updated_at: string };
 const roleFrom = (r: RoleRow): Role => ({ roleId: r.role_id, name: r.name, badge: r.badge, instructions: r.instructions, createdAt: r.created_at, updatedAt: r.updated_at });
 type SessRow = { session_id: string; workspace_id: string; node_id: string; command: string; args: string; cwd: string; state: Session["state"]; pid: number | null; exit_code: number | null; cols: number; rows: number; created_at: string; persistent: number; resume_id: string | null };
@@ -89,6 +96,7 @@ const nodeFrom = (r: NodeRow): Node => ({
   ...(r.color ? { color: r.color } : {}),
   ...(r.icon ? { icon: r.icon } : {}),
   ...(r.term_theme ? { termTheme: r.term_theme } : {}),
+  ...(parseIds(r.skill_ids) ? { skillIds: parseIds(r.skill_ids)! } : {}),
   ...(r.file_path ? { filePath: r.file_path } : {}),
   ...(r.content !== null ? { content: r.content } : {}),
 });
@@ -197,11 +205,27 @@ export class Store {
     return r ? nodeFrom(r) : undefined;
   }
   insertNode(n: Node, titleAuto = true): void {
-    this.db.prepare("INSERT INTO nodes(node_id,workspace_id,kind,title,x,y,w,h,session_id,content,created_at,role_id,locked,color,file_path,title_auto,icon,term_theme) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(
+    this.db.prepare("INSERT INTO nodes(node_id,workspace_id,kind,title,x,y,w,h,session_id,content,created_at,role_id,locked,color,file_path,title_auto,icon,term_theme,skill_ids) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(
       n.nodeId, n.workspaceId, n.kind, n.title, n.geometry.x, n.geometry.y, n.geometry.w, n.geometry.h,
-      n.sessionId ?? null, n.content ?? null, n.createdAt, n.roleId ?? null, n.locked ? 1 : 0, n.color ?? null, n.filePath ?? null, titleAuto ? 1 : 0, n.icon ?? null, n.termTheme ?? null);
+      n.sessionId ?? null, n.content ?? null, n.createdAt, n.roleId ?? null, n.locked ? 1 : 0, n.color ?? null, n.filePath ?? null, titleAuto ? 1 : 0, n.icon ?? null, n.termTheme ?? null, n.skillIds?.length ? JSON.stringify(n.skillIds) : null);
   }
   setNodeRole(id: string, roleId: string | null): void { this.db.prepare("UPDATE nodes SET role_id=? WHERE node_id=?").run(roleId, id); }
+  // #57 skills
+  setNodeSkills(id: string, skillIds: string[]): void { this.db.prepare("UPDATE nodes SET skill_ids=? WHERE node_id=?").run(skillIds.length ? JSON.stringify(skillIds) : null, id); }
+  listSkills(): Skill[] { return (this.db.prepare("SELECT * FROM skills ORDER BY name").all() as SkillRow[]).map(skillFrom); }
+  getSkill(id: string): Skill | undefined { const r = this.db.prepare("SELECT * FROM skills WHERE skill_id=?").get(id) as SkillRow | undefined; return r ? skillFrom(r) : undefined; }
+  findSkillByName(name: string): Skill | undefined { const r = this.db.prepare("SELECT * FROM skills WHERE lower(name)=lower(?)").get(name) as SkillRow | undefined; return r ? skillFrom(r) : undefined; }
+  insertSkill(k: Skill): void { this.db.prepare("INSERT INTO skills VALUES(?,?,?,?,?,?)").run(k.skillId, k.name, k.description, k.instructions, k.createdAt, k.updatedAt); }
+  updateSkill(id: string, p: { name?: string | undefined; description?: string | undefined; instructions?: string | undefined }, updatedAt: string): void {
+    this.db.prepare("UPDATE skills SET name=COALESCE(?,name), description=COALESCE(?,description), instructions=COALESCE(?,instructions), updated_at=? WHERE skill_id=?").run(p.name ?? null, p.description ?? null, p.instructions ?? null, updatedAt, id);
+  }
+  /** Apaga a skill e a tira de todos os nós; devolve os nós afetados (para republicar os espaços). */
+  deleteSkill(id: string): Node[] {
+    const affected = this.nodesWithSkill(id);
+    this.db.transaction(() => { for (const n of affected) this.setNodeSkills(n.nodeId, (n.skillIds ?? []).filter((x) => x !== id)); this.db.prepare("DELETE FROM skills WHERE skill_id=?").run(id); })();
+    return affected;
+  }
+  nodesWithSkill(id: string): Node[] { return (this.db.prepare("SELECT * FROM nodes WHERE skill_ids LIKE ?").all(`%"${id}"%`) as NodeRow[]).map(nodeFrom).filter((n) => (n.skillIds ?? []).includes(id)); }
   // roles
   listRoles(): Role[] { return (this.db.prepare("SELECT * FROM roles ORDER BY name").all() as RoleRow[]).map(roleFrom); }
   getRole(id: string): Role | undefined { const r = this.db.prepare("SELECT * FROM roles WHERE role_id=?").get(id) as RoleRow | undefined; return r ? roleFrom(r) : undefined; }

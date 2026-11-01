@@ -74,6 +74,7 @@ export const Node = Type.Object({
   // terminal (#56): ícone e tema do xterm escolhidos no preset ou editados no nó; `color` também vale para terminal
   icon: Type.Optional(Type.String()),
   termTheme: Type.Optional(Type.String()),
+  skillIds: Type.Optional(Type.Array(Id)), // #57 habilidades anexadas (terminal)
   createdAt: Type.String(),
 });
 export type Node = Static<typeof Node>;
@@ -341,6 +342,7 @@ export const CreateNode = Type.Object({
   // terminal (#56): aparência vinda do preset
   icon: Type.Optional(Type.String({ maxLength: 40 })),
   termTheme: Type.Optional(TermTheme),
+  skillIds: Type.Optional(Type.Array(Id, { maxItems: 20 })), // #57
 });
 export type CreateNode = Static<typeof CreateNode>;
 
@@ -359,6 +361,8 @@ export const PatchNode = Type.Object({
   // terminal (#56): aparência editável no nó (null limpa)
   icon: Type.Optional(Type.Union([Type.String({ maxLength: 40 }), Type.Null()])),
   termTheme: Type.Optional(Type.Union([TermTheme, Type.Null()])),
+  /** #57 Reatribuir habilidades reinicia só o processo do terminal (como o papel). */
+  skillIds: Type.Optional(Type.Array(Id, { maxItems: 20 })),
 });
 export type PatchNode = Static<typeof PatchNode>;
 
@@ -469,4 +473,14 @@ export const AGENT_ENV = {
   roleName: "MESS_ROLE",
   roleInstructions: "MESS_ROLE_INSTRUCTIONS",
   sessionId: "MESS_SESSION_ID",
+  skills: "MESS_SKILLS", // #57 nomes das habilidades anexadas, separados por vírgula
+  skillsText: "MESS_SKILLS_TEXT", // #57 instruções completas das habilidades
 } as const;
+
+// #57 — Skills: conjuntos de instruções reutilizáveis anexáveis a um terminal (vários por nó), injetadas como o papel.
+export const Skill = Type.Object({ skillId: Id, name: Type.String(), description: Type.String(), instructions: Type.String(), createdAt: Type.String(), updatedAt: Type.String() });
+export type Skill = Static<typeof Skill>;
+export const CreateSkill = Type.Object({ name: Type.String({ minLength: 1, maxLength: 60 }), description: Type.Optional(Type.String({ maxLength: 200 })), instructions: Type.String({ maxLength: 20000 }) });
+export type CreateSkill = Static<typeof CreateSkill>;
+export const PatchSkill = Type.Object({ name: Type.Optional(Type.String({ minLength: 1, maxLength: 60 })), description: Type.Optional(Type.String({ maxLength: 200 })), instructions: Type.Optional(Type.String({ maxLength: 20000 })) });
+export type PatchSkill = Static<typeof PatchSkill>;

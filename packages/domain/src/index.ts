@@ -233,6 +233,19 @@ export function resolveNodeRef<T extends Pick<Node, "nodeId" | "title">>(nodes: 
 export const roleText = (role: { name: string; instructions: string }): string =>
   `Sua responsabilidade neste terminal: ${role.name}.\n${role.instructions.trim()}`;
 
+/** #57 Texto das habilidades anexadas (vai para o system prompt do Claude Code e para MESS_SKILLS_TEXT). */
+export const skillsText = (skills: { name: string; instructions: string }[]): string =>
+  skills.length ? `Habilidades anexadas a este terminal:\n\n${skills.map((s) => `## ${s.name}\n${s.instructions.trim()}`).join("\n\n")}` : "";
+/** Injeta as habilidades na linha de comando como o papel (só Claude Code aceita system prompt); acumula no mesmo --append-system-prompt. */
+export function applySkills(command: string, args: string[], skills: { name: string; instructions: string }[]): string[] {
+  if (!skills.length) return args;
+  if (command.split("/").pop() !== "claude") return args;
+  const i = args.indexOf("--append-system-prompt");
+  const text = skillsText(skills);
+  if (i >= 0 && i + 1 < args.length) return args.map((a, j) => (j === i + 1 ? `${a}\n\n${text}` : a));
+  return [...args, "--append-system-prompt", text];
+}
+
 /** Injeta o papel na linha de comando quando a CLI aceita system prompt (Claude Code). Outras CLIs recebem só por variável de ambiente. */
 export function applyRole(command: string, args: string[], role: { name: string; instructions: string } | undefined): string[] {
   if (!role) return args;

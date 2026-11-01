@@ -1,7 +1,9 @@
 import { AGENT_ENV, type TreeEntry, type FileContent, type FsOp, type SearchHit, type CreateFloor, type LandFloor, type LandResult, type Role, type CreateRole, type PatchRole, type ChatMessage, type SendChat, type Attachment, type CreateAttachment, type FileEntry, type Connection, type CreateConnection, type PatchConnection, type CreateDrawing, type PatchDrawing, type GroupDrawings, type CreateFolder, type CreateNode, type Drawing, type Folder, type Message, type PatchFolder, type SendMessage, type Sidebar, type CreateWorkspace, type Node, type PatchNode, type PatchWorkspace, type Session, type Workspace, type WorkspaceSnapshot, type TaskFinished, type TaskSummary } from "@messai/contracts";
-import type { RuntimeSettings, PatchRuntimeSettings, PresetInput } from "@messai/contracts";
+import type { RuntimeSettings, PatchRuntimeSettings, PresetInput, Skill, CreateSkill, PatchSkill } from "@messai/contracts";
+import { listProviders } from "./providers.js";
+import { probeAccounts } from "./accounts.js";
 import { defaultPresets, parsePresets, validatePresets, PRESETS_META_KEY } from "./presets.js";
-import { applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, canMessage, checkRevision, formatDelivery, normalizeGeometry, planLocalTerminal, resolveNodeRef, validateNewNode, agentKind, agentResume, stripAnsi, fail, succeed, type Result } from "@messai/domain";
+import { applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, canMessage, checkRevision, formatDelivery, normalizeGeometry, planLocalTerminal, resolveNodeRef, validateNewNode, agentKind, agentResume, stripAnsi, fail, succeed, type Result, applySkills, skillsText } from "@messai/domain";
 import { randomUUID } from "node:crypto";
 import { Companion } from "./companion.js";
 import type { Store } from "@messai/storage";
@@ -226,6 +228,50 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     for (const w of new Set(affected)) this.publish(w);
     return succeed(undefined);
   }
+  // ---- #57 skills ----
+  listSkills(): Skill[] { return this.store.listSkills(); }
+  createSkill(input: CreateSkill): Result<Skill> {
+    if (this.store.findSkillByName(input.name)) return fail("CONFLICT", "já existe uma habilidade com esse nome");
+    const now = nowIso();
+    const k: Skill = { skillId: newId(), name: input.name.trim(), description: (input.description ?? "").trim(), instructions: input.instructions, createdAt: now, updatedAt: now };
+    this.store.insertSkill(k);
+    return succeed(k);
+  }
+  patchSkill(id: string, input: PatchSkill): Result<Skill> {
+    if (!this.store.getSkill(id)) return fail("NOT_FOUND", "habilidade não encontrada");
+    const dup = input.name ? this.store.findSkillByName(input.name) : undefined;
+    if (dup && dup.skillId !== id) return fail("CONFLICT", "já existe uma habilidade com esse nome");
+    this.store.updateSkill(id, { name: input.name?.trim(), description: input.description?.trim(), instructions: input.instructions }, nowIso());
+    return succeed(this.store.getSkill(id)!);
+  }
+  deleteSkill(id: string): Result<void> {
+    if (!this.store.getSkill(id)) return fail("NOT_FOUND", "habilidade não encontrada");
+    const affected = this.store.deleteSkill(id);
+    for (const w of new Set(affected.map((n) => n.workspaceId))) this.publish(w);
+    return succeed(undefined);
+  }
+  /** Reatribui as habilidades de um terminal; se estiver rodando, reinicia só o processo (como o papel). */
+  setNodeSkills(nodeId: string, skillIds: string[]): Result<Node> {
+    const node = this.store.getNode(nodeId);
+    if (!node || node.kind !== "terminal") return fail("NOT_FOUND", "nó terminal não encontrado");
+    const ids = [...new Set(skillIds)];
+    for (const id of ids) if (!this.store.getSkill(id)) return fail("NOT_FOUND", `habilidade não encontrada: ${id}`);
+    this.store.setNodeSkills(nodeId, ids);
+    const updated = this.store.getNode(nodeId)!;
+    const s = node.sessionId ? this.store.getSession(node.sessionId) : undefined;
+    if (s && s.state === "running") {
+      const w = this.store.getWorkspace(node.workspaceId)!;
+      this.sessions.dispose(s.sessionId);
+      this.store.updateSession(s.sessionId, { state: "starting", exitCode: null, pid: null });
+      this.sessions.start({ ...s, state: "starting" }, this.plan(w, updated, s));
+    }
+    this.publish(node.workspaceId);
+    return succeed(updated);
+  }
+  // ---- #38 provedores / #57 contas ----
+  providers() { return listProviders(join(this.cfg.dataDir, "providers")); }
+  accounts() { return { accounts: probeAccounts(homedir()) }; }
+
   /** Reatribui o papel de um terminal; se estiver rodando, reinicia só o processo (a sessão e o nó continuam). */
   setNodeRole(nodeId: string, roleId: string | null): Result<Node> {
     const node = this.store.getNode(nodeId);
@@ -299,8 +345,8 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
         if (lim) { if (lim.plan) a0.plan = lim.plan; a0.limits = lim.limits; if (lim.limits.length) delete a0.note; }
       } catch { agents.push({ id: "claude", label: "Claude Code", available: false, note: "stats-cache.json ilegível.", metrics: [], models: [] }); }
     } else agents.push({ id: "claude", label: "Claude Code", available: false, note: "Sem ~/.claude/stats-cache.json.", metrics: [], models: [] });
-    for (const [id, label] of [["codex", "Codex"], ["gemini", "Gemini"], ["opencode", "OpenCode"]] as const)
-      agents.push({ id, label, available: false, note: "Uso não exposto localmente por esta CLI.", metrics: [], models: [] });
+    for (const p of this.providers().providers.filter((x) => x.id !== "claude"))
+      agents.push({ id: p.id, label: p.label, available: false, note: p.path ? "Uso não exposto localmente por esta CLI." : "CLI não encontrada no PATH.", metrics: [], models: [] });
     return { agents };
   }
 
@@ -597,7 +643,9 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       ...(input.kind === "terminal" && input.color ? { color: input.color } : {}),
       ...(input.kind === "terminal" && input.icon ? { icon: input.icon } : {}),
       ...(input.kind === "terminal" && input.termTheme && input.termTheme !== "system" ? { termTheme: input.termTheme } : {}),
+      ...(input.kind === "terminal" && input.skillIds?.length ? { skillIds: input.skillIds } : {}),
     };
+    for (const id of node.skillIds ?? []) if (!this.store.getSkill(id)) return fail("NOT_FOUND", `habilidade não encontrada: ${id}`);
     if (node.roleId && !this.store.getRole(node.roleId)) return fail("NOT_FOUND", "papel não encontrado");
     let titleAuto = true;
     if (input.kind === "note") {
@@ -683,9 +731,11 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !/^(CLAUDECODE|CLAUDE_CODE_|CODEX_)/.test(k)) baseEnv[k] = v;
     baseEnv["PATH"] = `${CLI_DIR}${delimiter}${baseEnv["PATH"] ?? ""}`;
     const role = node.roleId ? this.store.getRole(node.roleId) : undefined;
+    const skills = (node.skillIds ?? []).map((id) => this.store.getSkill(id)).filter((k): k is Skill => !!k); // #57
     const ground = w.parentId ? this.store.getWorkspace(w.parentId) : undefined;
     const inject = {
       ...(role ? { [AGENT_ENV.roleName]: role.name, [AGENT_ENV.roleInstructions]: roleText(role) } : {}),
+      ...(skills.length ? { [AGENT_ENV.skills]: skills.map((k) => k.name).join(", "), [AGENT_ENV.skillsText]: skillsText(skills) } : {}),
       ...(ground ? { [AGENT_ENV.floorName]: w.name, [AGENT_ENV.branchName]: w.branch ?? "", [AGENT_ENV.floorPath]: w.cwd, [AGENT_ENV.rootPath]: ground.cwd, [AGENT_ENV.projectName]: ground.name } : { [AGENT_ENV.rootPath]: w.cwd, [AGENT_ENV.projectName]: w.name }),
       [AGENT_ENV.socket]: this.cfg.socketPath, [AGENT_ENV.token]: this.cfg.token,
       [AGENT_ENV.workspaceId]: w.workspaceId, [AGENT_ENV.workspaceName]: w.name, [AGENT_ENV.workspaceDir]: w.cwd,
@@ -694,7 +744,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       // Empacotado: o launcher `mess` roda o CLI com o Node do Electron (sem Node do sistema).
       ...(process.env["MESS_RESOURCES"] ? { MESS_ELECTRON: process.execPath } : {}),
     };
-    const plan = planLocalTerminal({ command: s.command, args: applyRole(s.command, s.args, role), cwd: s.cwd, defaultShell: this.cfg.defaultShell, baseEnv, inject });
+    const plan = planLocalTerminal({ command: s.command, args: applySkills(s.command, applyRole(s.command, s.args, role), skills), cwd: s.cwd, defaultShell: this.cfg.defaultShell, baseEnv, inject });
     return s.persistent ? wrapInTmux(plan, tmuxSessionName(s.sessionId), { ...inject, PATH: baseEnv["PATH"]! }, this.cfg.tmuxSocket) : plan;
   }
   /** Reinicia o processo de um nó terminal cuja sessão saiu ou se perdeu. Mesmo sessionId. */
@@ -980,10 +1030,11 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     });
     if (node.kind === "note" && input.content !== undefined) this.writeNoteFile(this.store.getNode(nodeId)!, input.content);
     else if (filePath) { try { this.noteMtime.set(nodeId, statSync(filePath).mtimeMs); } catch { /* ignorar */ } }
+    if (input.skillIds !== undefined) { const r = this.setNodeSkills(nodeId, input.skillIds); if (!r.ok) return r; } // já publica (e reinicia o processo se rodando)
     if (input.roleId !== undefined && (node.roleId ?? null) !== input.roleId) {
       const r = this.setNodeRole(nodeId, input.roleId); // já publica
       if (!r.ok) return r;
-    } else this.publish(node.workspaceId);
+    } else if (input.skillIds === undefined) this.publish(node.workspaceId);
     return succeed(this.store.getNode(nodeId)!);
   }
 

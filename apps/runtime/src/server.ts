@@ -5,14 +5,13 @@ import type { WebSocket } from "ws";
 import {
   BUILD_VERSION, PROTOCOL_VERSION, SendMessage, Ask, CreateConnection, CreateDrawing, CreateNode, CreateWorkspace, DeleteNode, PatchNode, PatchWorkspace, ApplyLayout, WsClientMessage,
   type Capabilities, type WsServerMessage, type ApiError,
- CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, FsOp, PatchRuntimeSettings, PutPresets, type PresetInput, type Preset } from "@messai/contracts";
+ CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, FsOp, PatchRuntimeSettings, PutPresets, CreateSkill, PatchSkill, type PresetInput, type Preset } from "@messai/contracts";
 import type { Result } from "@messai/domain";
 import { newId, type Config } from "./config.js";
-import { accessSync, constants } from "node:fs";
-import { delimiter, join as joinPath } from "node:path";
 import type { WorkspaceService } from "./service.js";
 import { SessionManager } from "./sessions.js";
 import { DEFAULT_PRESET_IDS } from "./presets.js";
+import { whichOnPath } from "./providers.js";
 
 const STATUS: Record<ApiError["code"], number> = {
   UNAUTHORIZED: 401, FORBIDDEN: 403, NOT_FOUND: 404, CONFLICT: 409, INVALID: 400,
@@ -59,11 +58,7 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
     protocolVersion: PROTOCOL_VERSION, machineId: cfg.machineId,
     features: ["workspaces", "folders", "sidebar", "files", "attachments", "chat", "roles", "notes.file", "notes.lock", "connections.style", "floors", "nodes.tree", ...(SessionManager.tmuxAvailable() ? ["terminal.tmux"] : []), "nodes.terminal", "nodes.note", "connections", "messages", "drawings", "nodes.text", "terminal.lease", "terminal.snapshot", opts.unix ? "agent.socket" : "client.http"],
   }));
-  const onPath = (cmd: string): boolean => {
-    if (cmd.includes("/")) { try { accessSync(cmd, constants.X_OK); return true; } catch { return false; } }
-    for (const dir of (process.env["PATH"] ?? "").split(delimiter)) { try { accessSync(joinPath(dir, cmd), constants.X_OK); return true; } catch { /* próximo */ } }
-    return false;
-  };
+  const onPath = (cmd: string): boolean => whichOnPath(cmd) !== null;
   app.get("/v1/agent-usage", async () => svc.agentUsage());
   // #56 — presets editáveis/persistidos; `available` = comando no PATH; `builtin` = veio dos padrões (pode ser editado, e "Restaurar padrões" volta).
   const decorate = (list: PresetInput[]): Preset[] => list.map((p) => ({ ...p, available: onPath(p.command), builtin: DEFAULT_PRESET_IDS.has(p.id) }));
@@ -112,6 +107,13 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
   // #55 — configurações do runtime (persistidas; valem para todos os clientes desta máquina)
   app.get("/v1/settings", async () => svc.settings());
   app.patch("/v1/settings", async (req, reply) => { const b = body<PatchRuntimeSettings>(PatchRuntimeSettings, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.patchSettings(b)); });
+  // #57 skills · #38 provedores · #57 contas
+  app.get("/v1/skills", async () => svc.listSkills());
+  app.post("/v1/skills", async (req, reply) => { const b = body<CreateSkill>(CreateSkill, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.createSkill(b), 201); });
+  app.patch<{ Params: { id: string } }>("/v1/skills/:id", async (req, reply) => { const b = body<PatchSkill>(PatchSkill, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.patchSkill(req.params.id, b)); });
+  app.delete<{ Params: { id: string } }>("/v1/skills/:id", async (req, reply) => send(reply, svc.deleteSkill(req.params.id), 204));
+  app.get("/v1/providers", async () => svc.providers());
+  app.get("/v1/accounts", async () => svc.accounts());
   app.get("/v1/roles", async () => svc.listRoles());
   app.post("/v1/roles", async (req, reply) => { const b = body<CreateRole>(CreateRole, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.createRole(b), 201); });
   app.patch<{ Params: { id: string } }>("/v1/roles/:id", async (req, reply) => { const b = body<PatchRole>(PatchRole, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.patchRole(req.params.id, b)); });
