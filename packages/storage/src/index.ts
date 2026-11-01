@@ -59,6 +59,8 @@ const MIGRATIONS: string[] = [
    ALTER TABLE workspaces ADD COLUMN status_text TEXT;`,
   `ALTER TABLE drawings ADD COLUMN group_id TEXT;`,
   `ALTER TABLE sessions ADD COLUMN resume_id TEXT;`, // id de sessão do CLI de IA, para retomar após reboot
+  `ALTER TABLE nodes ADD COLUMN icon TEXT;
+   ALTER TABLE nodes ADD COLUMN term_theme TEXT;`, // #56 aparência do terminal (preset / edição no nó)
 ];
 type DrwRow = { drawing_id: string; workspace_id: string; kind: Drawing["kind"]; points: string; color: string; width: number; created_at: string; group_id: string | null };
 const drwFrom = (r: DrwRow): Drawing => ({ drawingId: r.drawing_id, workspaceId: r.workspace_id, kind: r.kind, points: JSON.parse(r.points) as Drawing["points"], color: r.color, width: r.width, createdAt: r.created_at, ...(r.group_id ? { groupId: r.group_id } : {}) });
@@ -72,7 +74,7 @@ type ChatRow = { chat_id: string; workspace_id: string; node_id: string; thread:
 const chatFrom = (r: ChatRow): ChatMessage => ({ chatId: r.chat_id, workspaceId: r.workspace_id, nodeId: r.node_id, thread: r.thread, role: r.role, text: r.text, createdAt: r.created_at });
 type FolderRow = { folder_id: string; name: string; kind: Folder["kind"]; parent_id: string | null; sort_order: number; collapsed: number; created_at: string };
 const folderFrom = (r: FolderRow): Folder => ({ folderId: r.folder_id, name: r.name, kind: r.kind, sortOrder: r.sort_order, collapsed: r.collapsed === 1, createdAt: r.created_at, ...(r.parent_id ? { parentId: r.parent_id } : {}) });
-type NodeRow = { node_id: string; workspace_id: string; kind: Node["kind"]; title: string; x: number; y: number; w: number; h: number; session_id: string | null; content: string | null; created_at: string; role_id: string | null; locked: number; color: string | null; file_path: string | null; title_auto: number };
+type NodeRow = { node_id: string; workspace_id: string; kind: Node["kind"]; title: string; x: number; y: number; w: number; h: number; session_id: string | null; content: string | null; created_at: string; role_id: string | null; locked: number; color: string | null; icon: string | null; term_theme: string | null; file_path: string | null; title_auto: number };
 type RoleRow = { role_id: string; name: string; badge: string; instructions: string; created_at: string; updated_at: string };
 const roleFrom = (r: RoleRow): Role => ({ roleId: r.role_id, name: r.name, badge: r.badge, instructions: r.instructions, createdAt: r.created_at, updatedAt: r.updated_at });
 type SessRow = { session_id: string; workspace_id: string; node_id: string; command: string; args: string; cwd: string; state: Session["state"]; pid: number | null; exit_code: number | null; cols: number; rows: number; created_at: string; persistent: number; resume_id: string | null };
@@ -85,6 +87,8 @@ const nodeFrom = (r: NodeRow): Node => ({
   ...(r.role_id ? { roleId: r.role_id } : {}),
   ...(r.locked ? { locked: true } : {}),
   ...(r.color ? { color: r.color } : {}),
+  ...(r.icon ? { icon: r.icon } : {}),
+  ...(r.term_theme ? { termTheme: r.term_theme } : {}),
   ...(r.file_path ? { filePath: r.file_path } : {}),
   ...(r.content !== null ? { content: r.content } : {}),
 });
@@ -193,9 +197,9 @@ export class Store {
     return r ? nodeFrom(r) : undefined;
   }
   insertNode(n: Node, titleAuto = true): void {
-    this.db.prepare("INSERT INTO nodes(node_id,workspace_id,kind,title,x,y,w,h,session_id,content,created_at,role_id,locked,color,file_path,title_auto) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(
+    this.db.prepare("INSERT INTO nodes(node_id,workspace_id,kind,title,x,y,w,h,session_id,content,created_at,role_id,locked,color,file_path,title_auto,icon,term_theme) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(
       n.nodeId, n.workspaceId, n.kind, n.title, n.geometry.x, n.geometry.y, n.geometry.w, n.geometry.h,
-      n.sessionId ?? null, n.content ?? null, n.createdAt, n.roleId ?? null, n.locked ? 1 : 0, n.color ?? null, n.filePath ?? null, titleAuto ? 1 : 0);
+      n.sessionId ?? null, n.content ?? null, n.createdAt, n.roleId ?? null, n.locked ? 1 : 0, n.color ?? null, n.filePath ?? null, titleAuto ? 1 : 0, n.icon ?? null, n.termTheme ?? null);
   }
   setNodeRole(id: string, roleId: string | null): void { this.db.prepare("UPDATE nodes SET role_id=? WHERE node_id=?").run(roleId, id); }
   // roles
@@ -208,7 +212,7 @@ export class Store {
   }
   deleteRole(id: string): void { this.db.transaction(() => { this.db.prepare("UPDATE nodes SET role_id=NULL WHERE role_id=?").run(id); this.db.prepare("DELETE FROM roles WHERE role_id=?").run(id); })(); }
   nodesWithRole(id: string): Node[] { return (this.db.prepare("SELECT * FROM nodes WHERE role_id=?").all(id) as NodeRow[]).map(nodeFrom); }
-  updateNode(id: string, patch: { title?: string | undefined; geometry?: Node["geometry"] | undefined; content?: string | undefined; sessionId?: string | undefined; locked?: boolean | undefined; color?: string | null | undefined; filePath?: string | undefined; titleAuto?: boolean | undefined }): void {
+  updateNode(id: string, patch: { title?: string | undefined; geometry?: Node["geometry"] | undefined; content?: string | undefined; sessionId?: string | undefined; locked?: boolean | undefined; color?: string | null | undefined; filePath?: string | undefined; titleAuto?: boolean | undefined; icon?: string | null | undefined; termTheme?: string | null | undefined }): void {
     const g = patch.geometry;
     const sets = ["title=COALESCE(?,title)", "x=COALESCE(?,x)", "y=COALESCE(?,y)", "w=COALESCE(?,w)", "h=COALESCE(?,h)", "content=COALESCE(?,content)", "session_id=COALESCE(?,session_id)"];
     const vals: unknown[] = [patch.title ?? null, g?.x ?? null, g?.y ?? null, g?.w ?? null, g?.h ?? null, patch.content ?? null, patch.sessionId ?? null];
@@ -216,6 +220,8 @@ export class Store {
     if (patch.color !== undefined) { sets.push("color=?"); vals.push(patch.color); }
     if (patch.filePath !== undefined) { sets.push("file_path=?"); vals.push(patch.filePath); }
     if (patch.titleAuto !== undefined) { sets.push("title_auto=?"); vals.push(patch.titleAuto ? 1 : 0); }
+    if (patch.icon !== undefined) { sets.push("icon=?"); vals.push(patch.icon); }
+    if (patch.termTheme !== undefined) { sets.push("term_theme=?"); vals.push(patch.termTheme); }
     this.db.prepare(`UPDATE nodes SET ${sets.join(",")} WHERE node_id=?`).run(...vals, id);
   }
   isTitleAuto(id: string): boolean { return ((this.db.prepare("SELECT title_auto t FROM nodes WHERE node_id=?").get(id) as { t: number } | undefined)?.t ?? 0) === 1; }

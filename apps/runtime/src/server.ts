@@ -5,13 +5,14 @@ import type { WebSocket } from "ws";
 import {
   BUILD_VERSION, PROTOCOL_VERSION, SendMessage, Ask, CreateConnection, CreateDrawing, CreateNode, CreateWorkspace, DeleteNode, PatchNode, PatchWorkspace, ApplyLayout, WsClientMessage,
   type Capabilities, type WsServerMessage, type ApiError,
- CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, FsOp, PatchRuntimeSettings } from "@messai/contracts";
+ CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, FsOp, PatchRuntimeSettings, PutPresets, type PresetInput, type Preset } from "@messai/contracts";
 import type { Result } from "@messai/domain";
 import { newId, type Config } from "./config.js";
 import { accessSync, constants } from "node:fs";
 import { delimiter, join as joinPath } from "node:path";
 import type { WorkspaceService } from "./service.js";
 import { SessionManager } from "./sessions.js";
+import { DEFAULT_PRESET_IDS } from "./presets.js";
 
 const STATUS: Record<ApiError["code"], number> = {
   UNAUTHORIZED: 401, FORBIDDEN: 403, NOT_FOUND: 404, CONFLICT: 409, INVALID: 400,
@@ -58,21 +59,17 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
     protocolVersion: PROTOCOL_VERSION, machineId: cfg.machineId,
     features: ["workspaces", "folders", "sidebar", "files", "attachments", "chat", "roles", "notes.file", "notes.lock", "connections.style", "floors", "nodes.tree", ...(SessionManager.tmuxAvailable() ? ["terminal.tmux"] : []), "nodes.terminal", "nodes.note", "connections", "messages", "drawings", "nodes.text", "terminal.lease", "terminal.snapshot", opts.unix ? "agent.socket" : "client.http"],
   }));
-  const AGENT_HINT = "Você está rodando dentro de um nó terminal do MessAI, um workspace visual para agentes. Outros nós (notas, terminais) podem estar conectados ao seu. Use o comando `mess context` para ver o espaço, seu nó e o conteúdo das notas conectadas; `mess note read <id|título>`, `mess note write <título> <texto>` (cria nota ligada a você), `mess connect <nodeId>`, `mess nodes`. Para falar com outro agente conectado: `mess peers` lista quem está ligado a você, `mess ask <nome> 'pergunta'` envia (chega como mensagem no terminal dele), `mess reply <id> 'texto'` responde, `mess inbox` mostra mensagens recebidas. Chat: quando uma mensagem do usuário vier marcada com [MessAI chat], responda também com `mess say 'sua resposta em Markdown'` (aparece em balões na tela); `mess chat` mostra o histórico do chat. Quando o usuário mencionar 'a nota conectada' ou 'a nota ligada', leia com `mess context`.";
-  const PRESETS = [
-    { id: "shell", label: "Shell", command: cfg.defaultShell, args: [] as string[] },
-    { id: "claude", label: "Claude Code", command: "claude", args: ["--append-system-prompt", AGENT_HINT] },
-    { id: "codex", label: "Codex", command: "codex", args: [] as string[] },
-    { id: "opencode", label: "OpenCode", command: "opencode", args: [] as string[] },
-    { id: "antigravity", label: "Antigravity", command: "agy", args: [] as string[] }, // o binário é `agy`
-  ];
   const onPath = (cmd: string): boolean => {
     if (cmd.includes("/")) { try { accessSync(cmd, constants.X_OK); return true; } catch { return false; } }
     for (const dir of (process.env["PATH"] ?? "").split(delimiter)) { try { accessSync(joinPath(dir, cmd), constants.X_OK); return true; } catch { /* próximo */ } }
     return false;
   };
   app.get("/v1/agent-usage", async () => svc.agentUsage());
-  app.get("/v1/presets", async () => PRESETS.map((p) => ({ ...p, available: onPath(p.command) })));
+  // #56 — presets editáveis/persistidos; `available` = comando no PATH; `builtin` = veio dos padrões (pode ser editado, e "Restaurar padrões" volta).
+  const decorate = (list: PresetInput[]): Preset[] => list.map((p) => ({ ...p, available: onPath(p.command), builtin: DEFAULT_PRESET_IDS.has(p.id) }));
+  app.get("/v1/presets", async () => decorate(svc.presetDefs()));
+  app.put("/v1/presets", async (req, reply) => { const b = body<PutPresets>(PutPresets, req.body); if ("code" in b) return invalid(reply, b); const r = svc.putPresets(b.presets); return r.ok ? decorate(r.value) : send(reply, r); });
+  app.post("/v1/presets/reset", async () => decorate(svc.resetPresets()));
   app.get("/v1/machine", async () => ({ machineId: cfg.machineId, name: cfg.machineName, platform: cfg.platform, protocolVersion: PROTOCOL_VERSION }));
 
   const body = <T>(schema: Parameters<typeof Value.Check>[0], v: unknown): T | ApiError =>

@@ -71,9 +71,17 @@ export const Node = Type.Object({
   filePath: Type.Optional(Type.String()),
   locked: Type.Optional(Type.Boolean()),
   color: Type.Optional(Type.String()),
+  // terminal (#56): ícone e tema do xterm escolhidos no preset ou editados no nó; `color` também vale para terminal
+  icon: Type.Optional(Type.String()),
+  termTheme: Type.Optional(Type.String()),
   createdAt: Type.String(),
 });
 export type Node = Static<typeof Node>;
+// #56 — tema do xterm de um terminal (system = segue o tema do app) e alvo do preset (terminal ou chat aberto)
+export const TermTheme = Type.Union([Type.Literal("system"), Type.Literal("dark"), Type.Literal("light"), Type.Literal("custom")]);
+export type TermTheme = Static<typeof TermTheme>;
+export const PresetTarget = Type.Union([Type.Literal("terminal"), Type.Literal("chat")]);
+export type PresetTarget = Static<typeof PresetTarget>;
 
 export const Workspace = Type.Object({
   workspaceId: Id,
@@ -329,7 +337,10 @@ export const CreateNode = Type.Object({
   persistent: Type.Optional(Type.Boolean()),
   // só para nota: vincular um .md/.txt existente (fica no lugar) e cor
   filePath: Type.Optional(Type.String({ minLength: 1 })),
-  color: Type.Optional(Type.String()),
+  color: Type.Optional(Type.String()), // nota ou terminal
+  // terminal (#56): aparência vinda do preset
+  icon: Type.Optional(Type.String({ maxLength: 40 })),
+  termTheme: Type.Optional(TermTheme),
 });
 export type CreateNode = Static<typeof CreateNode>;
 
@@ -345,6 +356,9 @@ export const PatchNode = Type.Object({
   color: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   /** "Mover para…": novo caminho completo do .md; o arquivo é movido. */
   filePath: Type.Optional(Type.String({ minLength: 1 })),
+  // terminal (#56): aparência editável no nó (null limpa)
+  icon: Type.Optional(Type.Union([Type.String({ maxLength: 40 }), Type.Null()])),
+  termTheme: Type.Optional(Type.Union([TermTheme, Type.Null()])),
 });
 export type PatchNode = Static<typeof PatchNode>;
 
@@ -420,8 +434,24 @@ export type FsOp = Static<typeof FsOp>;
 export const SearchHit = Type.Object({ path: Type.String(), line: Type.Optional(Type.Integer()), text: Type.Optional(Type.String()) });
 export type SearchHit = Static<typeof SearchHit>;
 
-export const Preset = Type.Object({ id: Type.String(), label: Type.String(), command: Type.String(), args: Type.Array(Type.String()), available: Type.Boolean() });
+// #56 — presets de Início rápido: editáveis e persistidos no runtime. `theme` é o tema do xterm do terminal criado.
+export const PresetInput = Type.Object({
+  id: Type.String({ minLength: 1, maxLength: 40, pattern: "^[a-z0-9][a-z0-9-]*$" }),
+  label: Type.String({ minLength: 1, maxLength: 60 }),
+  command: Type.String({ minLength: 1, maxLength: 300 }),
+  args: Type.Array(Type.String({ maxLength: 4000 }), { maxItems: 50 }),
+  enabled: Type.Boolean(),
+  icon: Type.String({ maxLength: 40 }), // "" = ícone do agente deduzido pelo comando
+  color: Type.String({ maxLength: 12 }), // "" = sem cor
+  maestro: Type.Boolean(), // promove o terminal a condutor (#29) — só guardado por enquanto
+  target: PresetTarget,
+  theme: TermTheme,
+});
+export type PresetInput = Static<typeof PresetInput>;
+export const Preset = Type.Object({ ...PresetInput.properties, available: Type.Boolean(), builtin: Type.Boolean() });
 export type Preset = Static<typeof Preset>;
+export const PutPresets = Type.Object({ presets: Type.Array(PresetInput, { maxItems: 20 }) });
+export type PutPresets = Static<typeof PutPresets>;
 
 // ---------- Variáveis injetadas em terminais (ADR-0008) ----------
 export const AGENT_ENV = {

@@ -1,5 +1,6 @@
 import { AGENT_ENV, type TreeEntry, type FileContent, type FsOp, type SearchHit, type CreateFloor, type LandFloor, type LandResult, type Role, type CreateRole, type PatchRole, type ChatMessage, type SendChat, type Attachment, type CreateAttachment, type FileEntry, type Connection, type CreateConnection, type PatchConnection, type CreateDrawing, type PatchDrawing, type GroupDrawings, type CreateFolder, type CreateNode, type Drawing, type Folder, type Message, type PatchFolder, type SendMessage, type Sidebar, type CreateWorkspace, type Node, type PatchNode, type PatchWorkspace, type Session, type Workspace, type WorkspaceSnapshot, type TaskFinished, type TaskSummary } from "@messai/contracts";
-import type { RuntimeSettings, PatchRuntimeSettings } from "@messai/contracts";
+import type { RuntimeSettings, PatchRuntimeSettings, PresetInput } from "@messai/contracts";
+import { defaultPresets, parsePresets, validatePresets, PRESETS_META_KEY } from "./presets.js";
 import { applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, canMessage, checkRevision, formatDelivery, normalizeGeometry, planLocalTerminal, resolveNodeRef, validateNewNode, agentKind, agentResume, stripAnsi, fail, succeed, type Result } from "@messai/domain";
 import { randomUUID } from "node:crypto";
 import { Companion } from "./companion.js";
@@ -592,6 +593,10 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       ...(input.kind === "note" || input.kind === "text" ? { content: input.content ?? "" } : {}),
       ...(input.kind === "tree" ? { content: input.content ?? JSON.stringify({ root: "", mode: "list" }) } : {}),
       ...(input.kind === "terminal" && input.roleId ? { roleId: input.roleId } : {}),
+      // #56 aparência do terminal (vinda do preset)
+      ...(input.kind === "terminal" && input.color ? { color: input.color } : {}),
+      ...(input.kind === "terminal" && input.icon ? { icon: input.icon } : {}),
+      ...(input.kind === "terminal" && input.termTheme && input.termTheme !== "system" ? { termTheme: input.termTheme } : {}),
     };
     if (node.roleId && !this.store.getRole(node.roleId)) return fail("NOT_FOUND", "papel não encontrado");
     let titleAuto = true;
@@ -693,6 +698,15 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     return s.persistent ? wrapInTmux(plan, tmuxSessionName(s.sessionId), { ...inject, PATH: baseEnv["PATH"]! }, this.cfg.tmuxSocket) : plan;
   }
   /** Reinicia o processo de um nó terminal cuja sessão saiu ou se perdeu. Mesmo sessionId. */
+  // #56 — presets de Início rápido (persistidos na meta; padrões como semente).
+  presetDefs(): PresetInput[] { return parsePresets(this.store.getMeta(PRESETS_META_KEY), defaultPresets(this.cfg.defaultShell)); }
+  putPresets(list: PresetInput[]): Result<PresetInput[]> {
+    const v = validatePresets(list); if (!v.ok) return v;
+    this.store.setMeta(PRESETS_META_KEY, JSON.stringify(list));
+    return succeed(list);
+  }
+  resetPresets(): PresetInput[] { const d = defaultPresets(this.cfg.defaultShell); this.store.setMeta(PRESETS_META_KEY, JSON.stringify(d)); return d; }
+
   // #55 — configurações do runtime, persistidas na tabela meta (chave `settings.<nome>`).
   settings(): RuntimeSettings { return { restoreSessions: this.store.getMeta("settings.restoreSessions") !== "0" }; }
   patchSettings(p: PatchRuntimeSettings): Result<RuntimeSettings> {
@@ -961,7 +975,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       }
     }
     this.store.transaction(() => {
-      this.store.updateNode(nodeId, { title, geometry: input.geometry ? normalizeGeometry(input.geometry) : undefined, content: input.content, locked: input.locked, color: input.color, filePath, titleAuto });
+      this.store.updateNode(nodeId, { title, geometry: input.geometry ? normalizeGeometry(input.geometry) : undefined, content: input.content, locked: input.locked, color: input.color, filePath, titleAuto, icon: input.icon, termTheme: input.termTheme === "system" ? null : input.termTheme });
       this.store.bumpRevision(node.workspaceId, rev.value);
     });
     if (node.kind === "note" && input.content !== undefined) this.writeNoteFile(this.store.getNode(nodeId)!, input.content);
