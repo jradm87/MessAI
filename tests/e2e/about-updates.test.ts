@@ -71,4 +71,20 @@ describe("Atualizações (#61) e Sobre (#63)", () => {
     await page.waitForSelector('[data-testid="prefs-pane-opensource"]');
     await page.keyboard.press("Escape");
   }, 30_000);
+
+  it("Código aberto (#60): licença Apache-2.0, lista gerada de terceiros com busca e contagem por licença, componentes de sistema", async () => {
+    await openTab("opensource");
+    await page.waitForSelector('[data-testid="os-table"] [data-testid="os-row"]');
+    expect(await page.locator('[data-testid="prefs-pane-opensource"]').textContent()).toContain("Apache-2.0");
+    const total = await page.locator('[data-testid="os-row"]').count();
+    expect(total).toBeGreaterThan(100);
+    expect(await page.locator('[data-testid="os-counts"]').textContent()).toMatch(/MIT: \d+/);
+    await page.fill('[data-testid="os-search"]', "@xyflow/react"); // casa o pacote e quem depende dele (via)
+    await page.waitForFunction((t) => { const n = document.querySelectorAll('[data-testid="os-row"]').length; return n > 0 && n < t; }, total);
+    const names = await page.locator('[data-testid="os-row"] b').allTextContents();
+    expect(names).toContain("@xyflow/react");
+    expect(await page.locator('[data-testid="os-row"]', { hasText: "@xyflow/react" }).first().textContent()).toContain("MIT");
+    expect(await page.locator('[data-testid="os-system"]').count()).toBeGreaterThanOrEqual(4);
+    await page.keyboard.press("Escape");
+  }, 20_000);
 });

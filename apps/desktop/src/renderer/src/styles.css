@@ -556,3 +556,9 @@ button.danger:hover { border-color: var(--danger); color: var(--danger-fg); }
 .about-desc { min-height: 70px; }
 .about-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; } .about-opts .switch-row { margin: 4px 0; }
 .about-report { margin: 0; max-height: 240px; overflow: auto; font-size: 11px; line-height: 1.4; background: var(--input); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; white-space: pre-wrap; }
+/* ===== #60 Código aberto ===== */
+.os-counts { display: flex; flex-wrap: wrap; gap: 4px; } .os-counts .pa-chip { margin: 0; }
+.os-table { display: flex; flex-direction: column; gap: 2px; max-height: 320px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; padding: 4px; }
+.os-row { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; } .os-row:hover { background: var(--hover); }
+.os-name { flex: 1; min-width: 0; display: flex; flex-direction: column; font-size: 12px; } .os-name small { font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.os-row .pa-chip { margin: 0; } .os-row .tb { width: 24px; height: 24px; }

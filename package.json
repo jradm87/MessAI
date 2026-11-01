@@ -17,7 +17,9 @@
     "test": "vitest run",
     "runtime": "node apps/runtime/dist/index.js",
     "desktop": "npm run dev -w @messai/desktop",
-    "package": "node scripts/package.mjs"
+    "package": "node scripts/package.mjs",
+    "licenses": "node scripts/licenses.mjs",
+    "licenses:check": "node scripts/licenses.mjs --check"
   },
   "devDependencies": {
     "@types/node": "22.10.2",

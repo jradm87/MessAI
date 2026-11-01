@@ -172,3 +172,8 @@ Alpha, and moving fast. The core loop — workspaces, agent terminals, notes, co
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).
+
+## Licença
+
+Apache-2.0 — ver [LICENSE](LICENSE).
+Avisos de terceiros (dependências e licenças, gerados por `npm run licenses`): [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). No app: Preferências → Código aberto.

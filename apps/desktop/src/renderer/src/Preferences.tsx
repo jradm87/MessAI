@@ -8,6 +8,7 @@ import { PrefsAgents, type OpenTerminal } from "./PrefsAgents.js";
 import { PrefsShortcuts } from "./PrefsShortcuts.js";
 import { PrefsUpdates } from "./PrefsUpdates.js";
 import { PrefsAbout } from "./PrefsAbout.js";
+import { PrefsOpenSource } from "./PrefsOpenSource.js";
 import type { AppInfo } from "./diagnostics.js";
 
 /**
@@ -111,7 +112,7 @@ export function Preferences({ api, onClose, onPresetsChanged, workspaceCwd, onRo
     : tab === "remote" ? <Soon issue={59} what="controle remoto e pareamento (depende do hub #28)" />
     : tab === "updates" ? <PrefsUpdates appVersion={appInfo?.version ?? "…"} buildVersion={appInfo?.buildVersion ?? 0} />
     : tab === "data" ? <Soon issue={62} what="local dos dados, uso, backups e apagar" />
-    : tab === "opensource" ? <Soon issue={60} what="avisos de terceiros e licenças" />
+    : tab === "opensource" ? <PrefsOpenSource />
     : <PrefsAbout api={api} appInfo={appInfo} />;
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
