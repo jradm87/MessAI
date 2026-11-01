@@ -18,7 +18,7 @@
 
 ### Fase 1 — Alto impacto / reuso
 - [x] #54 Tema claro/escuro/sistema — `a498555` (visual pendente de conferência humana)
-- [ ] #68 Companheiro (epic) · [x] #65 detectar fim — `6d7fb11` · [ ] #66 resumo via Ollama · [ ] #67 HUD flutuante
+- [ ] #68 Companheiro (epic) · [x] #65 detectar fim — `6d7fb11` · [x] #66 resumo via Ollama — `8393b0a` · [ ] #67 HUD flutuante
 
 ### Fase 2 — Preferências (#64 epic)
 - [ ] #64 shell · #55 Geral · #56 Terminal · #57 Agentes (+#38 Usage) · #58 Atalhos · #61 Atualizações · #62 Dados · #63 Sobre · #60 Código aberto (UI) · #59 stub remoto
@@ -43,12 +43,12 @@
 
 ## Estado atual
 - **Fase atual:** 1 (alto impacto / reuso)
-- **Concluídas:** #90, #40 (Fase 0) · #54 · #65
-- **Em andamento:** #66 (companheiro: resumo + próximo passo via Ollama)
+- **Concluídas:** #90, #40 (Fase 0) · #54 · #65 · #66
+- **Em andamento:** #67 (companheiro: janela flutuante / HUD)
 - **Bloqueadas:** (nenhuma)
-- **Commits (assinados, branch `auto/roadmap`):** `e781477` setup · `df6f553` #90 · `01f125c` progress · `a498555` #54 · `09b424f` progress · `6d7fb11` #65
-- **Testes:** 85 verdes (83 + 2 do companheiro)
-- **Próximas:** #66 → #67 (fecha #68) → Fase 2 (#64 Preferências)
+- **Commits (assinados, branch `auto/roadmap`):** `e781477` setup · `df6f553` #90 · `01f125c` progress · `a498555` #54 · `09b424f` progress · `6d7fb11` #65 · `bde3e91` progress · `8393b0a` #66
+- **Testes:** 93 verdes (85 + 7 unit + 1 Ollama real; +1 degradação dentro do companion)
+- **Próximas:** #67 (fecha #68) → Fase 2 (#64 Preferências)
 - **Nota:** shutdown do runtime endurecido (zumbi segurando porta) — achado pelo teste do #65.
 
 ## Log de execução
