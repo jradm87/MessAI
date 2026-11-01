@@ -173,36 +173,32 @@ export function agentKind(command: string, args: string[] = []): AgentKind {
 
 /**
  * Receita de retomada por tipo de agente (para o workspace à prova de reboot).
- * - `startArgs(uuid)`: argumentos a injetar no PRIMEIRO start, quando o CLI deixa fixar o id (claude).
- * - `resume(id, baseArgs)`: comando/args para RETOMAR a conversa por id.
- * - `capture`: quando o CLI NÃO deixa fixar o id, onde achar o id que ele criou (subdir do $HOME + regex no nome do arquivo).
- * Sem receita (ou sem id capturado) → o restore reabre limpo (seguro: nunca retoma conversa errada).
+ * - `startArgs(uuid)`: argumentos a injetar no PRIMEIRO start, quando o CLI deixa FIXAR o id (só claude).
+ * - `resume(id, baseArgs)`: comando/args para RETOMAR no restore. Claude com id → retomada determinística
+ *   (`--resume <uuid>`); sem id (ou CLIs que não deixam fixar id) → "continuar a última conversa" do CLI,
+ *   que no restore é a sessão que acabou de cair. Retorna null quando não dá → reabre limpo.
+ *
+ * Nota: a captura do id pelo store de cada CLI foi abandonada no v1 — frágil (layout/tempo variam por
+ * CLI e versão). O "continuar a última" é robusto; o porém é colisão se houver VÁRIOS agentes do mesmo
+ * tipo na MESMA pasta (pega a última). Para um de cada por pasta — o caso comum — resolve.
  */
 export type ResumeRecipe = {
   startArgs?: (uuid: string) => string[];
-  resume?: (id: string, baseArgs: string[]) => { command: string; args: string[] };
-  capture?: { dir: string; re: RegExp };
+  resume?: (id: string | null, baseArgs: string[]) => { command: string; args: string[] } | null;
 };
-const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 export function agentResume(agentType: string): ResumeRecipe {
   switch (agentType) {
-    case "claudeCode": // determinístico: fixa o id no start, retoma por ele
+    case "claudeCode": // id fixado no start → retoma determinístico; sem id (ex.: criado numa versão antiga) → --continue da pasta
       return {
         startArgs: (uuid) => ["--session-id", uuid],
-        resume: (id, base) => ({ command: "claude", args: [...stripFlag(base, "--session-id"), "--resume", id] }),
+        resume: (id, base) => ({ command: "claude", args: [...stripFlag(base, "--session-id"), ...(id ? ["--resume", id] : ["--continue"])] }),
       };
-    case "codex": // id não fixável no start; capturado do rollout em ~/.codex/sessions
-      return {
-        resume: (id) => ({ command: "codex", args: ["resume", id] }),
-        capture: { dir: ".codex/sessions", re: new RegExp(`(${UUID})\\.jsonl$`) },
-      };
-    case "openCode": // id "ses_…" capturado do store do opencode
-      return {
-        resume: (id, base) => ({ command: "opencode", args: ["--session", id, ...base] }),
-        capture: { dir: ".local/share/opencode/storage", re: /\b(ses_[A-Za-z0-9]+)\.json$/ },
-      };
-    case "antigravityCLI": // agy: retoma por --conversation; captura do store ainda a confirmar (v1 reabre limpo)
-      return { resume: (id, base) => ({ command: "agy", args: ["--conversation", id, ...base] }) };
+    case "codex":
+      return { resume: () => ({ command: "codex", args: ["resume", "--last"] }) };
+    case "openCode":
+      return { resume: (_id, base) => ({ command: "opencode", args: ["--continue", ...base] }) };
+    case "antigravityCLI":
+      return { resume: (_id, base) => ({ command: "agy", args: ["--continue", ...base] }) };
     default:
       return {};
   }

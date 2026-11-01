@@ -113,19 +113,19 @@ describe("agentKind", () => {
 });
 
 describe("agentResume", () => {
-  it("claude fixa o id no start e retoma por ele (troca --session-id por --resume)", () => {
+  it("claude: com id → --resume determinístico (troca --session-id); sem id → --continue da pasta", () => {
     const r = agentResume("claudeCode");
     expect(r.startArgs!("abc-123")).toEqual(["--session-id", "abc-123"]);
-    const resumed = r.resume!("abc-123", ["--append-system-prompt", "x", "--session-id", "abc-123"]);
-    expect(resumed.command).toBe("claude");
-    expect(resumed.args).toEqual(["--append-system-prompt", "x", "--resume", "abc-123"]); // --session-id removido
+    expect(r.resume!("abc-123", ["--append-system-prompt", "x", "--session-id", "abc-123"]))
+      .toEqual({ command: "claude", args: ["--append-system-prompt", "x", "--resume", "abc-123"] });
+    expect(r.resume!(null, ["--append-system-prompt", "x"]))
+      .toEqual({ command: "claude", args: ["--append-system-prompt", "x", "--continue"] });
   });
-  it("codex/opencode/agy retomam por id; sem startArgs (id é capturado)", () => {
+  it("codex/opencode/agy: continuam a última (sem id, sem startArgs)", () => {
     expect(agentResume("codex").startArgs).toBeUndefined();
-    expect(agentResume("codex").resume!("uuid", [])).toEqual({ command: "codex", args: ["resume", "uuid"] });
-    expect(agentResume("openCode").resume!("ses_1", [])).toEqual({ command: "opencode", args: ["--session", "ses_1"] });
-    expect(agentResume("antigravityCLI").resume!("cid", [])).toEqual({ command: "agy", args: ["--conversation", "cid"] });
-    expect(agentResume("codex").capture?.dir).toBe(".codex/sessions");
+    expect(agentResume("codex").resume!(null, [])).toEqual({ command: "codex", args: ["resume", "--last"] });
+    expect(agentResume("openCode").resume!(null, [])).toEqual({ command: "opencode", args: ["--continue"] });
+    expect(agentResume("antigravityCLI").resume!(null, [])).toEqual({ command: "agy", args: ["--continue"] });
   });
   it("shell não tem retomada", () => {
     expect(agentResume("genericShell").resume).toBeUndefined();

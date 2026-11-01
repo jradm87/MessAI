@@ -60,24 +60,6 @@ async function fetchClaudeLimits(): Promise<{ plan?: string; limits: AgentUsageL
   } catch { return null; }
 }
 
-/** Coleta ids (grupo 1 do regex no nome do arquivo) sob `root`, recursivo e raso; opcionalmente só mtime ≥ since. */
-function scanIds(root: string, re: RegExp, since = 0, depth = 5): Set<string> {
-  const ids = new Set<string>();
-  const walk = (dir: string, d: number) => {
-    let entries: ReturnType<typeof readdirSync>;
-    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
-    for (const e of entries) {
-      const p = join(dir, e.name);
-      if (e.isDirectory()) { if (d > 0) walk(p, d - 1); continue; }
-      const m = re.exec(e.name); if (!m?.[1]) continue;
-      if (since) { try { if (statSync(p).mtimeMs < since) continue; } catch { continue; } }
-      ids.add(m[1]);
-    }
-  };
-  walk(root, depth);
-  return ids;
-}
-
 export class WorkspaceService extends EventEmitter<ServiceEvents> {
   constructor(private readonly cfg: Config, private readonly store: Store, readonly sessions: SessionManager) { super(); }
 
@@ -601,7 +583,6 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       node.sessionId = base.sessionId;
       this.store.transaction(() => { this.store.insertNode(node); this.store.insertSession(base); this.store.bumpRevision(workspaceId, rev.value); });
       session = this.sessions.start(base, this.plan(w, node, base));
-      if (k.isAgent && !resumeId && recipe.capture) void this.captureResumeId(base.sessionId, recipe.capture, Date.now());
     } else {
       this.store.transaction(() => { this.store.insertNode(node, titleAuto); this.store.bumpRevision(workspaceId, rev.value); });
       if (node.kind === "note" && node.filePath && !input.filePath) this.writeNoteFile(node, node.content ?? "");
@@ -685,24 +666,15 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     return { reattached, respawned, lost };
   }
 
-  /** Monta a sessão para RE-SUBIR: agente com id → comando de retomada; senão, o comando original (limpo). */
+  /**
+   * Monta a sessão para RE-SUBIR no restore. Agente → comando de retomada do CLI (claude com id guardado
+   * retoma determinístico; os demais "continuam a última"); shell → o comando original (reabre limpo).
+   */
   private resumeSession(s: Session): Session {
     const k = agentKind(s.command, s.args);
-    if (!k.isAgent || !s.resumeId) return s;
-    const r = agentResume(k.agentType).resume?.(s.resumeId, s.args);
+    if (!k.isAgent) return s;
+    const r = agentResume(k.agentType).resume?.(s.resumeId ?? null, s.args);
     return r ? { ...s, command: r.command, args: r.args } : s;
-  }
-
-  /** Captura (async) o id que um CLI de IA criou no seu store, para retomar depois do reboot. */
-  private async captureResumeId(sessionId: string, cap: { dir: string; re: RegExp }, since: number): Promise<void> {
-    const root = join(homedir(), cap.dir);
-    const before = scanIds(root, cap.re);
-    for (let i = 0; i < 24; i++) { // ~12s de janela
-      await new Promise((r) => setTimeout(r, 500));
-      if (!this.store.getSession(sessionId)) return; // nó removido no meio
-      const fresh = [...scanIds(root, cap.re, since)].find((id) => !before.has(id));
-      if (fresh) { this.store.setSessionResume(sessionId, fresh); return; }
-    }
   }
 
   restartTerminal(nodeId: string): Result<Session> {
