@@ -1,5 +1,5 @@
 import { AGENT_ENV, type TreeEntry, type FileContent, type FsOp, type SearchHit, type CreateFloor, type LandFloor, type LandResult, type Role, type CreateRole, type PatchRole, type ChatMessage, type SendChat, type Attachment, type CreateAttachment, type FileEntry, type Connection, type CreateConnection, type PatchConnection, type CreateDrawing, type PatchDrawing, type GroupDrawings, type CreateFolder, type CreateNode, type Drawing, type Folder, type Message, type PatchFolder, type SendMessage, type Sidebar, type CreateWorkspace, type Node, type PatchNode, type PatchWorkspace, type Session, type Workspace, type WorkspaceSnapshot, type TaskFinished, type TaskSummary } from "@messai/contracts";
-import type { RuntimeSettings, PatchRuntimeSettings, PresetInput, Skill, CreateSkill, PatchSkill } from "@messai/contracts";
+import type { RuntimeSettings, PatchRuntimeSettings, PresetInput, Skill, CreateSkill, PatchSkill, FindHit, FindKind } from "@messai/contracts";
 import { listProviders } from "./providers.js";
 import { probeAccounts } from "./accounts.js";
 import { backupName, copyBackupFiles, dataStats, isBackupName, listBackups, validateBackup, validateMoveTarget, writeManifest, type BackupEntry } from "./data.js";
@@ -270,6 +270,11 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     this.publish(node.workspaceId);
     return succeed(updated);
   }
+  // ---- #41 busca de texto (notas/textos e chats) ----
+  findText(q: string, opt: { workspaceId?: string | undefined; kinds?: FindKind[] | undefined; limit?: number | undefined } = {}): FindHit[] {
+    return this.store.search(q, opt).map((r) => ({ kind: r.kind, refId: r.refId, workspaceId: r.workspaceId, nodeId: r.nodeId, nodeTitle: this.store.getNode(r.nodeId)?.title ?? "", title: r.title, snippet: r.snippet }));
+  }
+
   // ---- #62 dados ----
   dataInfo() { const st = dataStats(this.cfg.dataDir, this.cfg.dataDirSource); return { ...st, counts: this.store.counts(), backups: listBackups(st.backupsDir) }; }
   /** Backup consistente: VACUUM INTO (banco) + notas/provedores/identidade + manifesto. Destino padrão <dataDir>/backups. */

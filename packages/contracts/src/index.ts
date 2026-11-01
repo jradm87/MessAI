@@ -447,6 +447,11 @@ export const FsOp = Type.Object({ op: Type.Union([Type.Literal("mkdir"), Type.Li
 export type FsOp = Static<typeof FsOp>;
 export const SearchHit = Type.Object({ path: Type.String(), line: Type.Optional(Type.Integer()), text: Type.Optional(Type.String()) });
 export type SearchHit = Static<typeof SearchHit>;
+// #41 — busca de texto (FTS5) em notas/textos e chats: GET /v1/find?q=&workspaceId=&kinds=note,chat
+export const FindKind = Type.Union([Type.Literal("note"), Type.Literal("chat")]);
+export type FindKind = Static<typeof FindKind>;
+export const FindHit = Type.Object({ kind: FindKind, refId: Id, workspaceId: Id, nodeId: Id, nodeTitle: Type.String(), title: Type.String(), snippet: Type.String() });
+export type FindHit = Static<typeof FindHit>;
 
 // #56 — presets de Início rápido: editáveis e persistidos no runtime. `theme` é o tema do xterm do terminal criado.
 export const PresetInput = Type.Object({

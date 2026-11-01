@@ -61,6 +61,20 @@ const MIGRATIONS: string[] = [
   `ALTER TABLE sessions ADD COLUMN resume_id TEXT;`, // id de sessão do CLI de IA, para retomar após reboot
   `ALTER TABLE nodes ADD COLUMN icon TEXT;
    ALTER TABLE nodes ADD COLUMN term_theme TEXT;`, // #56 aparência do terminal (preset / edição no nó)
+  // #41 — busca de texto (FTS5): notas/textos (título+corpo) e chats; mantida por TRIGGERS, então nenhum caminho de código precisa lembrar de indexar.
+  `CREATE VIRTUAL TABLE IF NOT EXISTS search USING fts5(kind UNINDEXED, ref_id UNINDEXED, workspace_id UNINDEXED, node_id UNINDEXED, title, body, tokenize='unicode61 remove_diacritics 2');
+   INSERT INTO search(kind, ref_id, workspace_id, node_id, title, body) SELECT 'note', node_id, workspace_id, node_id, title, COALESCE(content,'') FROM nodes WHERE kind IN ('note','text');
+   INSERT INTO search(kind, ref_id, workspace_id, node_id, title, body) SELECT 'chat', chat_id, workspace_id, node_id, '', text FROM chats WHERE role <> 'system';
+   CREATE TRIGGER IF NOT EXISTS search_node_ai AFTER INSERT ON nodes WHEN new.kind IN ('note','text') BEGIN
+     INSERT INTO search(kind, ref_id, workspace_id, node_id, title, body) VALUES ('note', new.node_id, new.workspace_id, new.node_id, new.title, COALESCE(new.content,'')); END;
+   CREATE TRIGGER IF NOT EXISTS search_node_au AFTER UPDATE OF title, content ON nodes WHEN new.kind IN ('note','text') BEGIN
+     DELETE FROM search WHERE kind='note' AND ref_id=new.node_id;
+     INSERT INTO search(kind, ref_id, workspace_id, node_id, title, body) VALUES ('note', new.node_id, new.workspace_id, new.node_id, new.title, COALESCE(new.content,'')); END;
+   CREATE TRIGGER IF NOT EXISTS search_node_ad AFTER DELETE ON nodes BEGIN
+     DELETE FROM search WHERE kind='note' AND ref_id=old.node_id; DELETE FROM search WHERE kind='chat' AND node_id=old.node_id; END;
+   CREATE TRIGGER IF NOT EXISTS search_chat_ai AFTER INSERT ON chats WHEN new.role <> 'system' BEGIN
+     INSERT INTO search(kind, ref_id, workspace_id, node_id, title, body) VALUES ('chat', new.chat_id, new.workspace_id, new.node_id, '', new.text); END;
+   CREATE TRIGGER IF NOT EXISTS search_chat_ad AFTER DELETE ON chats BEGIN DELETE FROM search WHERE kind='chat' AND ref_id=old.chat_id; END;`,
   `CREATE TABLE IF NOT EXISTS skills (
      skill_id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', instructions TEXT NOT NULL DEFAULT '',
      created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
@@ -109,6 +123,14 @@ const sessFrom = (r: SessRow): Session => ({
   ...(r.resume_id ? { resumeId: r.resume_id } : {}),
 });
 
+/** #41 Texto livre → consulta FTS5 segura: cada token vira frase entre aspas com prefixo (AND implícito); operadores do usuário são neutralizados. */
+export function ftsQuery(q: string): string | null {
+  const toks = q.normalize("NFKC").split(/\s+/).map((t) => t.replace(/["*()^:{}]/g, "")).filter((t) => t.length > 0);
+  return toks.length ? toks.map((t) => `"${t}"*`).join(" ") : null;
+}
+export type SearchKind = "note" | "chat";
+export type SearchRow = { kind: SearchKind; refId: string; workspaceId: string; nodeId: string; title: string; snippet: string; rank: number };
+
 export class Store {
   readonly db: Database.Database;
   constructor(path: string) {
@@ -127,6 +149,15 @@ export class Store {
     }
   }
   close(): void { this.db.close(); }
+  /** #41 Busca FTS5 em notas/textos e chats; ordena por relevância (título pesa 2×). Consulta malformada → []. */
+  search(q: string, opt: { workspaceId?: string | undefined; kinds?: SearchKind[] | undefined; limit?: number | undefined } = {}): SearchRow[] {
+    const m = ftsQuery(q); if (!m) return [];
+    const where = ["search MATCH ?"]; const args: unknown[] = [m];
+    if (opt.workspaceId) { where.push("workspace_id = ?"); args.push(opt.workspaceId); }
+    if (opt.kinds?.length) { where.push(`kind IN (${opt.kinds.map(() => "?").join(",")})`); args.push(...opt.kinds); }
+    const sql = `SELECT kind, ref_id refId, workspace_id workspaceId, node_id nodeId, title, CASE WHEN body <> '' THEN snippet(search, 5, '[', ']', '…', 14) ELSE title END snippet, bm25(search, 0, 0, 0, 0, 2.0, 1.0) rank FROM search WHERE ${where.join(" AND ")} ORDER BY rank LIMIT ?`;
+    try { return this.db.prepare(sql).all(...args, Math.max(1, Math.min(200, opt.limit ?? 50))) as SearchRow[]; } catch { return []; }
+  }
   /** #62 Cópia consistente do banco (VACUUM INTO): funciona com o runtime vivo e em WAL. O destino não pode existir. */
   backupTo(path: string): void { this.db.prepare("VACUUM INTO ?").run(path); }
   /** #62 Contagens para o manifesto do backup. */

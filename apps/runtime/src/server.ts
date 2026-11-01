@@ -57,7 +57,7 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
   });
   app.get("/v1/capabilities", async (): Promise<Capabilities> => ({
     protocolVersion: PROTOCOL_VERSION, machineId: cfg.machineId,
-    features: ["workspaces", "folders", "sidebar", "files", "attachments", "chat", "roles", "notes.file", "notes.lock", "connections.style", "floors", "nodes.tree", ...(SessionManager.tmuxAvailable() ? ["terminal.tmux"] : []), "nodes.terminal", "nodes.note", "connections", "messages", "drawings", "nodes.text", "terminal.lease", "terminal.snapshot", opts.unix ? "agent.socket" : "client.http"],
+    features: ["workspaces", "folders", "sidebar", "files", "attachments", "chat", "roles", "notes.file", "notes.lock", "connections.style", "floors", "nodes.tree", "search.fts5", ...(SessionManager.tmuxAvailable() ? ["terminal.tmux"] : []), "nodes.terminal", "nodes.note", "connections", "messages", "drawings", "nodes.text", "terminal.lease", "terminal.snapshot", opts.unix ? "agent.socket" : "client.http"],
   }));
   const onPath = (cmd: string): boolean => whichOnPath(cmd) !== null;
   app.get("/v1/agent-usage", async () => svc.agentUsage());
@@ -105,6 +105,11 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
   });
 
   // papéis (responsabilidades)
+  // #41 — busca de texto FTS5 (notas/textos e chats); kinds=note,chat; limit ≤ 200
+  app.get<{ Querystring: { q?: string; workspaceId?: string; kinds?: string; limit?: string } }>("/v1/find", async (req) => {
+    const kinds = (req.query.kinds ?? "").split(",").filter((k): k is "note" | "chat" => k === "note" || k === "chat");
+    return svc.findText(req.query.q ?? "", { workspaceId: req.query.workspaceId || undefined, kinds: kinds.length ? kinds : undefined, limit: req.query.limit ? Number(req.query.limit) : undefined });
+  });
   // #62 — dados: estatísticas, backups, restauração/reset/mover (estas três respondem 202 e o runtime sai; o app sobe outro)
   app.get("/v1/data", async () => svc.dataInfo());
   app.post("/v1/data/backup", async (req, reply) => { const b = body<BackupInput>(BackupInput, req.body ?? {}); if ("code" in b) return invalid(reply, b); return send(reply, svc.createBackup(b.dir), 201); });
