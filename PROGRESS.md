@@ -17,7 +17,7 @@
 - [x] #40 alinhar documentação (koba→messai) — docs em `REA/docs` (NOSSO.md, §6, ADR-0011); repo já limpo
 
 ### Fase 1 — Alto impacto / reuso
-- [ ] #54 Tema claro/escuro/sistema
+- [x] #54 Tema claro/escuro/sistema — `a498555` (visual pendente de conferência humana)
 - [ ] #68 Companheiro (epic) · #65 detectar fim · #66 resumo via Ollama · #67 HUD flutuante
 
 ### Fase 2 — Preferências (#64 epic)
@@ -43,12 +43,12 @@
 
 ## Estado atual
 - **Fase atual:** 1 (alto impacto / reuso)
-- **Concluídas:** #90, #40 (Fase 0 completa)
-- **Em andamento:** #54 (tema claro/escuro/sistema)
+- **Concluídas:** #90, #40 (Fase 0) · #54
+- **Em andamento:** #65 (companheiro: detectar tarefa concluída)
 - **Bloqueadas:** (nenhuma)
-- **Commits (assinados, branch `auto/roadmap`):** `e781477` setup/PROGRESS · `df6f553` #90
-- **Testes:** 79 verdes (78 baseline + 1 regressão #90)
-- **Próximas:** #54 → #68 (#65 → #66 → #67) → Fase 2 (#64 Preferências)
+- **Commits (assinados, branch `auto/roadmap`):** `e781477` setup · `df6f553` #90 · `01f125c` progress · `a498555` #54
+- **Testes:** 83 verdes (79 + 4 do tema)
+- **Próximas:** #65 → #66 → #67 (fecha #68) → Fase 2 (#64 Preferências)
 
 ## Log de execução
 - Setup: branch `auto/roadmap`, assinatura GPG local configurada (Good signature verificada), baseline 78 verdes.
