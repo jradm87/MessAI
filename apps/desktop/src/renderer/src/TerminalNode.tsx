@@ -10,6 +10,7 @@ import "@xterm/xterm/css/xterm.css";
 import type { Session } from "@messai/contracts";
 import type { Api, Stream } from "./api.js";
 import { unreadAtom, attentionAtom } from "./atoms.js";
+import { onTheme, cssVar } from "./theme.js";
 import { EditableTitle } from "./EditableTitle.js";
 import { Composer, type MentionTarget } from "./Composer.js";
 import { ChatLayer } from "./ChatLayer.js";
@@ -33,7 +34,9 @@ export function TerminalNode({ id, data, selected }: NodeProps & { data: Termina
   const attention = useAtomValue(attentionAtom(id));
 
   useEffect(() => {
-    const term = new Terminal({ cursorBlink: true, fontSize: 14, fontFamily: '"JetBrainsMono Nerd Font", "MesloLGS NF", "FiraCode Nerd Font", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, "DejaVu Sans Mono", ui-monospace, monospace', theme: { background: "#0a0a0b" }, scrollback: 2000, allowProposedApi: true });
+    // Tema do xterm vem dos tokens do app (#54): acompanha claro/escuro; re-aplicado quando o tema muda.
+    const xtermTheme = () => ({ background: cssVar("--term-bg") || "#0a0a0b", foreground: cssVar("--term-fg") || "#e4e4e7", cursor: cssVar("--acc") || "#4a9eff", selectionBackground: cssVar("--term-sel") || "rgba(74,158,255,.35)" });
+    const term = new Terminal({ cursorBlink: true, fontSize: 14, fontFamily: '"JetBrainsMono Nerd Font", "MesloLGS NF", "FiraCode Nerd Font", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, "DejaVu Sans Mono", ui-monospace, monospace', theme: xtermTheme(), scrollback: 2000, allowProposedApi: true });
     const fit = new FitAddon();
     const search = new SearchAddon();
     term.loadAddon(new Unicode11Addon());
@@ -49,6 +52,7 @@ export function TerminalNode({ id, data, selected }: NodeProps & { data: Termina
     // demais e o `ls`/prompt saem embaralhados (timestamps repetidos, conteúdo jogado pra direita).
     // O canvas respeita o scale do CSS e mede a célula de forma confiável.
     termRef.current = term;
+    const offTheme = onTheme(() => { term.options.theme = xtermTheme(); });
     let lastSeq = 0;
     let mine = false;
     const sendResize = () => { if (mine) stream.send({ type: "resize", sessionId, cols: term.cols, rows: term.rows }); };
@@ -79,7 +83,7 @@ export function TerminalNode({ id, data, selected }: NodeProps & { data: Termina
     const el = host.current!;
     const focus = () => { if (stateRef.current === "running") stream.send({ type: "acquireLease", sessionId }); data.onFocus(); };
     el.addEventListener("focusin", focus);
-    return () => { ro.disconnect(); onData.dispose(); off(); el.removeEventListener("focusin", focus); stream.detach(sessionId); term.dispose(); };
+    return () => { ro.disconnect(); onData.dispose(); off(); offTheme(); el.removeEventListener("focusin", focus); stream.detach(sessionId); term.dispose(); };
   }, [sessionId, stream]);
 
   const mine = session?.lease?.clientId === stream.clientId;

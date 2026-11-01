@@ -2,7 +2,14 @@
 window.addEventListener("error", (e) => { if (e.message && e.message.includes("ResizeObserver loop")) { e.stopImmediatePropagation(); } });
 import { createRoot } from "react-dom/client";
 import { App } from "./App.js";
+import { initTheme, onTheme, getEffectiveTheme } from "./theme.js";
+import { store, themeAtom } from "./atoms.js";
 import "./styles.css";
+
+// Tema antes do primeiro render (sem flash): aplica `data-theme` já aqui e espelha no átomo para quem reage (xterm).
+initTheme();
+store.set(themeAtom, getEffectiveTheme());
+onTheme((t) => store.set(themeAtom, t));
 
 // Remove o splash estático (index.html) com um fade curto quando o conteúdo React já está pronto.
 const dropSplash = () => { const s = document.getElementById("splash"); if (s) { s.style.opacity = "0"; setTimeout(() => s.remove(), 250); } };

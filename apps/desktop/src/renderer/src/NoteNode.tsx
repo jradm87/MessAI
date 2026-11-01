@@ -25,11 +25,11 @@ export function NoteNode({ data, selected }: NodeProps & { data: NoteData }) {
     return () => clearTimeout(t);
   }, [text]);
   useMermaid(body, [data.content, raw]);
-  const tint = data.color ? { background: `color-mix(in srgb, ${data.color} 14%, #1c1a12)` } : undefined;
+  const tint = data.color ? { background: `color-mix(in srgb, ${data.color} 14%, var(--note))` } : undefined;
   return (
     <div className={`node note ${selected ? "sel" : ""} ${data.locked ? "locked" : ""}`} style={tint}>
       <NodeResizer minWidth={160} minHeight={100} isVisible={selected} />
-      <div className="bar" style={data.color ? { background: `color-mix(in srgb, ${data.color} 28%, #2a2618)` } : undefined}>
+      <div className="bar" style={data.color ? { background: `color-mix(in srgb, ${data.color} 28%, var(--note-bar))` } : undefined}>
         <EditableTitle value={data.title} onSave={data.onRename} editSignal={data.editSignal ?? 0} />
         {data.locked && <Lock size={12} className="mut" />}
         <span className="sp" />
@@ -40,7 +40,7 @@ export function NoteNode({ data, selected }: NodeProps & { data: NoteData }) {
         <button className="ib nodrag" title="Remover" onClick={data.onDelete}>✕</button>
         {colors && (
           <div className="menu color-menu nodrag" onMouseLeave={() => setColors(false)}>
-            <button className={`sw ${!data.color ? "on" : ""}`} style={{ background: "#2a2618" }} title="padrão" onClick={() => { setColors(false); data.onColor(null); }} />
+            <button className={`sw ${!data.color ? "on" : ""}`} style={{ background: "var(--note-bar)" }} title="padrão" onClick={() => { setColors(false); data.onColor(null); }} />
             {WS_COLORS.map((c) => <button key={c} className={`sw ${data.color === c ? "on" : ""}`} style={{ background: c }} title={c} onClick={() => { setColors(false); data.onColor(c); }} />)}
           </div>
         )}

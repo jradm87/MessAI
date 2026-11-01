@@ -6,9 +6,13 @@
     <title>MessAI</title>
     <style>
       /* Splash estático: pinta imediatamente, enquanto o bundle React compila (~alguns segundos no 1º load). */
+      /* Cores do splash seguem o SO (modo Sistema) para não piscar; a preferência forçada (claro/escuro) é aplicada pelo primeiro JS. */
       #splash { position: fixed; inset: 0; z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; background: #0a0a0b; color: #e7e9ee; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; transition: opacity .25s ease; }
       #splash .logo { font-size: 34px; font-weight: 700; letter-spacing: -.03em; }
       #splash .spin { width: 22px; height: 22px; border: 2px solid #2a2c31; border-top-color: #5aa9ff; border-radius: 50%; animation: messspin .8s linear infinite; }
+      @media (prefers-color-scheme: light) { #splash { background: #f5f6f8; color: #1b1f27; } #splash .spin { border-color: #d6dae2; border-top-color: #2f7df6; } }
+      :root[data-theme="light"] #splash { background: #f5f6f8; color: #1b1f27; } :root[data-theme="light"] #splash .spin { border-color: #d6dae2; border-top-color: #2f7df6; }
+      :root[data-theme="dark"] #splash { background: #0a0a0b; color: #e7e9ee; } :root[data-theme="dark"] #splash .spin { border-color: #2a2c31; border-top-color: #5aa9ff; }
       @keyframes messspin { to { transform: rotate(360deg); } }
     </style>
   </head>

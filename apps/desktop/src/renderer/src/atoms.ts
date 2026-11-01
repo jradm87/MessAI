@@ -3,6 +3,8 @@ import { atomFamily, selectAtom } from "jotai/utils";
 
 /** Store padrão do Jotai — para ler/escrever fora de componentes (handlers de stream, atalhos). */
 export const store = getDefaultStore();
+/** Tema efetivo ("light" | "dark"); quem precisa reagir (ex.: xterm) assina este átomo. */
+export const themeAtom = atom<"light" | "dark">("dark");
 
 /**
  * Estado volátil por nó, mantido FORA do rebuild do canvas: sessão e não-lidas.

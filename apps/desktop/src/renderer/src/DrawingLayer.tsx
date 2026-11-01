@@ -142,7 +142,7 @@ export function DrawingLayer({ tool, style, drawings, selected, onSelect, onMove
           })}
           {box && <rect x={box.x + off[0]} y={box.y + off[1]} width={box.w} height={box.h} fill="none" stroke="#5aa9ff" strokeDasharray="5 4" strokeWidth={1} vectorEffect="non-scaling-stroke" pointerEvents="none" />}
           {showHandles && handleDefs.map(([h, cx, cy, cur]) => (
-            <rect key={h} x={cx - hs / 2} y={cy - hs / 2} width={hs} height={hs} fill="#0a0a0b" stroke="#5aa9ff" strokeWidth={1} vectorEffect="non-scaling-stroke"
+            <rect key={h} x={cx - hs / 2} y={cy - hs / 2} width={hs} height={hs} fill="var(--surface)" stroke="#5aa9ff" strokeWidth={1} vectorEffect="non-scaling-stroke"
               style={{ pointerEvents: "all", cursor: cur }} onPointerDown={(e) => handleDown(e, h)} onPointerMove={handleMove} onPointerUp={handleUp} />
           ))}
           {live && <Stroke d={{ drawingId: "live", workspaceId: "", kind: style.kind === "erase" ? "pen" : style.kind, points: live, color: style.color, width: style.width, createdAt: "" }} />}
