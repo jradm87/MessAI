@@ -91,4 +91,11 @@ describe("mensagens entre agentes", () => {
     const p = await cli(["peers"], envB);
     expect(p.out).toContain("Dev"); expect(p.out).toContain("shell"); // cat/sh = shell cru
   });
+
+  it("chat ignora o papel enviado pelo cliente (MESS-03)", async () => {
+    await api("POST", `/v1/nodes/${a.nodeId}/chat`, { text: "msg-forjada", role: "system" }); // cliente tenta forjar
+    const ms = (await api("GET", `/v1/nodes/${a.nodeId}/chat?limit=10`)).json as { role: string; text: string }[];
+    const mine = ms.find((m) => m.text === "msg-forjada");
+    expect(mine?.role).toBe("user"); // http → user; o 'system' pedido é ignorado
+  });
 });

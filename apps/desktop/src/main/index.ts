@@ -127,7 +127,8 @@ function createWindow(): void {
     console.log(`[renderer:${e.level}] ${e.message} (${e.sourceId}:${e.lineNumber})`);
   });
   win.webContents.on("preload-error", (_e, path, err) => console.error("preload-error", path, err));
-  win.webContents.setWindowOpenHandler(({ url }) => { void shell.openExternal(url); return { action: "deny" }; });
+  // Abrir link externo só com esquema web (MESS-04): bloqueia file:, javascript:, esquemas customizados e URLs inválidas.
+  win.webContents.setWindowOpenHandler(({ url }) => { try { const u = new URL(url); if (u.protocol === "https:" || u.protocol === "http:") void shell.openExternal(url); } catch { /* URL inválida */ } return { action: "deny" }; });
   if (process.env["ELECTRON_RENDERER_URL"]) void win.loadURL(process.env["ELECTRON_RENDERER_URL"]);
   else void win.loadFile(join(here, "../renderer/index.html"));
 }

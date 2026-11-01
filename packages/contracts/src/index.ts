@@ -256,7 +256,8 @@ export const ChatRole = Type.Union([Type.Literal("user"), Type.Literal("agent"),
 export type ChatRole = Static<typeof ChatRole>;
 export const ChatMessage = Type.Object({ chatId: Id, workspaceId: Id, nodeId: Id, thread: Type.Integer({ minimum: 1, maximum: 7 }), role: ChatRole, text: Type.String(), createdAt: Type.String() });
 export type ChatMessage = Static<typeof ChatMessage>;
-export const SendChat = Type.Object({ text: Type.String({ minLength: 1 }), thread: Type.Optional(Type.Integer({ minimum: 1, maximum: 7 })), role: Type.Optional(ChatRole) });
+// O papel NÃO vem do cliente (segurança MESS-03): o servidor deriva do canal autenticado (http=user, socket=agent).
+export const SendChat = Type.Object({ text: Type.String({ minLength: 1 }), thread: Type.Optional(Type.Integer({ minimum: 1, maximum: 7 })) });
 export type SendChat = Static<typeof SendChat>;
 
 // ---------- Comandos (HTTP) ----------

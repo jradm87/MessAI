@@ -1,0 +1,30 @@
+name: ci
+
+# Gate de qualidade: build + testes determinísticos em todo push/PR (MESS-06).
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Toolchain para addons nativos
+        run: sudo apt-get update && sudo apt-get install -y build-essential python3 libsecret-1-dev
+      - run: npm ci
+      - name: Build (typecheck)
+        run: npm run build
+      - name: Garantir addons nativos para o Node
+        run: npm rebuild node-pty better-sqlite3
+      - name: Testes determinísticos
+        run: npx vitest run packages apps tests/integration

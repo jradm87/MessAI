@@ -86,7 +86,7 @@ export function Composer(p: ComposerProps) {
   const send = () => {
     const t = text.trim(); if (!t) return;
     const body = expand(t);
-    if (p.chatThread) void p.api.say(p.nodeId, { text: t, thread: p.chatThread, role: "user" }).catch(() => {});
+    if (p.chatThread) void p.api.say(p.nodeId, { text: t, thread: p.chatThread }).catch(() => {});
     p.stream.send({ type: "acquireLease", sessionId: p.sessionId });
     p.stream.send({ type: "input", sessionId: p.sessionId, data: (p.chatThread ? `[MessAI chat t${p.chatThread}] ` : "") + body + "\r" });
     setText(""); setPills([]); setPop(null);

@@ -11,7 +11,7 @@
 ![React Flow](https://img.shields.io/badge/React%20Flow-canvas-ff4785)
 ![SQLite](https://img.shields.io/badge/SQLite-local--first-003b57?logo=sqlite&logoColor=white)
 ![status](https://img.shields.io/badge/status-alpha-orange)
-![license](https://img.shields.io/badge/license-MIT-brightgreen)
+![license](https://img.shields.io/badge/license-Apache--2.0-brightgreen)
 
 </div>
 
@@ -62,7 +62,7 @@ Reusable responsibilities (name, badge, instructions) injected at launch — int
 Terminals run inside their own tmux server by default, so they **survive closing the window and restarting the runtime** — reattached, process and scrollback intact. Optionally install a `systemd --user` unit so the runtime comes back on its own.
 
 ### 🔒 Local-first
-Your data lives in `~/.messai` (SQLite + notes + attachments). The runtime listens only on loopback behind a token, plus a Unix socket for agents. Nothing leaves your machine.
+Your data and orchestration are local by default: workspaces, notes, chat and sessions live in `~/.messai` (SQLite + notes + attachments), and the runtime listens only on loopback behind a token, plus a Unix socket for agents — nothing MessAI stores leaves your machine. Local-first is not the same as offline, though: the agent CLIs you run (Claude, Codex, …) talk to their own providers, and MessAI may make an optional call to check plan limits when it finds local credentials. Those are the only external requests, and they come from the tools, not from your data.
 
 ---
 
@@ -171,4 +171,4 @@ Alpha, and moving fast. The core loop — workspaces, agent terminals, notes, co
 
 ## License
 
-MIT.
+Apache-2.0. See [LICENSE](LICENSE).

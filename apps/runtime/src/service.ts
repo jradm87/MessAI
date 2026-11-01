@@ -268,7 +268,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const node = this.store.getNode(nodeId);
     if (!node) return fail("NOT_FOUND", "nó não encontrado");
     if (node.kind !== "terminal") return fail("INVALID", "chat só existe em terminais");
-    const m: ChatMessage = { chatId: newId(), workspaceId: node.workspaceId, nodeId, thread: input.thread ?? 1, role: input.role ?? defaultRole, text: input.text, createdAt: nowIso() };
+    const m: ChatMessage = { chatId: newId(), workspaceId: node.workspaceId, nodeId, thread: input.thread ?? 1, role: defaultRole, text: input.text, createdAt: nowIso() };
     this.store.insertChat(m);
     this.emit("chat", m);
     return succeed(m);

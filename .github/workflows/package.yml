@@ -21,6 +21,11 @@ jobs:
       - name: Toolchain para addons nativos
         run: sudo apt-get update && sudo apt-get install -y build-essential python3 libsecret-1-dev
       - run: npm ci
+      - name: Build + testes (gate antes de publicar)
+        run: |
+          npm run build
+          npm rebuild node-pty better-sqlite3
+          npx vitest run packages apps tests/integration
       - name: Empacotar e publicar
         run: node scripts/package.mjs --publish
         env:
