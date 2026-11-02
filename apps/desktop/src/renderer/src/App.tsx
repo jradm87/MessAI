@@ -34,6 +34,8 @@ import { setPref, usePref } from "./prefs.js";
 import { ACTION_BY_ID, comboFromEvent, effectiveCombo, sameCombo, type Keymap } from "./keymap.js";
 import { History, plural, type ConnSpec, type DrawingSpec, type NodeSpec, type Op } from "./undo.js";
 import { GroupLayer, type Guides } from "./GroupLayer.js";
+import { Palette, type PaletteAction } from "./Palette.js";
+import type { PaletteItem } from "./palette.js";
 import { useHint, useKeymap } from "./shortcuts.js";
 
 const nodeTypes: NodeTypes = { terminal: TerminalNode as never, note: NoteNode as never, text: TextNode as never, tree: TreeNode as never };
@@ -124,6 +126,7 @@ function Canvas({ conn }: { conn: Connection }) {
   const [preview, setPreview] = useState<string | null>(null);
   const [usage, setUsage] = useState(false);
   const [prefsOpen, setPrefsOpen] = useState(false); // #64 janela de Preferências
+  const [paletteOpen, setPaletteOpen] = useState(false); // #69 paleta global
   const keymap = useKeymap(); const keymapRef = useRef<Keymap>(keymap); keymapRef.current = keymap; // #58 atalhos editáveis
   // #67: estado da janela flutuante do companheiro (vive no processo principal; aqui só espelho + preferência).
   const [hud, setHud] = useState(false);
@@ -367,11 +370,41 @@ function Canvas({ conn }: { conn: Connection }) {
     void rf.fitView({ nodes: [{ id }], padding: 0.5, duration: 200, maxZoom: 1.2 });
   };
   // "Ir ao terminal" vindo do HUD: troca de espaço (se preciso) e seleciona o nó quando ele existir no canvas.
-  useEffect(() => window.messai.onFocusNode?.((t) => {
+  /** Vai a um nó (deste ou de outro espaço): seleciona direto ou troca de espaço e seleciona quando ele aparecer. Usado pelo HUD e pela paleta. */
+  const focusNode = (workspaceId: string, nodeId: string) => {
     setOverview(null);
-    if (flowRef.current.some((n) => n.id === t.nodeId)) { selectNode(t.nodeId); return; } // já está no espaço certo: seleciona direto
-    pendingFocus.current = t.nodeId; setCurrent(t.workspaceId); // senão troca de espaço; o efeito abaixo seleciona quando o nó aparecer
-  }), []); // eslint-disable-line react-hooks/exhaustive-deps
+    if (flowRef.current.some((n) => n.id === nodeId)) { selectNode(nodeId); return; }
+    pendingFocus.current = nodeId; setCurrent(workspaceId);
+  };
+  useEffect(() => window.messai.onFocusNode?.((t) => focusNode(t.workspaceId, t.nodeId)), []); // eslint-disable-line react-hooks/exhaustive-deps
+  // #69 paleta: o que cada item faz
+  const paletteActions: PaletteAction[] = [
+    { id: "terminal.new", label: "Novo terminal", detail: "Ctrl+T", keywords: "criar shell agente" },
+    { id: "note.new", label: "Nova nota", detail: "Ctrl+Shift+D", keywords: "criar markdown" },
+    { id: "ws.new", label: "Novo espaço", detail: "Ctrl+Shift+N", keywords: "workspace projeto" },
+    { id: "prefs", label: "Preferências", detail: "Ctrl+,", keywords: "configurações tema atalhos" },
+    { id: "theme", label: "Alternar tema", keywords: "claro escuro sistema" },
+    { id: "minimap", label: "Alternar minimapa", detail: "Ctrl+Shift+M" },
+    { id: "hud", label: "Janela flutuante do companheiro", keywords: "hud resumo" },
+    { id: "attention.next", label: "Ir ao próximo terminal esperando você", detail: "Ctrl+Shift+A", keywords: "atenção" },
+  ];
+  const onPalettePick = (it: PaletteItem) => {
+    if (it.kind === "workspace" || it.kind === "floor") { if (it.workspaceId) { setOverview(null); setCurrent(it.workspaceId); } return; }
+    if (it.kind === "node" || it.kind === "attention" || it.kind === "content") {
+      if (it.workspaceId && it.nodeId) { focusNode(it.workspaceId, it.nodeId); if (it.kind === "attention") void api.seen(it.nodeId).catch(() => {}); if (it.kind === "content" && it.label.startsWith("chat ·")) setTimeout(() => openChat(it.nodeId!), 450); }
+      return;
+    }
+    switch (it.action) {
+      case "terminal.new": if (current) { const c = viewCenter(); setDialog({ rect: { x: c.x - 320, y: c.y - 190, ...SIZE.terminal } }); } return;
+      case "note.new": if (current) { const c = viewCenter(); createSimple("note", { x: c.x - 130, y: c.y - 80, ...SIZE.note }); } return;
+      case "ws.new": setWsDialog({}); return;
+      case "prefs": setPrefsOpen(true); return;
+      case "theme": setThemePref(nextTheme(getThemePref())); return;
+      case "minimap": setMinimap((v) => !v); return;
+      case "hud": void window.messai.hudToggle?.().then(setHud); return;
+      case "attention.next": { const att = flowRef.current.filter((n) => store.get(attentionAtom(n.id))); if (!att.length) { toast("Nenhum terminal precisa de atenção neste espaço"); return; } const i = att.findIndex((n) => n.selected); selectNode(att[(i + 1) % att.length]!.id); return; }
+    }
+  };
   useEffect(() => {
     const id = pendingFocus.current;
     if (!id || !flow.some((n) => n.id === id)) return;
@@ -575,6 +608,7 @@ function Canvas({ conn }: { conn: Connection }) {
       // #58: cada ação casa pelo keymap (padrão do catálogo ou override do usuário); ações sem `whileTyping` são ignoradas com foco em input/terminal.
       const combo = comboFromEvent(e); const typing = isTyping();
       const is = (id: string) => { const a = ACTION_BY_ID.get(id)!; return !(typing && !a.whileTyping) && sameCombo(effectiveCombo(id, keymapRef.current), combo); };
+      if (is("palette.open")) { e.preventDefault(); setPaletteOpen((v) => !v); return; } // #69 paleta global
       if (is("prefs.toggle")) { e.preventDefault(); setPrefsOpen((v) => !v); return; } // #64 Preferências
       if (is("ws.new")) { e.preventDefault(); setWsDialog({}); return; }
       if (is("sidebar.toggle")) { e.preventDefault(); setSideMini((v) => !v); return; } // dentro do terminal Ctrl+B é o prefixo do tmux
@@ -738,6 +772,7 @@ function Canvas({ conn }: { conn: Connection }) {
         {floorDialog && <FloorDialog ground={floorDialog} onSubmit={(i) => void submitFloor(floorDialog, i)} onClose={() => setFloorDialog(null)} />}
         {overview && groundOf(overview) && <FloorOverview ground={groundOf(overview)!} floors={side.workspaces.filter((w) => w.parentId === overview)} current={current} terminals={side.terminals} api={api}
           onOpen={(id) => { setCurrent(id); setOverview(null); }} onNew={() => { setFloorDialog(groundOf(overview)!); }} onClose={() => setOverview(null)} onChanged={() => void refreshList()} onError={toast} />}
+        {paletteOpen && <Palette api={api} workspaces={side.workspaces} currentId={current} currentNodes={(snap?.nodes ?? []).map((n) => ({ nodeId: n.nodeId, kind: n.kind, title: n.title }))} actions={paletteActions} onClose={() => setPaletteOpen(false)} onPick={onPalettePick} />}
         {prefsOpen && <Preferences api={api} onClose={() => setPrefsOpen(false)} onPresetsChanged={() => void api.presets().then(setPresets).catch(() => {})}
           workspaceCwd={snap?.workspace.cwd ?? ""} onRolesChanged={() => { void loadRoles(); void loadSkills(); }} onOpenUsage={() => { setPrefsOpen(false); setUsage(true); }}
           onOpenTerminal={(t) => { if (!current) { toast("Abra um espaço para criar o terminal de login"); return; } setPrefsOpen(false); createTerminal(freeSpot(snap?.nodes ?? [], SIZE.terminal), { title: t.title, command: t.command }); }} />}

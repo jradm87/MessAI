@@ -9,6 +9,7 @@ export type Keymap = Record<string, Combo | null>; // id → combinação nova, 
 const C = (key: string, mods = ""): Combo => ({ key, ctrl: mods.includes("c"), shift: mods.includes("s"), alt: mods.includes("a") });
 /** Ordem = ordem na tela. `whileTyping`: vale mesmo com foco num input/terminal (os demais são ignorados ao digitar). */
 export const ACTIONS: ActionDef[] = [
+  { id: "palette.open", label: "Busca global / paleta", group: "Aplicativo", combo: C("k", "c"), whileTyping: true },
   { id: "prefs.toggle", label: "Preferências", group: "Aplicativo", combo: C(",", "c"), whileTyping: true },
   { id: "sidebar.toggle", label: "Recolher/expandir barra lateral", group: "Aplicativo", combo: C("b", "c"), note: "No terminal, Ctrl+B é o prefixo do tmux" },
   { id: "minimap.toggle", label: "Minimapa", group: "Aplicativo", combo: C("m", "cs"), whileTyping: true },

@@ -115,6 +115,7 @@ export function TerminalNode({ id, data, selected }: NodeProps & { data: Termina
       store.set(finishedMapAtom, (p) => { if (!(id in p)) return p; const n = { ...p }; delete n[id]; return n; });
       store.set(summaryMapAtom, (p) => { if (!(id in p)) return p; const n = { ...p }; delete n[id]; return n; });
       void window.messai.hudDismiss?.(id); // #67: o cartão some também da janela flutuante
+      void api.seen(id).catch(() => {}); // #69: sai da lista global "esperando você"
       data.onFocus();
     };
     el.addEventListener("focusin", focus);
