@@ -36,6 +36,7 @@ import { ACTION_BY_ID, comboFromEvent, effectiveCombo, sameCombo, type Keymap } 
 import { History, plural, type ConnSpec, type DrawingSpec, type NodeSpec, type Op } from "./undo.js";
 import { GroupLayer, type Guides } from "./GroupLayer.js";
 import { Palette, type PaletteAction } from "./Palette.js";
+import { ScoresDialog } from "./ScoresDialog.js";
 import type { PaletteItem } from "./palette.js";
 import { useHint, useKeymap } from "./shortcuts.js";
 
@@ -128,6 +129,7 @@ function Canvas({ conn }: { conn: Connection }) {
   const [usage, setUsage] = useState(false);
   const [prefsOpen, setPrefsOpen] = useState(false); // #64 janela de Preferências
   const [paletteOpen, setPaletteOpen] = useState(false); // #69 paleta global
+  const [scoresOpen, setScoresOpen] = useState(false); // #71 partituras
   const keymap = useKeymap(); const keymapRef = useRef<Keymap>(keymap); keymapRef.current = keymap; // #58 atalhos editáveis
   // #67: estado da janela flutuante do companheiro (vive no processo principal; aqui só espelho + preferência).
   const [hud, setHud] = useState(false);
@@ -393,6 +395,7 @@ function Canvas({ conn }: { conn: Connection }) {
     { id: "terminal.new", label: "Novo terminal", detail: "Ctrl+T", keywords: "criar shell agente" },
     { id: "note.new", label: "Nova nota", detail: "Ctrl+Shift+D", keywords: "criar markdown" },
     { id: "ws.new", label: "Novo espaço", detail: "Ctrl+Shift+N", keywords: "workspace projeto" },
+    { id: "scores", label: "Partituras…", detail: "salvar/colocar arranjos", keywords: "template time arranjo salvar colocar" },
     { id: "prefs", label: "Preferências", detail: "Ctrl+,", keywords: "configurações tema atalhos" },
     { id: "theme", label: "Alternar tema", keywords: "claro escuro sistema" },
     { id: "minimap", label: "Alternar minimapa", detail: "Ctrl+Shift+M" },
@@ -410,6 +413,7 @@ function Canvas({ conn }: { conn: Connection }) {
       case "note.new": if (current) { const c = viewCenter(); createSimple("note", { x: c.x - 130, y: c.y - 80, ...SIZE.note }); } return;
       case "ws.new": setWsDialog({}); return;
       case "prefs": setPrefsOpen(true); return;
+      case "scores": setScoresOpen(true); return;
       case "theme": setThemePref(nextTheme(getThemePref())); return;
       case "minimap": setMinimap((v) => !v); return;
       case "hud": void window.messai.hudToggle?.().then(setHud); return;
@@ -788,6 +792,9 @@ function Canvas({ conn }: { conn: Connection }) {
         {floorDialog && <FloorDialog ground={floorDialog} onSubmit={(i) => void submitFloor(floorDialog, i)} onClose={() => setFloorDialog(null)} />}
         {overview && groundOf(overview) && <FloorOverview ground={groundOf(overview)!} floors={side.workspaces.filter((w) => w.parentId === overview)} current={current} terminals={side.terminals} api={api}
           onOpen={(id) => { setCurrent(id); setOverview(null); }} onNew={() => { setFloorDialog(groundOf(overview)!); }} onClose={() => setOverview(null)} onChanged={() => void refreshList()} onError={toast} />}
+        {scoresOpen && current && <ScoresDialog api={api} hasSelection={flowRef.current.filter((n) => n.selected).length} onClose={() => setScoresOpen(false)}
+          onSave={async (name, description) => { const ids = flowRef.current.filter((n) => n.selected).map((n) => n.id); await runOp((rev) => api.saveScore(current, { expectedRevision: rev, name, ...(description ? { description } : {}), ...(ids.length ? { nodeIds: ids } : {}) })); }}
+          onPlace={async (sc) => { const c = viewCenter(); const r = await runOp((rev) => api.placeScore(current, sc.scoreId, { expectedRevision: rev, at: { x: Math.round(c.x - 200), y: Math.round(c.y - 120) } })); rec({ label: `partitura "${sc.name}"`, forward: [], inverse: r.nodeIds.map((id): Op => ({ type: "deleteNode", id })) }); toast(`Partitura "${sc.name}" colocada: ${plural(r.nodeIds.length, "nó", "nós")}`, "ok"); return r.warnings; }} />}
         {paletteOpen && <Palette api={api} workspaces={side.workspaces} currentId={current} currentNodes={(snap?.nodes ?? []).map((n) => ({ nodeId: n.nodeId, kind: n.kind, title: n.title }))} actions={paletteActions} onClose={() => setPaletteOpen(false)} onPick={onPalettePick} />}
         {prefsOpen && <Preferences api={api} onClose={() => setPrefsOpen(false)} onPresetsChanged={() => void api.presets().then(setPresets).catch(() => {})}
           workspaceCwd={snap?.workspace.cwd ?? ""} onRolesChanged={() => { void loadRoles(); void loadSkills(); }} onOpenUsage={() => { setPrefsOpen(false); setUsage(true); }}

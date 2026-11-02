@@ -1,4 +1,4 @@
-import type { ApiError, AttentionItem, FindHit, FindKind, CompanionConfig, NodeGroup, CreateNodeGroup, PatchNodeGroup, RuntimeSettings, PatchRuntimeSettings, PresetInput, Skill, CreateSkill, PatchSkill, TaskSummary, TreeEntry, FileContent, FsOp, SearchHit, CreateFloor, LandFloor, LandResult, PatchConnection, Role, CreateRole, PatchRole, ChatMessage, SendChat, Attachment, CreateAttachment, FileEntry, Connection as WsConnection, CreateDrawing, PatchDrawing, GroupDrawings, CreateFolder, CreateNode, CreateWorkspace, Drawing, Folder, Geometry, PatchFolder, PatchWorkspace, Preset, Node, PatchNode, Session, Sidebar, Workspace, WorkspaceSnapshot, WsClientMessage, WsServerMessage } from "@messai/contracts";
+import type { ApiError, Score, SaveScore, PatchScore, PlaceScore, PlaceScoreResult, AttentionItem, FindHit, FindKind, CompanionConfig, NodeGroup, CreateNodeGroup, PatchNodeGroup, RuntimeSettings, PatchRuntimeSettings, PresetInput, Skill, CreateSkill, PatchSkill, TaskSummary, TreeEntry, FileContent, FsOp, SearchHit, CreateFloor, LandFloor, LandResult, PatchConnection, Role, CreateRole, PatchRole, ChatMessage, SendChat, Attachment, CreateAttachment, FileEntry, Connection as WsConnection, CreateDrawing, PatchDrawing, GroupDrawings, CreateFolder, CreateNode, CreateWorkspace, Drawing, Folder, Geometry, PatchFolder, PatchWorkspace, Preset, Node, PatchNode, Session, Sidebar, Workspace, WorkspaceSnapshot, WsClientMessage, WsServerMessage } from "@messai/contracts";
 
 export type Connection = { baseUrl: string; wsUrl: string; token: string; homeDir?: string };
 export type RunningEntry = { title: string; agentType: string; isAgent: boolean; workspace: string };
@@ -48,6 +48,12 @@ export class Api {
   capabilities() { return this.req<{ features: string[] }>("GET", "/v1/capabilities"); }
   companion() { return this.req<CompanionConfig>("GET", "/v1/companion"); }
   settings() { return this.req<RuntimeSettings>("GET", "/v1/settings"); }
+  // #71 partituras
+  scores() { return this.req<Score[]>("GET", "/v1/scores"); }
+  saveScore(wsId: string, input: SaveScore) { return this.req<Score>("POST", `/v1/workspaces/${wsId}/scores`, input); }
+  patchScore(id: string, input: PatchScore) { return this.req<Score>("PATCH", `/v1/scores/${id}`, input); }
+  deleteScore(id: string) { return this.req<void>("DELETE", `/v1/scores/${id}`); }
+  placeScore(wsId: string, scoreId: string, input: PlaceScore) { return this.req<PlaceScoreResult>("POST", `/v1/workspaces/${wsId}/scores/${scoreId}/place`, input); }
   // #69 paleta: atenção global, busca unificada, "já vi"
   attentionList() { return this.req<AttentionItem[]>("GET", "/v1/attention"); }
   find(q: string, opt: { workspaceId?: string; kinds?: FindKind[]; limit?: number } = {}) { const p = new URLSearchParams({ q }); if (opt.workspaceId) p.set("workspaceId", opt.workspaceId); if (opt.kinds?.length) p.set("kinds", opt.kinds.join(",")); if (opt.limit) p.set("limit", String(opt.limit)); return this.req<FindHit[]>("GET", `/v1/find?${p.toString()}`); }

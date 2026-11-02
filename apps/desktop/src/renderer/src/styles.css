@@ -599,3 +599,6 @@ button.danger:hover { border-color: var(--danger); color: var(--danger-fg); }
 .bb-circle.presence.attention .pr-dot { background: #f6c344; animation: blink 1.2s steps(1) infinite; }
 .bb-circle.presence.dead .pr-dot { background: var(--danger); }
 .bb-circle .pr-count { position: absolute; left: 0; top: -3px; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; background: var(--acc); color: var(--on-acc); font-size: 9px; font-weight: 700; display: grid; place-items: center; }
+/* ===== #71 partituras ===== */
+.scores-modal { width: 640px; display: flex; flex-direction: column; gap: 10px; } .scores-modal h2 { display: flex; align-items: center; gap: 8px; }
+.scores-save { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; }
