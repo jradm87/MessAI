@@ -355,8 +355,10 @@ export class Store {
   }
   /** #69 nós por título (todos os espaços), case-insensitive. */
   searchNodeTitles(q: string, limit = 30): Node[] {
-    const like = `%${q.toLowerCase().replace(/[%_]/g, (c) => "\\" + c)}%`;
-    return (this.db.prepare("SELECT * FROM nodes WHERE lower(title) LIKE ? ESCAPE '\\' ORDER BY created_at DESC LIMIT ?").all(like, Math.max(1, Math.min(200, limit))) as NodeRow[]).map(nodeFrom);
+    const fold = (x: string) => x.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase(); // sem acento/caixa, como a paleta e o FTS5
+    const needle = fold(q);
+    const rows = this.db.prepare("SELECT * FROM nodes ORDER BY created_at DESC").all() as NodeRow[];
+    return rows.filter((r) => fold(r.title).includes(needle)).slice(0, Math.max(1, Math.min(200, limit))).map(nodeFrom);
   }
   unreadCounts(workspaceId: string): Record<string, number> {
     const rows = this.db.prepare("SELECT to_node_id, COUNT(*) n FROM messages WHERE workspace_id=? AND read_at IS NULL GROUP BY to_node_id").all(workspaceId) as { to_node_id: string; n: number }[];
