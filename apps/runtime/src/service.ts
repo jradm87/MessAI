@@ -1,6 +1,6 @@
 import { AGENT_ENV, type TreeEntry, type FileContent, type FsOp, type SearchHit, type CreateFloor, type LandFloor, type LandResult, type Role, type CreateRole, type PatchRole, type ChatMessage, type SendChat, type Attachment, type CreateAttachment, type FileEntry, type Connection, type CreateConnection, type PatchConnection, type CreateDrawing, type PatchDrawing, type GroupDrawings, type CreateFolder, type CreateNode, type Drawing, type Folder, type Message, type PatchFolder, type SendMessage, type Sidebar, type CreateWorkspace, type Node, type PatchNode, type PatchWorkspace, type Session, type Workspace, type WorkspaceSnapshot, type TaskFinished, type TaskSummary } from "@messai/contracts";
 import type { RuntimeSettings, PatchRuntimeSettings, PresetInput, Skill, CreateSkill, PatchSkill, FindHit, FindKind, NodeGroup, CreateNodeGroup, PatchNodeGroup, AttentionItem, Score, ScoreNode, SaveScore, PatchScore, PlaceScore, PlaceScoreResult } from "@messai/contracts";
-import type { ChatAttachment, ExportAttachment } from "@messai/contracts";
+import type { ChatAttachment, ExportAttachment, InstructionsStatus, InstructionFileInfo, PutInstructions, SyncInstructions } from "@messai/contracts";
 import type { Band, CreateBand, PatchBand, AskBand, BandAnswer, BandAskResult, MaestroRecruit } from "@messai/contracts";
 import { listProviders } from "./providers.js";
 import { probeAccounts } from "./accounts.js";
@@ -475,6 +475,42 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const sys: ChatMessage = { chatId: newId(), workspaceId: this.store.getNode(nodeId)!.workspaceId, nodeId, thread: thread ?? 1, role: "system", text: "__cleared__", createdAt: nowIso() };
     this.emit("chat", sys); // avisa a UI para recarregar, sem persistir
     return succeed({ removed });
+  }
+
+  // ---- #76 arquivos de instrução do projeto (CLAUDE.md / AGENTS.md) ----
+  private readInstrFile(root: string, name: "CLAUDE.md" | "AGENTS.md"): InstructionFileInfo {
+    const p = join(root, name);
+    try {
+      const st = statSync(p);
+      if (!st.isFile()) return { name, exists: false, text: "" };
+      return { name, exists: true, text: readFileSync(p, "utf8"), mtime: st.mtimeMs };
+    } catch { return { name, exists: false, text: "" }; }
+  }
+  getInstructions(workspaceId: string): Result<InstructionsStatus> {
+    const root = this.wsRoot(workspaceId); if (!root.ok) return root;
+    const claude = this.readInstrFile(root.value, "CLAUDE.md");
+    const agents = this.readInstrFile(root.value, "AGENTS.md");
+    const status: InstructionsStatus["status"] = !claude.exists && !agents.exists ? "missing"
+      : claude.exists && !agents.exists ? "only-claude"
+      : !claude.exists && agents.exists ? "only-agents"
+      : claude.text.replace(/\r\n/g, "\n").trim() === agents.text.replace(/\r\n/g, "\n").trim() ? "synced" : "diverged";
+    return succeed({ status, claude, agents });
+  }
+  putInstructions(workspaceId: string, input: PutInstructions): Result<InstructionsStatus> {
+    const root = this.wsRoot(workspaceId); if (!root.ok) return root;
+    try {
+      mkdirSync(root.value, { recursive: true });
+      const targets: ("CLAUDE.md" | "AGENTS.md")[] = input.target === "both" ? ["CLAUDE.md", "AGENTS.md"] : [input.target];
+      for (const t of targets) writeFileSync(join(root.value, t), input.text, "utf8");
+    } catch (e) { return fail("INTERNAL", String((e as Error).message ?? e)); }
+    return this.getInstructions(workspaceId);
+  }
+  syncInstructions(workspaceId: string, input: SyncInstructions): Result<InstructionsStatus> {
+    const cur = this.getInstructions(workspaceId); if (!cur.ok) return cur;
+    const src = input.direction === "claude-to-agents" ? cur.value.claude : cur.value.agents;
+    const dst: "CLAUDE.md" | "AGENTS.md" = input.direction === "claude-to-agents" ? "AGENTS.md" : "CLAUDE.md";
+    if (!src.exists) return fail("NOT_FOUND", `${src.name} não existe na raiz do espaço`);
+    return this.putInstructions(workspaceId, { target: dst, text: src.text });
   }
 
   // ---- árvore de arquivos (confinada ao diretório do espaço) ----

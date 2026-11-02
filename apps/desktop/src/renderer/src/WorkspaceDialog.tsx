@@ -1,16 +1,19 @@
 import { useEffect, useState } from "react";
 import type { Folder, Workspace } from "@messai/contracts";
+import type { Api } from "./api.js";
+import { InstructionsPanel } from "./InstructionsPanel.js";
 import { WS_COLORS, WS_ICONS } from "./wsicons.js";
 
 export type WorkspaceInput = { name: string; cwd: string; icon: string; color: string; folderId?: string };
 
 /** Diálogo "New Workspace" (criar e editar): nome, grade de ícones, cores, diretório com Procurar… */
-export function WorkspaceDialog({ edit, folders, defaultFolderId, defaultCwd = "", onSubmit, onClose }: { edit?: Workspace; folders: Folder[]; defaultFolderId?: string; defaultCwd?: string; onSubmit: (i: WorkspaceInput) => void; onClose: () => void }) {
+export function WorkspaceDialog({ edit, api, folders, defaultFolderId, defaultCwd = "", onSubmit, onClose }: { edit?: Workspace; api?: Api; folders: Folder[]; defaultFolderId?: string; defaultCwd?: string; onSubmit: (i: WorkspaceInput) => void; onClose: () => void }) {
   const [name, setName] = useState(edit?.name ?? "");
   const [cwd, setCwd] = useState(edit?.cwd ?? defaultCwd);
   const [icon, setIcon] = useState(edit?.icon ?? "folder");
   const [color, setColor] = useState<string>(edit?.color ?? WS_COLORS[0]);
   const [folderId, setFolderId] = useState<string>(edit?.folderId ?? defaultFolderId ?? "");
+  const [showInstr, setShowInstr] = useState(false);
   useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); }; window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, [onClose]);
   const ok = name.trim().length > 0;
   const submit = () => { if (ok) onSubmit({ name: name.trim(), cwd: cwd.trim() || defaultCwd, icon, color, ...(folderId ? { folderId } : {}) }); };
@@ -40,6 +43,12 @@ export function WorkspaceDialog({ edit, folders, defaultFolderId, defaultCwd = "
               <option value="">(sem pasta)</option>
               {onlyFolders.map((f) => <option key={f.folderId} value={f.folderId}>{f.name}</option>)}
             </select></>
+        )}
+        {edit && api && (
+          <div className="ws-instr-section">
+            <div className="row"><div className="lbl">Instruções do projeto (CLAUDE.md / AGENTS.md)</div><span className="sp" /><button type="button" onClick={() => setShowInstr((v) => !v)} data-testid="ws-toggle-instr">{showInstr ? "Ocultar" : "Editar / sincronizar…"}</button></div>
+            {showInstr && <InstructionsPanel api={api} workspaceId={edit.workspaceId} workspaceCwd={edit.cwd} />}
+          </div>
         )}
         <div className="actions"><button type="button" onClick={onClose}>Cancelar</button><button type="button" className="pri" disabled={!ok} onClick={submit} data-testid="ws-submit">{edit ? "Salvar" : "Criar"}</button></div>
       </div>

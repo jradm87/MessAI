@@ -5,7 +5,7 @@ import type { WebSocket } from "ws";
 import {
   BUILD_VERSION, PROTOCOL_VERSION, SendMessage, Ask, CreateConnection, CreateDrawing, CreateNode, CreateWorkspace, DeleteNode, PatchNode, PatchWorkspace, ApplyLayout, WsClientMessage,
   type Capabilities, type WsServerMessage, type ApiError,
- CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, FsOp, PatchRuntimeSettings, PutPresets, CreateSkill, PatchSkill, BackupInput, RestoreInput, MoveDataInput, ResetInput, CreateNodeGroup, PatchNodeGroup, SaveScore, PatchScore, PlaceScore, CreateBand, PatchBand, AskBand, MaestroRecruit, MaestroTarget, MaestroAssign, ExportAttachment, type PresetInput, type Preset } from "@messai/contracts";
+ CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, FsOp, PatchRuntimeSettings, PutPresets, CreateSkill, PatchSkill, BackupInput, RestoreInput, MoveDataInput, ResetInput, CreateNodeGroup, PatchNodeGroup, SaveScore, PatchScore, PlaceScore, CreateBand, PatchBand, AskBand, MaestroRecruit, MaestroTarget, MaestroAssign, ExportAttachment, PutInstructions, SyncInstructions, type PresetInput, type Preset } from "@messai/contracts";
 import type { Result } from "@messai/domain";
 import { newId, type Config } from "./config.js";
 import type { WorkspaceService } from "./service.js";
@@ -88,6 +88,10 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
   });
   app.delete<{ Params: { id: string }; Querystring: { deleteBranch?: string } }>("/v1/workspaces/:id", async (req, reply) => send(reply, svc.deleteWorkspace(req.params.id, { deleteBranch: req.query.deleteBranch === "1" }), 204));
 
+  // #76 — arquivos de instrução do projeto (CLAUDE.md / AGENTS.md)
+  app.get<{ Params: { id: string } }>("/v1/workspaces/:id/instructions", async (req, reply) => send(reply, svc.getInstructions(req.params.id)));
+  app.put<{ Params: { id: string } }>("/v1/workspaces/:id/instructions", async (req, reply) => { const b = body<PutInstructions>(PutInstructions, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.putInstructions(req.params.id, b)); });
+  app.post<{ Params: { id: string } }>("/v1/workspaces/:id/instructions/sync", async (req, reply) => { const b = body<SyncInstructions>(SyncInstructions, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.syncInstructions(req.params.id, b)); });
   // árvore de arquivos
   app.get<{ Params: { id: string }; Querystring: { path?: string } }>("/v1/workspaces/:id/tree", async (req, reply) => send(reply, await svc.listTree(req.params.id, req.query.path ?? "")));
   app.get<{ Params: { id: string }; Querystring: { path?: string } }>("/v1/workspaces/:id/file", async (req, reply) => send(reply, svc.readFile(req.params.id, req.query.path ?? "")));

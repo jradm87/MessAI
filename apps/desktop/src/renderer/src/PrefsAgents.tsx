@@ -3,16 +3,17 @@ import { Bookmark, Copy, ExternalLink, FolderOpen, LogIn, Plus, RefreshCw, Trash
 import type { Skill } from "@messai/contracts";
 import type { Api } from "./api.js";
 import { RolesPanel } from "./RolesDialog.js";
+import { InstructionsPanel } from "./InstructionsPanel.js";
 import { Toggle } from "./Preferences.js";
 import { AgentIcon } from "./agentIcons.js";
 import { loadPrompts, onPrompts, promptTitle, savePrompts, type SavedPrompt } from "./prompts.js";
 import { setPref, usePref } from "./prefs.js";
 
 /** #57 — Preferências → Agentes: Papéis, Prompts, Skills, Contas e Uso (#38). */
-export type AgentsSub = "roles" | "prompts" | "skills" | "accounts" | "usage";
-const SUBS: { id: AgentsSub; label: string }[] = [{ id: "roles", label: "Papéis" }, { id: "prompts", label: "Prompts" }, { id: "skills", label: "Skills" }, { id: "accounts", label: "Contas" }, { id: "usage", label: "Uso" }];
+export type AgentsSub = "roles" | "prompts" | "skills" | "instructions" | "accounts" | "usage";
+const SUBS: { id: AgentsSub; label: string }[] = [{ id: "roles", label: "Papéis" }, { id: "prompts", label: "Prompts" }, { id: "skills", label: "Skills" }, { id: "instructions", label: "Instruções (CLAUDE/AGENTS)" }, { id: "accounts", label: "Contas" }, { id: "usage", label: "Uso" }];
 export type OpenTerminal = (t: { title: string; command: string }) => void;
-type Props = { api: Api; workspaceCwd: string; onRolesChanged: () => void; onOpenTerminal: OpenTerminal; onOpenUsage: () => void };
+type Props = { api: Api; workspaceId?: string; workspaceCwd: string; onRolesChanged: () => void; onOpenTerminal: OpenTerminal; onOpenUsage: () => void };
 
 function PromptsPanel() {
   const [list, setList] = useState<SavedPrompt[]>(() => loadPrompts());
@@ -152,7 +153,7 @@ function UsagePanel({ api, onOpenUsage }: { api: Api; onOpenUsage: () => void })
   </>);
 }
 
-export function PrefsAgents({ api, workspaceCwd, onRolesChanged, onOpenTerminal, onOpenUsage }: Props) {
+export function PrefsAgents({ api, workspaceId, workspaceCwd, onRolesChanged, onOpenTerminal, onOpenUsage }: Props) {
   const saved = usePref("agentsSub");
   const sub: AgentsSub = SUBS.some((s) => s.id === saved) ? (saved as AgentsSub) : "roles";
   return (<>
@@ -160,6 +161,7 @@ export function PrefsAgents({ api, workspaceCwd, onRolesChanged, onOpenTerminal,
     {sub === "roles" && <RolesPanel api={api} workspaceCwd={workspaceCwd} onChanged={onRolesChanged} />}
     {sub === "prompts" && <PromptsPanel />}
     {sub === "skills" && <SkillsPanel api={api} />}
+    {sub === "instructions" && <InstructionsPanel api={api} {...(workspaceId ? { workspaceId } : {})} workspaceCwd={workspaceCwd} />}
     {sub === "accounts" && <AccountsPanel api={api} onOpenTerminal={onOpenTerminal} />}
     {sub === "usage" && <UsagePanel api={api} onOpenUsage={onOpenUsage} />}
   </>);

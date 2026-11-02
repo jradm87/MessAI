@@ -1,4 +1,4 @@
-import type { ChatAttachment, ExportAttachment, Band, CreateBand, PatchBand, AskBand, BandAskResult, ApiError, Score, SaveScore, PatchScore, PlaceScore, PlaceScoreResult, AttentionItem, FindHit, FindKind, CompanionConfig, NodeGroup, CreateNodeGroup, PatchNodeGroup, RuntimeSettings, PatchRuntimeSettings, PresetInput, Skill, CreateSkill, PatchSkill, TaskSummary, TreeEntry, FileContent, FsOp, SearchHit, CreateFloor, LandFloor, LandResult, PatchConnection, Role, CreateRole, PatchRole, ChatMessage, SendChat, Attachment, CreateAttachment, FileEntry, Connection as WsConnection, CreateDrawing, PatchDrawing, GroupDrawings, CreateFolder, CreateNode, CreateWorkspace, Drawing, Folder, Geometry, PatchFolder, PatchWorkspace, Preset, Node, PatchNode, Session, Sidebar, Workspace, WorkspaceSnapshot, WsClientMessage, WsServerMessage } from "@messai/contracts";
+import type { InstructionsStatus, PutInstructions, SyncInstructions, ChatAttachment, ExportAttachment, Band, CreateBand, PatchBand, AskBand, BandAskResult, ApiError, Score, SaveScore, PatchScore, PlaceScore, PlaceScoreResult, AttentionItem, FindHit, FindKind, CompanionConfig, NodeGroup, CreateNodeGroup, PatchNodeGroup, RuntimeSettings, PatchRuntimeSettings, PresetInput, Skill, CreateSkill, PatchSkill, TaskSummary, TreeEntry, FileContent, FsOp, SearchHit, CreateFloor, LandFloor, LandResult, PatchConnection, Role, CreateRole, PatchRole, ChatMessage, SendChat, Attachment, CreateAttachment, FileEntry, Connection as WsConnection, CreateDrawing, PatchDrawing, GroupDrawings, CreateFolder, CreateNode, CreateWorkspace, Drawing, Folder, Geometry, PatchFolder, PatchWorkspace, Preset, Node, PatchNode, Session, Sidebar, Workspace, WorkspaceSnapshot, WsClientMessage, WsServerMessage } from "@messai/contracts";
 
 export type Connection = { baseUrl: string; wsUrl: string; token: string; homeDir?: string };
 export type RunningEntry = { title: string; agentType: string; isAgent: boolean; workspace: string };
@@ -132,6 +132,10 @@ export class Api {
   clearChat(nodeId: string, thread?: number) { return this.req<{ removed: number }>("DELETE", `/v1/nodes/${nodeId}/chat${thread ? `?thread=${thread}` : ""}`); }
   files(nodeId: string, q: string) { return this.req<FileEntry[]>("GET", `/v1/nodes/${nodeId}/files?q=${encodeURIComponent(q)}`); }
   attach(wsId: string, input: CreateAttachment) { return this.req<Attachment>("POST", `/v1/workspaces/${wsId}/attachments`, input); }
+  // #76 arquivos de instrução do projeto (CLAUDE.md / AGENTS.md)
+  instructions(wsId: string) { return this.req<InstructionsStatus>("GET", `/v1/workspaces/${wsId}/instructions`); }
+  putInstructions(wsId: string, input: PutInstructions) { return this.req<InstructionsStatus>("PUT", `/v1/workspaces/${wsId}/instructions`, input); }
+  syncInstructions(wsId: string, input: SyncInstructions) { return this.req<InstructionsStatus>("POST", `/v1/workspaces/${wsId}/instructions/sync`, input); }
   // #79 anexos do chat
   chatAttachmentUrl(id: string) { return `${this.conn.baseUrl}/v1/chat-attachments/${id}/raw?token=${encodeURIComponent(this.conn.token)}`; }
   chatAttachmentText(id: string) { return fetch(this.chatAttachmentUrl(id)).then((r) => (r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))); }

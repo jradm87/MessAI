@@ -96,9 +96,9 @@ function GeneralTab({ api }: { api: Api }) {
 export type PreferencesProps = {
   api: Api; onClose: () => void; onPresetsChanged?: () => void;
   // #57 Agentes
-  workspaceCwd?: string; onRolesChanged?: () => void; onOpenTerminal?: OpenTerminal; onOpenUsage?: () => void;
+  workspaceId?: string; workspaceCwd?: string; onRolesChanged?: () => void; onOpenTerminal?: OpenTerminal; onOpenUsage?: () => void;
 };
-export function Preferences({ api, onClose, onPresetsChanged, workspaceCwd, onRolesChanged, onOpenTerminal, onOpenUsage }: PreferencesProps) {
+export function Preferences({ api, onClose, onPresetsChanged, workspaceId, workspaceCwd, onRolesChanged, onOpenTerminal, onOpenUsage }: PreferencesProps) {
   const saved = usePref("prefsTab");
   const tab: PrefTabId = isTab(saved) ? saved : "general";
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null); // #61/#63
@@ -108,7 +108,7 @@ export function Preferences({ api, onClose, onPresetsChanged, workspaceCwd, onRo
   const cur = PREF_TABS.find((t) => t.id === tab)!;
   const body = tab === "general" ? <GeneralTab api={api} />
     : tab === "terminal" ? <PrefsTerminal api={api} onPresetsChanged={onPresetsChanged ?? (() => {})} />
-    : tab === "agents" ? <PrefsAgents api={api} workspaceCwd={workspaceCwd ?? ""} onRolesChanged={onRolesChanged ?? (() => {})} onOpenTerminal={onOpenTerminal ?? (() => {})} onOpenUsage={onOpenUsage ?? (() => {})} />
+    : tab === "agents" ? <PrefsAgents api={api} {...(workspaceId ? { workspaceId } : {})} workspaceCwd={workspaceCwd ?? ""} onRolesChanged={onRolesChanged ?? (() => {})} onOpenTerminal={onOpenTerminal ?? (() => {})} onOpenUsage={onOpenUsage ?? (() => {})} />
     : tab === "shortcuts" ? <PrefsShortcuts />
     : tab === "remote" ? <Soon issue={59} what="controle remoto e pareamento (depende do hub #28)" />
     : tab === "updates" ? <PrefsUpdates appVersion={appInfo?.version ?? "…"} buildVersion={appInfo?.buildVersion ?? 0} />

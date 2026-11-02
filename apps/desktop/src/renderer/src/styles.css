@@ -644,3 +644,9 @@ button.danger:hover { border-color: var(--danger); color: var(--danger-fg); }
 .chat-att-thumb { width: 32px; height: 32px; object-fit: cover; border-radius: 4px; background: var(--bar); }
 .chat-att-meta { display: flex; flex-direction: column; flex: 1; min-width: 0; }
 .chat-att-name { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* #76 instruções do projeto (CLAUDE.md / AGENTS.md) */
+.instr-panel { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.instr-editor { min-height: 200px; font-family: var(--mono, monospace); font-size: 12px; }
+.ws-instr-section { border-top: 1px solid var(--line); padding-top: 8px; margin-top: 4px; }
+.pa-chip.warn { background: rgba(229, 162, 58, 0.2); color: #e5a23a; }

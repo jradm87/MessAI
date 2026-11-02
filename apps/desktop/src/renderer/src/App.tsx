@@ -472,6 +472,7 @@ function Canvas({ conn }: { conn: Connection }) {
     { id: "scores", label: "Partituras…", detail: "salvar/colocar arranjos", keywords: "template time arranjo salvar colocar" },
     { id: "prefs", label: "Preferências", detail: "Ctrl+,", keywords: "configurações tema atalhos" },
     { id: "bands", label: "Bandas: perguntar/transmitir em lote…", keywords: "banda grupo agentes broadcast" },
+    { id: "instructions", label: "Instruções do projeto (CLAUDE.md / AGENTS.md)…", keywords: "claude agents md instrucoes sincronizar" },
     { id: "theme", label: "Alternar tema", keywords: "claro escuro sistema" },
     { id: "minimap", label: "Alternar minimapa", detail: "Ctrl+Shift+M" },
     { id: "hud", label: "Janela flutuante do companheiro", keywords: "hud resumo" },
@@ -492,6 +493,7 @@ function Canvas({ conn }: { conn: Connection }) {
       case "prefs": setPrefsOpen(true); return;
       case "scores": setScoresOpen(true); return;
       case "bands": if (current) setBandsOpen(true); return;
+      case "instructions": setPref("agentsSub", "instructions"); setPref("prefsTab", "agents"); setPrefsOpen(true); return;
       case "theme": setThemePref(nextTheme(getThemePref())); return;
       case "minimap": setMinimap((v) => !v); return;
       case "hud": void window.messai.hudToggle?.().then(setHud); return;
@@ -886,7 +888,7 @@ function Canvas({ conn }: { conn: Connection }) {
         <button className="pri add-btn" data-testid="add" disabled={!current} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); const p = e.currentTarget.closest("main")!.getBoundingClientRect(); setMenu({ x: r.left - p.left, y: r.bottom - p.top + 4 }); }}>+ Adicionar</button>
         {stale && <div className="banner">O runtime em execução é de uma versão anterior ao app. Reinicie o runtime para usar os recursos novos (isso encerra os shells dele; eles ficam como "lost" e podem ser reiniciados).</div>}
         {!current && <div className="empty">Crie um espaço com o botão + da barra lateral ou Ctrl+Shift+N.</div>}
-        {wsDialog && <WorkspaceDialog {...(wsDialog.edit ? { edit: wsDialog.edit } : {})} {...(wsDialog.folderId ? { defaultFolderId: wsDialog.folderId } : {})} defaultCwd={homeDir} folders={side.folders} onSubmit={(i) => void submitWs(i)} onClose={() => setWsDialog(null)} />}
+        {wsDialog && <WorkspaceDialog api={api} {...(wsDialog.edit ? { edit: wsDialog.edit } : {})} {...(wsDialog.folderId ? { defaultFolderId: wsDialog.folderId } : {})} defaultCwd={homeDir} folders={side.folders} onSubmit={(i) => void submitWs(i)} onClose={() => setWsDialog(null)} />}
         {menu && <AddMenu presets={presets.filter((p) => p.enabled)}x={menu.x} y={menu.y} onClose={() => setMenu(null)} onPick={(c) => add(c, menu.at)} />}
         {dialog && <NewTerminalDialog presets={presets.filter((p) => p.enabled)}roles={roles} defaultCwd={snap?.workspace.cwd || homeDir} onClose={() => { setDialog(null); setTool("select"); }} onCreate={(i) => createTerminal(dialog.rect, i)} onManageRoles={() => setRolesDialog(true)} tmux={features.includes("terminal.tmux")} />}
         {preview && snap && <FilePreview api={api} workspaceId={snap.workspace.workspaceId} path={preview} onClose={() => setPreview(null)} onOpenNote={(rel) => { setPreview(null); void mutate((r) => api.createNode(snap.workspace.workspaceId, { expectedRevision: r, kind: "note", geometry: { ...freeSpot(snap.nodes, { w: 360, h: 260 }), w: 360, h: 260 }, filePath: `${snap.workspace.cwd}/${rel}` })); }} />}
@@ -899,7 +901,7 @@ function Canvas({ conn }: { conn: Connection }) {
           onPlace={async (sc) => { const c = viewCenter(); const r = await runOp((rev) => api.placeScore(current, sc.scoreId, { expectedRevision: rev, at: { x: Math.round(c.x - 200), y: Math.round(c.y - 120) } })); rec({ label: `partitura "${sc.name}"`, forward: [], inverse: r.nodeIds.map((id): Op => ({ type: "deleteNode", id })) }); toast(`Partitura "${sc.name}" colocada: ${plural(r.nodeIds.length, "nó", "nós")}`, "ok"); return r.warnings; }} />}
         {paletteOpen && <Palette api={api} workspaces={side.workspaces} currentId={current} currentNodes={(snap?.nodes ?? []).map((n) => ({ nodeId: n.nodeId, kind: n.kind, title: n.title }))} actions={paletteActions} onClose={() => setPaletteOpen(false)} onPick={onPalettePick} />}
         {prefsOpen && <Preferences api={api} onClose={() => setPrefsOpen(false)} onPresetsChanged={() => void api.presets().then(setPresets).catch(() => {})}
-          workspaceCwd={snap?.workspace.cwd ?? ""} onRolesChanged={() => { void loadRoles(); void loadSkills(); }} onOpenUsage={() => { setPrefsOpen(false); setUsage(true); }}
+          {...(current ? { workspaceId: current } : {})} workspaceCwd={snap?.workspace.cwd ?? ""} onRolesChanged={() => { void loadRoles(); void loadSkills(); }} onOpenUsage={() => { setPrefsOpen(false); setUsage(true); }}
           onOpenTerminal={(t) => { if (!current) { toast("Abra um espaço para criar o terminal de login"); return; } setPrefsOpen(false); createTerminal(freeSpot(snap?.nodes ?? [], SIZE.terminal), { title: t.title, command: t.command }); }} />}
         {rolesDialog && <RolesDialog api={api} workspaceCwd={snap?.workspace.cwd ?? ""} onClose={() => setRolesDialog(false)} onChanged={() => void loadRoles()} />}
         <ReactFlow nodes={flow} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onNodeDragStart={onNodeDragStart} onNodeDragStop={onNodeDragStop} onEdgesChange={onEdgesChange} onConnect={onConnect} onEdgesDelete={onEdgesDelete}

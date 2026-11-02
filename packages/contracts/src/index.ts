@@ -356,6 +356,25 @@ export type SendChat = Static<typeof SendChat>;
 export const ExportAttachment = Type.Object({ workspaceId: Id, dir: Type.String(), name: Type.Optional(Type.String({ maxLength: 200 })) });
 export type ExportAttachment = Static<typeof ExportAttachment>;
 
+// ---------- #76 Arquivos de instrução do projeto (CLAUDE.md / AGENTS.md) ----------
+export const InstructionFileName = Type.Union([Type.Literal("CLAUDE.md"), Type.Literal("AGENTS.md")]);
+export type InstructionFileName = Static<typeof InstructionFileName>;
+export const InstructionFileInfo = Type.Object({ name: InstructionFileName, exists: Type.Boolean(), text: Type.String(), mtime: Type.Optional(Type.Number()) });
+export type InstructionFileInfo = Static<typeof InstructionFileInfo>;
+export const InstructionsStatus = Type.Object({
+  status: Type.Union([Type.Literal("missing"), Type.Literal("only-claude"), Type.Literal("only-agents"), Type.Literal("synced"), Type.Literal("diverged")]),
+  claude: InstructionFileInfo,
+  agents: InstructionFileInfo,
+});
+export type InstructionsStatus = Static<typeof InstructionsStatus>;
+export const PutInstructions = Type.Object({
+  target: Type.Union([InstructionFileName, Type.Literal("both")]),
+  text: Type.String({ maxLength: 500000 }),
+});
+export type PutInstructions = Static<typeof PutInstructions>;
+export const SyncInstructions = Type.Object({ direction: Type.Union([Type.Literal("claude-to-agents"), Type.Literal("agents-to-claude")]) });
+export type SyncInstructions = Static<typeof SyncInstructions>;
+
 // ---------- Comandos (HTTP) ----------
 export const CreateWorkspace = Type.Object({
   name: Type.String({ minLength: 1 }),
