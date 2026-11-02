@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, memo } from "react";
 import { useAtomValue } from "jotai";
-import { Search, Eraser, Lock, Eye, Folder, SquareTerminal, Crown, Activity } from "lucide-react";
+import { Search, Eraser, Lock, Eye, Folder, SquareTerminal, Crown, Activity, Link2 } from "lucide-react";
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -19,11 +19,11 @@ import { onTheme, cssVar } from "./theme.js";
 import { EditableTitle } from "./EditableTitle.js";
 import { Composer, type MentionTarget } from "./Composer.js";
 import { ChatLayer } from "./ChatLayer.js";
-import type { ChatMessage, Role, Skill, SessionProcs } from "@messai/contracts";
+import type { ChatMessage, Role, Skill, SessionProcs, ConnectedPeer, CrossNodeCandidate } from "@messai/contracts";
 import type { NodeBand } from "./bands.js";
 
 export type NodeExtras = { onLink: () => void; linkCount: number; onChat: () => void; onRaise: () => void };
-export type ComposerExtras = { composerOpen: boolean; onComposerClose: () => void; onFocus: () => void; workspaceId: string; targets: MentionTarget[]; chatOpen: boolean; onChatClose: () => void; role?: Role; roles: Role[]; onSetRole: (roleId: string | null) => void; onManageRoles: () => void; skills?: Skill[]; skillIds?: string[]; onSetSkills?: (ids: string[]) => void; onManageSkills?: () => void; bands?: NodeBand[]; onOpenBands?: () => void; maestro?: boolean; onMaestro?: (on: boolean) => void; memLimitMb?: number; onMemLimit?: (mb: number) => void };
+export type ComposerExtras = { composerOpen: boolean; onComposerClose: () => void; onFocus: () => void; workspaceId: string; targets: MentionTarget[]; chatOpen: boolean; onChatClose: () => void; role?: Role; roles: Role[]; onSetRole: (roleId: string | null) => void; onManageRoles: () => void; skills?: Skill[]; skillIds?: string[]; onSetSkills?: (ids: string[]) => void; onManageSkills?: () => void; bands?: NodeBand[]; onOpenBands?: () => void; maestro?: boolean; onMaestro?: (on: boolean) => void; memLimitMb?: number; onMemLimit?: (mb: number) => void; onFocusNode?: (wsId: string, nodeId: string) => void; onCrossConnect?: (target: { targetNodeId?: string; targetRef?: string }) => Promise<void> | void; onCrossDisconnect?: (connectionId: string) => Promise<void> | void };
 export type Appearance = { icon?: string | null; color?: string | null; termTheme?: TermTheme | null };
 export type TerminalData = { title: string; sessionId: string; api: Api; stream: Stream; onDelete: () => void; onRename: (t: string) => void; onResume: () => void; editSignal?: number; icon?: string; color?: string; termTheme?: string; onAppearance: (p: Appearance) => void } & NodeExtras & ComposerExtras;
 const THEMES: { id: TermTheme; label: string }[] = [{ id: "system", label: "Sistema" }, { id: "dark", label: "Escuro" }, { id: "light", label: "Claro" }, { id: "custom", label: "Custom" }];
@@ -68,6 +68,16 @@ function TerminalNodeImpl({ id, data, selected }: NodeProps & { data: TerminalDa
     const iv = setInterval(() => void loadProcs(), procsOpen ? 1200 : 3000);
     return () => clearInterval(iv);
   }, [session?.state, sessionId, procsOpen, data.memLimitMb]); // eslint-disable-line react-hooks/exhaustive-deps
+  // #82 conexões entre andares e entre espaços
+  const [crossOpen, setCrossOpen] = useState(false);
+  const [crossPeers, setCrossPeers] = useState<ConnectedPeer[]>([]);
+  const [candidates, setCandidates] = useState<CrossNodeCandidate[]>([]);
+  const [crossRefInput, setCrossRefInput] = useState("");
+  const loadCross = () => {
+    void api.connectedPeers(id).then((list) => setCrossPeers(list.filter((p) => p.crossWorkspace))).catch(() => {});
+    if (crossOpen) void api.crossCandidates(id).then(setCandidates).catch(() => {});
+  };
+  useEffect(() => { loadCross(); }, [id, data.linkCount, crossOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     // Tema do xterm: tokens do app (#54) ou tema do nó/prefs (#56); re-aplicado quando qualquer um muda.
@@ -191,6 +201,11 @@ function TerminalNodeImpl({ id, data, selected }: NodeProps & { data: TerminalDa
         )}
         {data.maestro && <span className="maestro-pill nodrag" title="Modo Maestro: este terminal recruta, dispensa e reatribui agentes (mess maestro …)" data-testid="maestro-pill"><Crown size={11} /></span>}
         {data.bands?.map((b) => <span key={b.id} className={`band-pill nodrag ${b.asking ? "asking" : ""}`} style={{ "--band-color": b.color } as CSSProperties} title={b.asking ? `Banda ${b.name}: pergunta em andamento neste terminal` : `Banda ${b.name} (clique para gerenciar)`} data-testid="band-pill" onClick={(e) => { e.stopPropagation(); data.onOpenBands?.(); }}>{b.name}{b.asking ? " …" : ""}</span>)}
+        {crossPeers.map((p) => (
+          <span key={p.connectionId} className="band-pill nodrag" data-testid="cross-peer-pill" title={`Conectado a ${p.node.title} @ ${p.workspaceName} — clique para abrir conexões entre andares/espaços`} onClick={(e) => { e.stopPropagation(); setCrossOpen((v) => !v); }}>
+            ⇄ {p.node.title} @ {p.workspaceName}
+          </span>
+        ))}
         {procs && state === "running" && (
           <span className={`mem-pill nodrag ${procs.overLimit ? "over" : ""}`} data-testid="term-mem-pill" title={`Memória da árvore do terminal: ${(procs.totalRssKb / 1024).toFixed(1)} MB${procs.limitMb ? ` / limite ${procs.limitMb} MB` : ""} (${procs.processes.length} processo(s)) — clique para monitorar`} onClick={(e) => { e.stopPropagation(); setProcsOpen((v) => !v); }}>
             <Activity size={10} /> {(procs.totalRssKb / 1024).toFixed(1)} MB{procs.limitMb ? `/${procs.limitMb}` : ""}{procs.overLimit ? " ⚠" : ""}
@@ -205,6 +220,7 @@ function TerminalNodeImpl({ id, data, selected }: NodeProps & { data: TerminalDa
         {chatUnread > 0 && <span className="badge chatb" title="respostas no chat (Ctrl+J)">💬 {chatUnread}</span>}
         <span className="sp" />
         {data.onMaestro && <button title={data.maestro ? "Modo Maestro ligado (clique para desligar)" : "Ligar o Modo Maestro (recrutar/dispensar/reatribuir agentes)"} className={`nodrag maestro-toggle ${data.maestro ? "on" : ""}`} data-testid="maestro-toggle" onClick={() => data.onMaestro?.(!data.maestro)}><Crown size={12} /></button>}
+        <button title="Conexões entre andares e espaços (Nome @ Espaço)" className={`nodrag ${crossOpen || crossPeers.length > 0 ? "on" : ""}`} data-testid="node-cross-link-btn" onClick={() => setCrossOpen((v) => !v)}><Link2 size={12} /></button>
         <button title="Monitor de processos e limite de memória" className={`nodrag ${procsOpen ? "on" : ""}`} data-testid="term-procs-btn" onClick={() => { setProcsOpen((v) => !v); void loadProcs(); }}><Activity size={12} /></button>
         <button title="Buscar no terminal (Ctrl+F)" className="nodrag" onClick={() => setFind((v) => (v === null ? "" : null))}><Search size={12} /></button>
         <button title="Limpar a tela" className="nodrag" onClick={() => termRef.current?.clear()}><Eraser size={12} /></button>
@@ -214,6 +230,69 @@ function TerminalNodeImpl({ id, data, selected }: NodeProps & { data: TerminalDa
       </div>
       {err && <div className="err">{err}</div>}
       <div className="term-wrap">
+        {crossOpen && (
+          <div className="term-procs nodrag nowheel" data-testid="cross-link-panel" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="row">
+              <b>Conexões entre andares/espaços ({crossPeers.length})</b>
+              <span className="sp" />
+              <button onClick={() => setCrossOpen(false)}>✕</button>
+            </div>
+            <div className="row" style={{ gap: 6, marginTop: 4 }}>
+              <input
+                value={crossRefInput}
+                onChange={(e) => setCrossRefInput(e.target.value)}
+                placeholder="Nome @ Espaço (ex.: Worker @ Backend)"
+                data-testid="cross-link-input"
+                style={{ flex: 1 }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && crossRefInput.trim()) {
+                    const ref = crossRefInput.trim();
+                    setCrossRefInput("");
+                    void Promise.resolve(data.onCrossConnect?.({ targetRef: ref })).then(() => setTimeout(loadCross, 150));
+                  }
+                }}
+              />
+              <button
+                className="tb"
+                data-testid="cross-link-submit"
+                disabled={!crossRefInput.trim()}
+                onClick={() => {
+                  const ref = crossRefInput.trim();
+                  if (!ref) return;
+                  setCrossRefInput("");
+                  void Promise.resolve(data.onCrossConnect?.({ targetRef: ref })).then(() => setTimeout(loadCross, 150));
+                }}
+              >
+                Conectar
+              </button>
+            </div>
+            {crossPeers.length > 0 && (
+              <div className="proc-list" data-testid="cross-peer-list" style={{ marginTop: 6 }}>
+                {crossPeers.map((p) => (
+                  <div key={p.connectionId} className="proc-row" data-testid="cross-peer-row">
+                    <b className="proc-name">{p.node.title} @ {p.workspaceName}</b>
+                    <span className="mut mono">{p.node.kind}</span>
+                    <span className="sp" />
+                    {data.onFocusNode && <button className="tb" data-testid={`cross-go-${p.node.nodeId}`} onClick={() => data.onFocusNode?.(p.workspaceId, p.node.nodeId)}>Ir</button>}
+                    <button className="tb danger" data-testid={`cross-unlink-${p.node.nodeId}`} onClick={() => void Promise.resolve(data.onCrossDisconnect?.(p.connectionId)).then(() => setTimeout(loadCross, 150))}>Desconectar</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="mut" style={{ fontSize: 11, marginTop: 6 }}>Outros andares e espaços</div>
+            <div className="proc-list" data-testid="cross-candidate-list">
+              {candidates.filter((c) => !crossPeers.some((p) => p.node.nodeId === c.nodeId)).map((c) => (
+                <div key={c.nodeId} className="proc-row" data-testid="cross-candidate-row">
+                  <b className="proc-name">{c.refLabel}</b>
+                  <span className="mut mono">{c.kind}{c.branch ? ` · ${c.branch}` : ""}</span>
+                  <span className="sp" />
+                  <button className="tb" data-testid={`cross-connect-${c.nodeId}`} onClick={() => void Promise.resolve(data.onCrossConnect?.({ targetNodeId: c.nodeId })).then(() => setTimeout(loadCross, 150))}>Conectar</button>
+                </div>
+              ))}
+              {candidates.filter((c) => !crossPeers.some((p) => p.node.nodeId === c.nodeId)).length === 0 && <div className="mut">Nenhum outro nó disponível fora deste espaço.</div>}
+            </div>
+          </div>
+        )}
         {procsOpen && (
           <div className="term-procs nodrag nowheel" data-testid="term-procs-panel" onMouseDown={(e) => e.stopPropagation()}>
             <div className="row">

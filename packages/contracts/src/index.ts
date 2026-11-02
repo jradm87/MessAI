@@ -2,7 +2,7 @@ import { Type, type Static } from "@sinclair/typebox";
 
 export const PROTOCOL_VERSION = 1 as const;
 /** Incrementar a cada mudança de snapshot/rotas; o cliente avisa quando o runtime está atrás. */
-export const BUILD_VERSION = 21 as const;
+export const BUILD_VERSION = 22 as const;
 
 // ---------- Identidades ----------
 export const Id = Type.String({ minLength: 8, maxLength: 64 });
@@ -226,6 +226,28 @@ export const Connection = Type.Object({
 export type Connection = Static<typeof Connection>;
 export const PatchConnection = Type.Object({ expectedRevision: Type.Integer(), style: Type.Optional(Type.Union([Type.Literal("rope"), Type.Literal("circuit")])), label: Type.Optional(Type.Union([Type.String(), Type.Null()])) });
 export type PatchConnection = Static<typeof PatchConnection>;
+// #82 — Conexões entre andares e entre espaços
+export const ConnectedPeer = Type.Object({
+  node: Node,
+  direction: Type.Union([Type.Literal("in"), Type.Literal("out")]),
+  connectionId: Id,
+  agentType: Type.Optional(Type.String()),
+  workspaceId: Id,
+  workspaceName: Type.String(),
+  crossWorkspace: Type.Boolean(),
+});
+export type ConnectedPeer = Static<typeof ConnectedPeer>;
+export const CrossNodeCandidate = Type.Object({
+  nodeId: Id,
+  title: Type.String(),
+  kind: NodeKind,
+  workspaceId: Id,
+  workspaceName: Type.String(),
+  parentId: Type.Optional(Id),
+  branch: Type.Optional(Type.String()),
+  refLabel: Type.String(),
+});
+export type CrossNodeCandidate = Static<typeof CrossNodeCandidate>;
 
 // ---------- Desenhos à mão ----------
 export const Point = Type.Tuple([Type.Number(), Type.Number()]);
@@ -560,7 +582,8 @@ export type DeleteNode = Static<typeof DeleteNode>;
 export const CreateConnection = Type.Object({
   expectedRevision: Type.Integer(),
   sourceNodeId: Id,
-  targetNodeId: Id,
+  targetNodeId: Type.Optional(Id),
+  targetRef: Type.Optional(Type.String({ minLength: 1 })),
   label: Type.Optional(Type.String()),
 });
 export type CreateConnection = Static<typeof CreateConnection>;

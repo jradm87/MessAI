@@ -157,10 +157,11 @@ try {
     console.log(`Seu nó: ${me ? `${me.title} [${short(me.nodeId)}]` : nodeId ?? "?"}`);
     if (process.env["MESS_MAESTRO"] === "1") console.log("Modo Maestro: você é o condutor — pode `mess maestro recruit|dismiss|assign` e `mess band ask|say`.");
     if (process.env["MESS_ROLE"]) console.log(`Seu papel: ${process.env["MESS_ROLE"]}\n${process.env["MESS_ROLE_INSTRUCTIONS"] ?? ""}`);
-    const conn = nodeId ? await call<{ node: Node; direction: string }[]>("GET", `/v1/nodes/${nodeId}/connected`) : [];
+    const conn = nodeId ? await call<{ node: Node; direction: string; workspaceName?: string; crossWorkspace?: boolean }[]>("GET", `/v1/nodes/${nodeId}/connected`) : [];
     if (conn.length === 0) { console.log("Nenhum nó conectado ao seu."); }
     for (const c of conn) {
-      console.log(`\n--- ${c.direction === "in" ? "←" : "→"} ${c.node.kind} "${c.node.title}" [${short(c.node.nodeId)}]`);
+      const label = c.crossWorkspace && c.workspaceName ? `${c.node.title} @ ${c.workspaceName}` : c.node.title;
+      console.log(`\n--- ${c.direction === "in" ? "←" : "→"} ${c.node.kind} "${label}" [${short(c.node.nodeId)}]`);
       if (c.node.kind === "note") { if (c.node.locked) console.log("(bloqueada: somente leitura)"); if (c.node.filePath) console.log(`arquivo: ${c.node.filePath}`); console.log(c.node.content ?? ""); }
     }
   } else if (cmd === "nodes") {
@@ -189,10 +190,13 @@ try {
     console.log("ok");
   } else if (cmd === "peers") {
     if (!nodeId) throw new Error("sem MESS_NODE_ID");
-    const conn = await call<{ node: Node; direction: string; agentType?: string }[]>("GET", `/v1/nodes/${nodeId}/connected`);
+    const conn = await call<{ node: Node; direction: string; agentType?: string; workspaceName?: string; crossWorkspace?: boolean }[]>("GET", `/v1/nodes/${nodeId}/connected`);
     const peers = conn.filter((c) => c.node.kind === "terminal");
     if (!peers.length) console.log("Nenhum terminal conectado a você. Use `mess connect <nome>` ou ligue no canvas.");
-    for (const c of peers) console.log(`${short(c.node.nodeId)}  ${c.node.title.padEnd(24)} ${c.agentType && c.agentType !== "genericShell" ? c.agentType : "shell"}`);
+    for (const c of peers) {
+      const label = c.crossWorkspace && c.workspaceName ? `${c.node.title} @ ${c.workspaceName}` : c.node.title;
+      console.log(`${short(c.node.nodeId)}  ${label.padEnd(28)} ${c.agentType && c.agentType !== "genericShell" ? c.agentType : "shell"}`);
+    }
   } else if (cmd === "ask") {
     if (!nodeId) throw new Error("sem MESS_NODE_ID");
     const args = [sub, ...rest].filter((a): a is string => a !== undefined);
@@ -212,8 +216,9 @@ try {
     console.log(`respondida [${short(m.messageId)}]${m.delivered ? "" : " (destino não está rodando; fica na caixa de entrada)"}`);
   } else if (cmd === "check") {
     if (!nodeId) throw new Error("sem MESS_NODE_ID");
-    if (!sub) throw new Error("uso: mess check <id|título>");
-    const r = await call<{ agentType: string; screen: string }>("GET", `/v1/nodes/${nodeId}/check?ref=${encodeURIComponent(sub)}`);
+    const ref = [sub, ...rest].filter((a): a is string => a !== undefined).join(" ").trim();
+    if (!ref) throw new Error("uso: mess check <id|título|Nome @ Espaço>");
+    const r = await call<{ agentType: string; screen: string }>("GET", `/v1/nodes/${nodeId}/check?ref=${encodeURIComponent(ref)}`);
     console.log(r.screen || "(tela vazia ou destino não está rodando)");
   } else if (cmd === "inbox") {
     if (!nodeId) throw new Error("sem MESS_NODE_ID");
@@ -272,9 +277,15 @@ try {
     } else throw new Error("uso: mess maestro recruit|dismiss|assign");
   } else if (cmd === "connect") {
     if (!nodeId) throw new Error("sem MESS_NODE_ID");
-    const s = await snapshot(); const n = findNode(s.nodes, sub ?? "");
-    if (!n) throw new Error("nó não encontrado");
-    await call("POST", `/v1/workspaces/${workspaceId}/connections`, { expectedRevision: s.workspace.revision, sourceNodeId: nodeId, targetNodeId: n.nodeId });
-    console.log(`ligado a "${n.title}"`);
+    const targetRef = [sub, ...rest].filter((a): a is string => a !== undefined).join(" ").trim();
+    if (!targetRef) throw new Error("uso: mess connect <id|título|Nome @ Espaço>");
+    const s = await snapshot();
+    const n = !targetRef.includes("@") ? findNode(s.nodes, targetRef) : undefined;
+    await call("POST", `/v1/workspaces/${workspaceId}/connections`, {
+      expectedRevision: s.workspace.revision,
+      sourceNodeId: nodeId,
+      ...(n ? { targetNodeId: n.nodeId } : { targetRef }),
+    });
+    console.log(`ligado a "${n ? n.title : targetRef}"`);
   } else { console.error(`comando desconhecido: ${cmd} ${sub ?? ""}`); process.exit(2); }
 } catch (e) { console.error(String(e instanceof Error ? e.message : e)); process.exit(1); }

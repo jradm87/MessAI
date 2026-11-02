@@ -297,6 +297,7 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
   });
   app.get<{ Params: { id: string } }>("/v1/workspaces/:id/unread", async (req) => svc.unreadCounts(req.params.id));
   app.get<{ Params: { id: string } }>("/v1/nodes/:id/connected", async (req, reply) => send(reply, svc.connectedNodes(req.params.id)));
+  app.get<{ Params: { id: string } }>("/v1/nodes/:id/cross-candidates", async (req, reply) => send(reply, svc.listCrossCandidates(req.params.id)));
   app.post<{ Params: { id: string } }>("/v1/nodes/:id/restart", async (req, reply) => send(reply, svc.restartTerminal(req.params.id)));
   app.get<{ Params: { id: string } }>("/v1/sessions/:id", async (req, reply) => {
     const s = svc.sessions.get(req.params.id);

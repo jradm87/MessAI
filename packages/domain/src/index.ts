@@ -228,6 +228,56 @@ export function resolveNodeRef<T extends Pick<Node, "nodeId" | "title">>(nodes: 
   return fail("CONFLICT", `"${ref}" é ambíguo: ${hits.map((h) => `${h.title} [${h.nodeId.slice(0, 8)}]`).join(", ")}`);
 }
 
+/** #82 Separa uma referência "Nome @ Espaço" no último `@` quando ambos os lados têm texto. */
+export function parseCrossRef(ref: string): { nodeRef: string; workspaceRef?: string } {
+  const idx = ref.lastIndexOf("@");
+  if (idx > 0 && idx < ref.length - 1) {
+    const nodeRef = ref.slice(0, idx).trim();
+    const workspaceRef = ref.slice(idx + 1).trim();
+    if (nodeRef && workspaceRef) return { nodeRef, workspaceRef };
+  }
+  return { nodeRef: ref.trim() };
+}
+
+/**
+ * #82 Resolve um nó localmente ou entre andares/espaços.
+ * - Com `@` ("Nome @ Espaço"): filtra pelos espaços/andares que casam com nome, slug, branch ou id e resolve o nó lá dentro.
+ * - Sem `@`: tenta primeiro no próprio espaço, depois nos nós já conectados em outros espaços, e por fim em todos os espaços.
+ */
+export function resolveCrossNodeRef<
+  N extends Pick<Node, "nodeId" | "title" | "workspaceId">,
+  W extends Pick<Workspace, "workspaceId" | "name" | "branch">,
+>(
+  allNodes: N[],
+  workspaces: W[],
+  localWorkspaceId: string,
+  connectedNodeIds: ReadonlySet<string>,
+  ref: string,
+): Result<N> {
+  const { nodeRef, workspaceRef } = parseCrossRef(ref);
+  if (workspaceRef) {
+    const wr = workspaceRef.toLowerCase();
+    const wrSlug = slugify(workspaceRef);
+    const wsHits = workspaces.filter(
+      (w) =>
+        w.workspaceId.toLowerCase() === wr ||
+        w.workspaceId.toLowerCase().startsWith(wr) ||
+        w.name.toLowerCase() === wr ||
+        slugify(w.name) === wrSlug ||
+        (w.branch !== undefined && w.branch.toLowerCase() === wr),
+    );
+    if (wsHits.length === 0) return fail("NOT_FOUND", `nenhum espaço/andar corresponde a "${workspaceRef}"`);
+    const wsIds = new Set(wsHits.map((w) => w.workspaceId));
+    return resolveNodeRef(allNodes.filter((n) => wsIds.has(n.workspaceId)), nodeRef);
+  }
+  const local = resolveNodeRef(allNodes.filter((n) => n.workspaceId === localWorkspaceId), nodeRef);
+  if (local.ok || local.error.code === "CONFLICT") return local;
+  const connPeers = allNodes.filter((n) => connectedNodeIds.has(n.nodeId));
+  const peerHit = resolveNodeRef(connPeers, nodeRef);
+  if (peerHit.ok || peerHit.error.code === "CONFLICT") return peerHit;
+  return resolveNodeRef(allNodes, nodeRef);
+}
+
 
 /** Texto do papel como o agente recebe. */
 export const roleText = (role: { name: string; instructions: string }): string =>

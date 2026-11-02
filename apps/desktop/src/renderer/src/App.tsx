@@ -422,6 +422,9 @@ function Canvas({ conn }: { conn: Connection }) {
             skills, ...(n.skillIds ? { skillIds: n.skillIds } : {}), onSetSkills: (skillIds: string[]) => patchRec(n, { skillIds }, "habilidades do terminal"), onManageSkills: () => { setPref("agentsSub", "skills"); setPref("prefsTab", "agents"); setPrefsOpen(true); }, // #57
             onResume: () => void api.restart(n.nodeId).catch(() => {}),
             onFocus: () => { focusedTerm.current = n.nodeId; if (composerRef.current && composerRef.current !== n.nodeId) setComposerFor(n.nodeId); },
+            onFocusNode: (wsId: string, nodeId: string) => focusNode(wsId, nodeId),
+            onCrossConnect: (target: { targetNodeId?: string; targetRef?: string }) => mutate((r) => api.createCrossConnection(snap.workspace.workspaceId, r, n.nodeId, target)),
+            onCrossDisconnect: (connectionId: string) => mutate((r) => api.deleteConnection(connectionId, r)),
             targets: snap.nodes.filter((o) => o.nodeId !== n.nodeId && o.kind !== "text").map((o) => ({ id: o.nodeId, kind: o.kind as "terminal" | "note", title: o.title, connected: (snap.connections ?? []).some((c) => (c.sourceNodeId === n.nodeId && c.targetNodeId === o.nodeId) || (c.targetNodeId === n.nodeId && c.sourceNodeId === o.nodeId)) })) }
           : n.kind === "note" ? { title: n.title, content: n.content ?? "", editSignal: renameSig.id === n.nodeId ? renameSig.n : 0, locked: !!n.locked, ...(n.groupId ? { groupId: n.groupId } : {}), ...(n.color ? { color: n.color } : {}), ...(n.filePath ? { filePath: n.filePath } : {}), onChange: change, onDelete: del, onRename: rename, ...extras,
               onLock: (locked: boolean) => patchRec(n, { locked }, locked ? "bloquear nota" : "desbloquear nota"),
@@ -435,7 +438,7 @@ function Canvas({ conn }: { conn: Connection }) {
           : { content: n.content ?? "", onChange: change, onDelete: del, onRaise: extras.onRaise, editSignal: renameSig.id === n.nodeId ? renameSig.n : 0 },
       };
     }));
-    setEdges((prevEdges) => (snap.connections ?? []).map((c) => {
+    setEdges((prevEdges) => (snap.connections ?? []).filter((c) => snap.nodes.some((n) => n.nodeId === c.sourceNodeId) && snap.nodes.some((n) => n.nodeId === c.targetNodeId)).map((c) => {
       const style = c.style ?? "rope";
       const wasSelected = prevEdges.find((e) => e.id === c.connectionId)?.selected;
       const data: EdgeData = {

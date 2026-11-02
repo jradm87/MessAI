@@ -297,6 +297,7 @@ export class Store {
 
   // nodes
   listNodes(workspaceId: string): Node[] { return (this.db.prepare("SELECT * FROM nodes WHERE workspace_id=? ORDER BY created_at").all(workspaceId) as NodeRow[]).map(nodeFrom); }
+  listAllNodes(): Node[] { return (this.db.prepare("SELECT * FROM nodes ORDER BY created_at").all() as NodeRow[]).map(nodeFrom); }
   getNode(id: string): Node | undefined {
     const r = this.db.prepare("SELECT * FROM nodes WHERE node_id=?").get(id) as NodeRow | undefined;
     return r ? nodeFrom(r) : undefined;
@@ -383,7 +384,12 @@ export class Store {
     if (p.label !== undefined) { sets.push("label=?"); vals.push(p.label); }
     if (sets.length) this.db.prepare(`UPDATE connections SET ${sets.join(",")} WHERE connection_id=?`).run(...vals, id);
   }
-  listConnections(workspaceId: string): Connection[] { return (this.db.prepare("SELECT * FROM connections WHERE workspace_id=? ORDER BY created_at").all(workspaceId) as ConnRow[]).map(connFrom); }
+  listConnections(workspaceId: string): Connection[] {
+    return (this.db.prepare("SELECT * FROM connections WHERE workspace_id=? OR source_node_id IN (SELECT node_id FROM nodes WHERE workspace_id=?) OR target_node_id IN (SELECT node_id FROM nodes WHERE workspace_id=?) ORDER BY created_at").all(workspaceId, workspaceId, workspaceId) as ConnRow[]).map(connFrom);
+  }
+  listNodeConnections(nodeId: string): Connection[] {
+    return (this.db.prepare("SELECT * FROM connections WHERE source_node_id=? OR target_node_id=? ORDER BY created_at").all(nodeId, nodeId) as ConnRow[]).map(connFrom);
+  }
   getConnection(id: string): Connection | undefined {
     const r = this.db.prepare("SELECT * FROM connections WHERE connection_id=?").get(id) as ConnRow | undefined;
     return r ? connFrom(r) : undefined;

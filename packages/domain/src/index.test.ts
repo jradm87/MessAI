@@ -1,5 +1,5 @@
 import {  describe, expect, it } from "vitest";
-import { canMessage, formatDelivery, resolveNodeRef, canWrite, checkRevision, decideLease, normalizeGeometry, trimBuffer, MAX_BUFFER_BYTES, applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxAttachPlan, shellQuote, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, alignGeometries, gridLayout, agentKind, agentResume, stripAnsi } from "./index.js";
+import { canMessage, formatDelivery, resolveNodeRef, parseCrossRef, resolveCrossNodeRef, canWrite, checkRevision, decideLease, normalizeGeometry, trimBuffer, MAX_BUFFER_BYTES, applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxAttachPlan, shellQuote, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, alignGeometries, gridLayout, agentKind, agentResume, stripAnsi } from "./index.js";
 
 describe("revisão", () => {
   it("aceita revisão igual e devolve próxima", () => {
@@ -188,6 +188,37 @@ describe("andares", () => {
     expect(floorGitPlan({ groundCwd: "/p", path: "/f", branch: "feat", newBranch: true, base: "main" })).toEqual([["-C", "/p", "worktree", "add", "-b", "feat", "/f", "main"]]);
     expect(floorGitPlan({ groundCwd: "/p", path: "/f", branch: "feat", newBranch: false })).toEqual([["-C", "/p", "worktree", "add", "/f", "feat"]]);
     expect(parseMergeConflicts("Auto-merging a.txt\nCONFLICT (content): Merge conflict in a.txt\nCONFLICT (add/add): Merge conflict in dir/b.md\nAutomatic merge failed")).toEqual(["a.txt", "dir/b.md"]);
+  });
+
+  it("resolve referências Nome @ Espaço entre andares e entre espaços (#82)", () => {
+    expect(parseCrossRef("Worker @ Backend")).toEqual({ nodeRef: "Worker", workspaceRef: "Backend" });
+    expect(parseCrossRef("Worker")).toEqual({ nodeRef: "Worker" });
+    const workspaces = [
+      { workspaceId: "ws-ground-1", name: "Principal" },
+      { workspaceId: "ws-floor-1", name: "Andar Login", branch: "feat/login" },
+      { workspaceId: "ws-other-1", name: "Backend API" },
+    ];
+    const allNodes = [
+      { nodeId: "node-11111111", title: "Worker", workspaceId: "ws-ground-1" },
+      { nodeId: "node-22222222", title: "Worker", workspaceId: "ws-floor-1" },
+      { nodeId: "node-33333333", title: "API Server", workspaceId: "ws-other-1" },
+    ];
+    expect(resolveCrossNodeRef(allNodes, workspaces, "ws-ground-1", new Set(), "Worker")).toEqual({
+      ok: true,
+      value: allNodes[0],
+    });
+    expect(resolveCrossNodeRef(allNodes, workspaces, "ws-ground-1", new Set(), "Worker @ Andar Login")).toEqual({
+      ok: true,
+      value: allNodes[1],
+    });
+    expect(resolveCrossNodeRef(allNodes, workspaces, "ws-ground-1", new Set(), "Worker @ feat/login")).toEqual({
+      ok: true,
+      value: allNodes[1],
+    });
+    expect(resolveCrossNodeRef(allNodes, workspaces, "ws-ground-1", new Set(["node-33333333"]), "API Server")).toEqual({
+      ok: true,
+      value: allNodes[2],
+    });
   });
 });
 

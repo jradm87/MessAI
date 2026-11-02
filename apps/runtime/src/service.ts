@@ -2,7 +2,7 @@ import { AGENT_ENV, type TreeEntry, type FileContent, type FsOp, type SearchHit,
 import type { RuntimeSettings, PatchRuntimeSettings, PresetInput, Skill, CreateSkill, PatchSkill, FindHit, FindKind, NodeGroup, CreateNodeGroup, PatchNodeGroup, AttentionItem, Score, ScoreNode, SaveScore, PatchScore, PlaceScore, PlaceScoreResult } from "@messai/contracts";
 import type { ChatAttachment, ExportAttachment, InstructionsStatus, InstructionFileInfo, PutInstructions, SyncInstructions } from "@messai/contracts";
 import type { Band, CreateBand, PatchBand, AskBand, BandAnswer, BandAskResult, MaestroRecruit } from "@messai/contracts";
-import type { FloorHookSection, FloorHooksConfig, PutFloorHooks, FloorHookStatus, FloorHooksState, RunFloorHookInput, StopFloorHookInput, FloorCopyInfo, PutFloorExcludes } from "@messai/contracts";
+import type { FloorHookSection, FloorHooksConfig, PutFloorHooks, FloorHookStatus, FloorHooksState, RunFloorHookInput, StopFloorHookInput, FloorCopyInfo, PutFloorExcludes, ConnectedPeer, CrossNodeCandidate } from "@messai/contracts";
 import { readProcTree } from "./procs.js";
 import type { SessionProcs, KillProcInput } from "@messai/contracts";
 import { listProviders } from "./providers.js";
@@ -10,7 +10,7 @@ import { probeAccounts } from "./accounts.js";
 import { backupName, copyBackupFiles, dataStats, isBackupName, listBackups, validateBackup, validateMoveTarget, writeManifest, type BackupEntry } from "./data.js";
 import { BUILD_VERSION } from "@messai/contracts";
 import { defaultPresets, parsePresets, validatePresets, PRESETS_META_KEY } from "./presets.js";
-import { applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, DEFAULT_FLOOR_EXCLUDES, normalizeFloorExcludes, shouldExcludeFloorDir, safeRelPath, looksBinary, canMessage, checkRevision, formatDelivery, normalizeGeometry, planLocalTerminal, resolveNodeRef, validateNewNode, agentKind, agentResume, stripAnsi, fail, succeed, type Result, applySkills, skillsText, placeGeometries, connectionsWithin } from "@messai/domain";
+import { applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, DEFAULT_FLOOR_EXCLUDES, normalizeFloorExcludes, shouldExcludeFloorDir, safeRelPath, looksBinary, canMessage, checkRevision, formatDelivery, normalizeGeometry, planLocalTerminal, resolveNodeRef, resolveCrossNodeRef, validateNewNode, agentKind, agentResume, stripAnsi, fail, succeed, type Result, applySkills, skillsText, placeGeometries, connectionsWithin } from "@messai/domain";
 import { randomUUID } from "node:crypto";
 import { Companion } from "./companion.js";
 import type { Store } from "@messai/storage";
@@ -1401,14 +1401,37 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     return succeed(undefined);
   }
 
+  // ---- #82 conexões locais, entre andares e entre espaços ----
+  private resolveCrossTarget(fromWorkspaceId: string, fromNodeId: string | undefined, ref: string): Result<Node> {
+    const connIds = new Set(
+      fromNodeId
+        ? this.store.listNodeConnections(fromNodeId).map((c) => (c.sourceNodeId === fromNodeId ? c.targetNodeId : c.sourceNodeId))
+        : [],
+    );
+    return resolveCrossNodeRef(this.store.listAllNodes(), this.store.listWorkspaces(), fromWorkspaceId, connIds, ref);
+  }
+  private publishConnectionEndpoints(c: Pick<Connection, "workspaceId" | "sourceNodeId" | "targetNodeId">): void {
+    const wsIds = new Set<string>([c.workspaceId]);
+    const a = this.store.getNode(c.sourceNodeId); if (a) wsIds.add(a.workspaceId);
+    const b = this.store.getNode(c.targetNodeId); if (b) wsIds.add(b.workspaceId);
+    for (const id of wsIds) if (this.store.getWorkspace(id)) this.publish(id);
+  }
   patchConnection(id: string, input: PatchConnection): Result<Connection> {
     const c = this.store.getConnection(id);
     if (!c) return fail("NOT_FOUND", "conexão não encontrada");
-    const w = this.store.getWorkspace(c.workspaceId)!;
-    const rev = checkRevision(w, input.expectedRevision);
+    let revWs = this.store.getWorkspace(c.workspaceId)!;
+    let rev = checkRevision(revWs, input.expectedRevision);
+    if (!rev.ok) {
+      for (const nid of [c.sourceNodeId, c.targetNodeId]) {
+        const nw = this.store.getNode(nid)?.workspaceId;
+        if (!nw || nw === revWs.workspaceId) continue;
+        const tw = this.store.getWorkspace(nw);
+        if (tw) { const r2 = checkRevision(tw, input.expectedRevision); if (r2.ok) { revWs = tw; rev = r2; break; } }
+      }
+    }
     if (!rev.ok) return rev;
-    this.store.transaction(() => { this.store.updateConnection(id, { style: input.style, label: input.label }); this.store.bumpRevision(c.workspaceId, rev.value); });
-    this.publish(c.workspaceId);
+    this.store.transaction(() => { this.store.updateConnection(id, { style: input.style, label: input.label }); this.store.bumpRevision(revWs.workspaceId, rev.value); });
+    this.publishConnectionEndpoints(c);
     return succeed(this.store.getConnection(id)!);
   }
   createConnection(workspaceId: string, input: CreateConnection): Result<Connection> {
@@ -1416,40 +1439,95 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     if (!w) return fail("NOT_FOUND", "espaço não encontrado");
     const rev = checkRevision(w, input.expectedRevision);
     if (!rev.ok) return rev;
-    const a = this.store.getNode(input.sourceNodeId), b = this.store.getNode(input.targetNodeId);
-    if (!a || !b || a.workspaceId !== workspaceId || b.workspaceId !== workspaceId) return fail("INVALID", "nós inválidos para este espaço");
+    const a = this.store.getNode(input.sourceNodeId);
+    if (!a) return fail("INVALID", "nós inválidos para este espaço");
+    let b: Node | undefined;
+    if (input.targetNodeId) {
+      b = this.store.getNode(input.targetNodeId);
+      if (!b) return fail("INVALID", "nós inválidos para este espaço");
+    } else if (input.targetRef) {
+      const r = this.resolveCrossTarget(workspaceId, a.nodeId, input.targetRef);
+      if (!r.ok) return r;
+      b = r.value;
+    } else {
+      return fail("INVALID", "informe targetNodeId ou targetRef");
+    }
+    if (a.workspaceId !== workspaceId && b.workspaceId !== workspaceId) return fail("INVALID", "nós inválidos para este espaço");
     if (a.nodeId === b.nodeId) return fail("INVALID", "um nó não se conecta a si mesmo");
-    if (this.store.listConnections(workspaceId).some((c) => c.sourceNodeId === a.nodeId && c.targetNodeId === b.nodeId)) return fail("CONFLICT", "conexão já existe");
+    if (this.store.listNodeConnections(a.nodeId).some((c) => (c.sourceNodeId === a.nodeId && c.targetNodeId === b.nodeId) || (c.sourceNodeId === b.nodeId && c.targetNodeId === a.nodeId && a.workspaceId !== b.workspaceId))) {
+      return fail("CONFLICT", "conexão já existe");
+    }
     const c: Connection = { connectionId: newId(), workspaceId, sourceNodeId: a.nodeId, targetNodeId: b.nodeId, createdAt: nowIso(), ...(input.label ? { label: input.label } : {}) };
     this.store.transaction(() => { this.store.insertConnection(c); this.store.bumpRevision(workspaceId, rev.value); });
-    this.publish(workspaceId);
+    this.publishConnectionEndpoints(c);
     return succeed(c);
   }
 
   deleteConnection(connectionId: string, expectedRevision: number): Result<void> {
     const c = this.store.getConnection(connectionId);
     if (!c) return fail("NOT_FOUND", "conexão não encontrada");
-    const w = this.store.getWorkspace(c.workspaceId)!;
-    const rev = checkRevision(w, expectedRevision);
+    let revWs = this.store.getWorkspace(c.workspaceId)!;
+    let rev = checkRevision(revWs, expectedRevision);
+    if (!rev.ok) {
+      for (const nid of [c.sourceNodeId, c.targetNodeId]) {
+        const nw = this.store.getNode(nid)?.workspaceId;
+        if (!nw || nw === revWs.workspaceId) continue;
+        const tw = this.store.getWorkspace(nw);
+        if (tw) { const r2 = checkRevision(tw, expectedRevision); if (r2.ok) { revWs = tw; rev = r2; break; } }
+      }
+    }
     if (!rev.ok) return rev;
-    this.store.transaction(() => { this.store.deleteConnection(connectionId); this.store.bumpRevision(c.workspaceId, rev.value); });
-    this.publish(c.workspaceId);
+    this.store.transaction(() => { this.store.deleteConnection(connectionId); this.store.bumpRevision(revWs.workspaceId, rev.value); });
+    this.publishConnectionEndpoints(c);
     return succeed(undefined);
   }
 
-  /** Nós ligados a um nó, nos dois sentidos. Base para agentes lerem contexto. */
-  connectedNodes(nodeId: string): Result<{ node: Node; direction: "in" | "out"; connectionId: string; agentType?: string }[]> {
+  /** Nós ligados a um nó, nos dois sentidos (inclusive entre andares e entre espaços). Base para agentes lerem contexto. */
+  connectedNodes(nodeId: string): Result<ConnectedPeer[]> {
     const me = this.store.getNode(nodeId);
     if (!me) return fail("NOT_FOUND", "nó não encontrado");
-    const out: { node: Node; direction: "in" | "out"; connectionId: string; agentType?: string }[] = [];
-    for (const c of this.store.listConnections(me.workspaceId)) {
+    const out: ConnectedPeer[] = [];
+    for (const c of this.store.listNodeConnections(nodeId)) {
       const otherId = c.sourceNodeId === nodeId ? c.targetNodeId : c.targetNodeId === nodeId ? c.sourceNodeId : null;
       if (!otherId) continue;
       const node = this.store.getNode(otherId);
       if (!node) continue;
-      const row: { node: Node; direction: "in" | "out"; connectionId: string; agentType?: string } = { node, direction: c.sourceNodeId === nodeId ? "out" : "in", connectionId: c.connectionId };
+      const ws = this.store.getWorkspace(node.workspaceId);
+      const row: ConnectedPeer = {
+        node,
+        direction: c.sourceNodeId === nodeId ? "out" : "in",
+        connectionId: c.connectionId,
+        workspaceId: node.workspaceId,
+        workspaceName: ws?.name ?? "",
+        crossWorkspace: node.workspaceId !== me.workspaceId,
+      };
       if (node.kind === "terminal" && node.sessionId) { const s = this.store.getSession(node.sessionId); if (s) row.agentType = agentKind(s.command, s.args).agentType; }
       out.push(row);
+    }
+    return succeed(out);
+  }
+
+  /** #82 Lista terminais e notas de outros andares/espaços disponíveis para conexão cross-floor/cross-workspace. */
+  listCrossCandidates(nodeId: string): Result<CrossNodeCandidate[]> {
+    const me = this.store.getNode(nodeId);
+    if (!me) return fail("NOT_FOUND", "nó não encontrado");
+    const wsMap = new Map(this.store.listWorkspaces().map((w) => [w.workspaceId, w]));
+    const out: CrossNodeCandidate[] = [];
+    for (const n of this.store.listAllNodes()) {
+      if (n.workspaceId === me.workspaceId) continue;
+      if (n.kind !== "terminal" && n.kind !== "note") continue;
+      const w = wsMap.get(n.workspaceId);
+      if (!w) continue;
+      out.push({
+        nodeId: n.nodeId,
+        title: n.title,
+        kind: n.kind,
+        workspaceId: w.workspaceId,
+        workspaceName: w.name,
+        ...(w.parentId ? { parentId: w.parentId } : {}),
+        ...(w.branch ? { branch: w.branch } : {}),
+        refLabel: `${n.title} @ ${w.name}`,
+      });
     }
     return succeed(out);
   }
@@ -1460,20 +1538,25 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     return { isAgent: false, agentType: "genericShell" };
   }
 
+  private senderLabel(from: Node, targetWorkspaceId: string): string {
+    if (from.workspaceId === targetWorkspaceId) return from.title;
+    const w = this.store.getWorkspace(from.workspaceId);
+    return w ? `${from.title} @ ${w.name}` : from.title;
+  }
+
   /** Envia mensagem de um nó terminal a outro nó conectado; entrega como prompt se o destino estiver rodando. */
   sendMessage(fromNodeId: string, input: SendMessage): Result<Message> {
     const from = this.store.getNode(fromNodeId);
     if (!from) return fail("NOT_FOUND", "nó de origem não encontrado");
-    const nodes = this.store.listNodes(from.workspaceId);
-    const to = resolveNodeRef(nodes, input.to);
+    const to = this.resolveCrossTarget(from.workspaceId, fromNodeId, input.to);
     if (!to.ok) return to;
     if (to.value.kind !== "terminal") return fail("INVALID", "o destino precisa ser um terminal");
-    const allowed = canMessage(this.store.listConnections(from.workspaceId), fromNodeId, to.value.nodeId);
+    const allowed = canMessage(this.store.listNodeConnections(fromNodeId), fromNodeId, to.value.nodeId);
     if (!allowed.ok) return allowed;
-    const m: Message = { messageId: newId(), workspaceId: from.workspaceId, fromNodeId, toNodeId: to.value.nodeId, text: input.text, createdAt: nowIso(), delivered: false, ...(input.replyTo ? { replyTo: input.replyTo } : {}) };
+    const m: Message = { messageId: newId(), workspaceId: to.value.workspaceId, fromNodeId, toNodeId: to.value.nodeId, text: input.text, createdAt: nowIso(), delivered: false, ...(input.replyTo ? { replyTo: input.replyTo } : {}) };
     this.store.insertMessage(m);
     if (to.value.sessionId) {
-      const d = this.sessions.deliver(to.value.sessionId, formatDelivery({ messageId: m.messageId, fromTitle: from.title, text: m.text, replyTo: m.replyTo }));
+      const d = this.sessions.deliver(to.value.sessionId, formatDelivery({ messageId: m.messageId, fromTitle: this.senderLabel(from, to.value.workspaceId), text: m.text, replyTo: m.replyTo }));
       if (d.ok) { this.store.markDelivered(m.messageId); m.delivered = true; }
     }
     this.emit("message", m);
@@ -1488,16 +1571,15 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
   async ask(fromNodeId: string, input: { to: string; text: string; timeoutMs?: number; noWait?: boolean; replyTo?: string }, opts: { bypassConnection?: boolean } = {}): Promise<Result<{ messageId: string; delivered: boolean; response: string; timedOut: boolean; agentType: string }>> {
     const from = this.store.getNode(fromNodeId);
     if (!from) return fail("NOT_FOUND", "nó de origem não encontrado");
-    const nodes = this.store.listNodes(from.workspaceId);
-    const to = resolveNodeRef(nodes, input.to);
+    const to = this.resolveCrossTarget(from.workspaceId, fromNodeId, input.to);
     if (!to.ok) return to;
     if (to.value.kind !== "terminal") return fail("INVALID", "o destino precisa ser um terminal");
-    const allowed = opts.bypassConnection && fromNodeId !== to.value.nodeId ? succeed(undefined) : canMessage(this.store.listConnections(from.workspaceId), fromNodeId, to.value.nodeId); // #70 mesma banda dispensa a ligação
+    const allowed = opts.bypassConnection && fromNodeId !== to.value.nodeId ? succeed(undefined) : canMessage(this.store.listNodeConnections(fromNodeId), fromNodeId, to.value.nodeId); // #70 mesma banda dispensa a ligação
     if (!allowed.ok) return allowed;
     const kind = this.kindOfNode(to.value);
-    const m: Message = { messageId: newId(), workspaceId: from.workspaceId, fromNodeId, toNodeId: to.value.nodeId, text: input.text, createdAt: nowIso(), delivered: false, ...(input.replyTo ? { replyTo: input.replyTo } : {}) };
+    const m: Message = { messageId: newId(), workspaceId: to.value.workspaceId, fromNodeId, toNodeId: to.value.nodeId, text: input.text, createdAt: nowIso(), delivered: false, ...(input.replyTo ? { replyTo: input.replyTo } : {}) };
     this.store.insertMessage(m);
-    const payload = formatDelivery({ messageId: m.messageId, fromTitle: from.title, text: m.text, replyTo: input.replyTo });
+    const payload = formatDelivery({ messageId: m.messageId, fromTitle: this.senderLabel(from, to.value.workspaceId), text: m.text, replyTo: input.replyTo });
     const sid = to.value.sessionId;
     const deliverNow = () => { const d = this.sessions.deliver(sid!, payload); if (d.ok) { this.store.markDelivered(m.messageId); m.delivered = true; } return d.ok; };
     if (!sid || this.sessions.get(sid)?.state !== "running") {
@@ -1531,11 +1613,10 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
   checkPeer(fromNodeId: string, ref: string): Result<{ agentType: string; screen: string }> {
     const from = this.store.getNode(fromNodeId);
     if (!from) return fail("NOT_FOUND", "nó de origem não encontrado");
-    const nodes = this.store.listNodes(from.workspaceId);
-    const to = resolveNodeRef(nodes, ref);
+    const to = this.resolveCrossTarget(from.workspaceId, fromNodeId, ref);
     if (!to.ok) return to;
     if (to.value.kind !== "terminal") return fail("INVALID", "o destino precisa ser um terminal");
-    const allowed = canMessage(this.store.listConnections(from.workspaceId), fromNodeId, to.value.nodeId);
+    const allowed = canMessage(this.store.listNodeConnections(fromNodeId), fromNodeId, to.value.nodeId);
     if (!allowed.ok) return allowed;
     const screen = to.value.sessionId ? this.sessions.screen(to.value.sessionId) : undefined;
     return succeed({ agentType: this.kindOfNode(to.value).agentType, screen: screen ?? "" });
@@ -1544,8 +1625,11 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
   inbox(nodeId: string, unreadOnly: boolean, markRead: boolean): Result<{ messages: (Message & { fromTitle: string })[] }> {
     const me = this.store.getNode(nodeId);
     if (!me) return fail("NOT_FOUND", "nó não encontrado");
-    const titles = new Map(this.store.listNodes(me.workspaceId).map((n) => [n.nodeId, n.title]));
-    const list = this.store.listInbox(nodeId, unreadOnly).map((m) => ({ ...m, fromTitle: titles.get(m.fromNodeId) ?? m.fromNodeId.slice(0, 8) }));
+    const list = this.store.listInbox(nodeId, unreadOnly).map((m) => {
+      const fn = this.store.getNode(m.fromNodeId);
+      const fromTitle = fn ? this.senderLabel(fn, me.workspaceId) : m.fromNodeId.slice(0, 8);
+      return { ...m, fromTitle };
+    });
     if (markRead && list.length) { this.store.markRead(list.map((m) => m.messageId), nowIso()); this.publish(me.workspaceId); }
     return succeed({ messages: list });
   }
