@@ -26,8 +26,8 @@
 ### Fase 3 — Canvas / UX ✅
 - [x] #41 FTS5 · [x] #77 Undo/redo · [x] #78 Grupos+snap · [x] #69 Busca global — `253ae0c` · [x] #42 Fluidez — `192ff00` · [x] #47 Presença — `2c68c06` · [x] #71 Partituras — `3ac63dd` · [x] #74 Fichários — `5f7b128`
 
-### Fase 4 — Agentes / colaboração
-- [ ] #70 Bandas · #29 Modo Maestro · #76 CLAUDE/AGENTS.md · #79 Chat anexos · #80 Monitor de processos
+### Fase 4 — Agentes / colaboração ✅
+- [x] #70 Bandas — `0f26c7a` · [x] #29 Modo Maestro — `0f26c7a` · [x] #76 CLAUDE/AGENTS.md — `73a886b` · [x] #79 Chat anexos — `a010f09` · [x] #80 Monitor de processos — concluído
 
 ### Fase 5 — Andares
 - [ ] #75 Hooks de andar · #81 Cópia isolada · #82 Conexões cross-floor · #31 PR nos andares
@@ -42,17 +42,17 @@
 - [ ] #26 Portais · #73 Portais de dispositivo · #30 Editor+git · #28 Hub (dep #87) · #93 (MESS-09) modo isolado
 
 ## Estado atual
-- **Fase atual:** 4 (Agentes / colaboração)
-- **Concluídas:** Fases 0, 1, 2 e 3 completas (#90 #40 · #54 #65–#68 · #55–#58 #60–#64 #38 · #41 #42 #47 #69 #71 #74 #77 #78). Fase 2: só #59 (controle remoto) ficou como stub, vai com o hub #28.
-- **Em andamento:** (nenhuma — Fase 3 concluída; próxima: #70 Bandas → #29 Maestro → #76 → #79 → #80)
+- **Fase atual:** 5 (Andares)
+- **Concluídas:** Fases 0, 1, 2, 3 e 4 completas (#90 #40 · #54 #65–#68 · #55–#58 #60–#64 #38 · #41 #42 #47 #69 #71 #74 #77 #78 · #70 #29 #76 #79 #80). Fase 2: só #59 (controle remoto) ficou como stub, vai com o hub #28.
+- **Em andamento:** (nenhuma — Fase 4 concluída; próxima: #75 Hooks de andar → #81 → #82 → #31)
 - **Bloqueadas:** (nenhuma)
 - **Dívida paga:** `tests/e2e/pilot.test.ts` voltou a 18/18 (espaço padrão, tela de encerramento, nós de teste em espaço livre, compositor aberto, pílula do espaço atual).
-- **Commits (assinados, branch `auto/roadmap`):** `e781477` setup · `df6f553` #90 · `01f125c` progress · `a498555` #54 · `09b424f` progress · `6d7fb11` #65 · `bde3e91` progress · `8393b0a` #66 · `24b28ea` progress · `f396041` #67 · `037e003` #67 escopo · `f719476` #64 shell · `c152e06` #55 · `9bfac0d` progress · `53bf1bf` #56 runtime · `5a79039` #56 desktop · `d8391fa` progress · `f031e87` #57 runtime · `a074656` #57 desktop · `6f1e147` progress · `a9654c2` e2e piloto · `c0af29a` #58 · `2e96d9d` progress · `f90d4db` #61+#63 · `10148f9` progress · `65b020a` #60 · `5a054c6` progress · `3b439f9` #62 runtime · `6e00459` #62 desktop · `3d5d748` progress · `1794568` #41 · `89283b2` progress · `ae61feb` #77 · `dfec519` progress · `18c3123` #78 runtime · `8d248fc` #78 desktop
-- **Testes:** 183 verdes na suíte determinística (`packages apps tests/integration`) + e2e Electron real fora do CI: `hud.test.ts` 3/3, `prefs.test.ts` 4/4, `terminal-prefs.test.ts` 3/3, `agents-prefs.test.ts` 3/3, `shortcuts.test.ts` 2/2, `about-updates.test.ts` 3/3, `data-prefs.test.ts` 3/3, `undo.test.ts` 3/3, `groups.test.ts` 2/2, `palette` 3/3, `fluidez` 1/1, `presence` 2/2, `scores` 1/1, `binder` 5/5, `pilot` 18/18, `pilot.test.ts` 14/18
-- **Próximas (Fase 4):** #70 Bandas → #29 Maestro → #76 CLAUDE/AGENTS.md → #79 anexos no chat → #80 monitor de processos
+- **Commits (assinados, branch `auto/roadmap` + `auto/fase4`):** `e781477` setup · `df6f553` #90 · `01f125c` progress · `a498555` #54 · `09b424f` progress · `6d7fb11` #65 · `bde3e91` progress · `8393b0a` #66 · `24b28ea` progress · `f396041` #67 · `037e003` #67 escopo · `f719476` #64 shell · `c152e06` #55 · `9bfac0d` progress · `53bf1bf` #56 runtime · `5a79039` #56 desktop · `d8391fa` progress · `f031e87` #57 runtime · `a074656` #57 desktop · `6f1e147` progress · `a9654c2` e2e piloto · `c0af29a` #58 · `2e96d9d` progress · `f90d4db` #61+#63 · `10148f9` progress · `65b020a` #60 · `5a054c6` progress · `3b439f9` #62 runtime · `6e00459` #62 desktop · `3d5d748` progress · `1794568` #41 · `89283b2` progress · `ae61feb` #77 · `dfec519` progress · `18c3123` #78 runtime · `8d248fc` #78 desktop · `0f26c7a` #70+#29 · `a010f09` #79 · `73a886b` #76
+- **Testes:** 207 verdes na suíte determinística (`packages apps tests/integration`) + e2e Electron real fora do CI: `hud.test.ts` 3/3, `prefs.test.ts` 4/4, `terminal-prefs.test.ts` 3/3, `agents-prefs.test.ts` 3/3, `shortcuts.test.ts` 2/2, `about-updates.test.ts` 3/3, `data-prefs.test.ts` 3/3, `undo.test.ts` 3/3, `groups.test.ts` 2/2, `palette` 3/3, `fluidez` 1/1, `presence` 2/2, `scores` 1/1, `binder` 5/5, `bands` 3/3, `chat-attachments` 3/3, `instructions` 1/1, `procs` 1/1, `pilot` 18/18
+- **Próximas (Fase 5):** #75 Hooks de andar → #81 Cópia isolada → #82 Conexões cross-floor → #31 PR nos andares
 - **Nota:** shutdown do runtime endurecido (zumbi segurando porta) — achado pelo teste do #65.
 - **Nota:** achado pelo e2e do #56: modal ficava atrás da barra inferior (z-index) — corrigido em `5a79039`. CI verde em `c152e06`, `9bfac0d`, `53bf1bf`.
-- **Nota:** CI passou a rodar em `auto/**` a partir de `c152e06` (antes só `main`); BUILD_VERSION atual = **18** (o app troca o runtime antigo sozinho ao abrir).
+- **Nota:** CI passou a rodar em `auto/**` a partir de `c152e06` (antes só `main`); BUILD_VERSION atual = **19** (o app troca o runtime antigo sozinho ao abrir).
 
 ## Log de execução
 - Setup: branch `auto/roadmap`, assinatura GPG local configurada (Good signature verificada), baseline 78 verdes.

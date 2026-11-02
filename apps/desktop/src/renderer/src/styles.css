@@ -650,3 +650,11 @@ button.danger:hover { border-color: var(--danger); color: var(--danger-fg); }
 .instr-editor { min-height: 200px; font-family: var(--mono, monospace); font-size: 12px; }
 .ws-instr-section { border-top: 1px solid var(--line); padding-top: 8px; margin-top: 4px; }
 .pa-chip.warn { background: rgba(229, 162, 58, 0.2); color: #e5a23a; }
+
+/* #80 monitor de processos e métrica de memória */
+.mem-pill { display: inline-flex; align-items: center; gap: 3px; height: 16px; padding: 0 6px; border-radius: 8px; font-size: 10px; cursor: pointer; background: var(--surface-2); border: 1px solid var(--line); color: var(--fg); white-space: nowrap; }
+.mem-pill.over { background: rgba(255, 107, 107, 0.22); border-color: #ff6b6b; color: #ff6b6b; font-weight: 600; }
+.term-procs { position: absolute; top: 4px; left: 6px; right: 6px; z-index: 15; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.45); display: flex; flex-direction: column; gap: 6px; max-height: 78%; overflow: auto; }
+.proc-list { display: flex; flex-direction: column; gap: 3px; }
+.proc-row { display: flex; align-items: center; gap: 8px; font-size: 11px; padding: 3px 6px; border-radius: 4px; background: var(--surface-2); }
+.proc-cmd { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

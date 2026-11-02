@@ -78,6 +78,9 @@ function PresetEditor({ initial, isNew, onSave, onCancel }: { initial: PresetInp
 
 export function PrefsTerminal({ api, onPresetsChanged }: { api: Api; onPresetsChanged: () => void }) {
   const [presets, setPresets] = useState<Preset[] | null>(null);
+  const [rtMemLimit, setRtMemLimit] = useState(0);
+  const [rtMemAction, setRtMemAction] = useState<"warn" | "kill">("warn");
+  useEffect(() => { api.settings().then((r) => { setRtMemLimit(r.termMemLimitMb ?? 0); setRtMemAction(r.termMemAction ?? "warn"); }).catch(() => {}); }, [api]);
   const [err, setErr] = useState("");
   const [edit, setEdit] = useState<{ p: PresetInput; isNew: boolean; index: number } | null>(null);
   useEffect(() => { api.presets().then(setPresets).catch((e) => setErr(String(e))); }, [api]);
@@ -162,6 +165,15 @@ export function PrefsTerminal({ api, onPresetsChanged }: { api: Api; onPresetsCh
         <div className="pf-ctl">
           {memLimit && <><input type="number" className="pt-input" min={SCROLLBACK_MIN} max={SCROLLBACK_MAX} step={500} value={scrollback} onChange={(e) => setPref("termScrollback", clampScrollback(Number(e.target.value)))} data-testid="term-scrollback" /><span className="mut">linhas</span></>}
           <Toggle on={memLimit} onChange={(v) => setPref("termMemLimit", v)} testId="term-memlimit" />
+        </div></div>
+      <div className="pf-field"><div className="pf-lbl"><span>Limite de memória RSS por terminal (processos)</span><small>0 = sem limite global (cada nó pode definir o seu no monitor de processos). Ao estourar, avisa ou encerra o processo filho.</small></div>
+        <div className="pf-ctl">
+          <input type="number" className="pt-input" min={0} max={65536} step={64} value={rtMemLimit} onChange={(e) => { const v = Math.max(0, Number(e.target.value) || 0); setRtMemLimit(v); void api.patchSettings({ termMemLimitMb: v }); }} data-testid="term-rss-limit" />
+          <span className="mut">MB</span>
+          <select value={rtMemAction} onChange={(e) => { const a = e.target.value === "kill" ? "kill" : "warn"; setRtMemAction(a); void api.patchSettings({ termMemAction: a }); }} data-testid="term-rss-action">
+            <option value="warn">Só avisar</option>
+            <option value="kill">Encerrar processo ao estourar</option>
+          </select>
         </div></div>
       <div className="pf-field"><div className="pf-lbl"><span>Copiar texto ao selecionar</span><small>Selecionar no terminal já copia para a área de transferência.</small></div>
         <div className="pf-ctl"><Toggle on={copyOnSelect} onChange={(v) => setPref("termCopyOnSelect", v)} testId="term-copy" /></div></div>

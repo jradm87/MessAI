@@ -2,6 +2,8 @@ import { AGENT_ENV, type TreeEntry, type FileContent, type FsOp, type SearchHit,
 import type { RuntimeSettings, PatchRuntimeSettings, PresetInput, Skill, CreateSkill, PatchSkill, FindHit, FindKind, NodeGroup, CreateNodeGroup, PatchNodeGroup, AttentionItem, Score, ScoreNode, SaveScore, PatchScore, PlaceScore, PlaceScoreResult } from "@messai/contracts";
 import type { ChatAttachment, ExportAttachment, InstructionsStatus, InstructionFileInfo, PutInstructions, SyncInstructions } from "@messai/contracts";
 import type { Band, CreateBand, PatchBand, AskBand, BandAnswer, BandAskResult, MaestroRecruit } from "@messai/contracts";
+import { readProcTree } from "./procs.js";
+import type { SessionProcs, KillProcInput } from "@messai/contracts";
 import { listProviders } from "./providers.js";
 import { probeAccounts } from "./accounts.js";
 import { backupName, copyBackupFiles, dataStats, isBackupName, listBackups, validateBackup, validateMoveTarget, writeManifest, type BackupEntry } from "./data.js";
@@ -903,9 +905,19 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
   resetPresets(): PresetInput[] { const d = defaultPresets(this.cfg.defaultShell); this.store.setMeta(PRESETS_META_KEY, JSON.stringify(d)); return d; }
 
   // #55 — configurações do runtime, persistidas na tabela meta (chave `settings.<nome>`).
-  settings(): RuntimeSettings { return { restoreSessions: this.store.getMeta("settings.restoreSessions") !== "0" }; }
+  settings(): RuntimeSettings {
+    const lim = Number(this.store.getMeta("settings.termMemLimitMb") ?? 0) || 0;
+    const act = this.store.getMeta("settings.termMemAction");
+    return {
+      restoreSessions: this.store.getMeta("settings.restoreSessions") !== "0",
+      ...(lim > 0 ? { termMemLimitMb: lim } : {}),
+      ...(act === "kill" || act === "warn" ? { termMemAction: act } : {}),
+    };
+  }
   patchSettings(p: PatchRuntimeSettings): Result<RuntimeSettings> {
     if (p.restoreSessions !== undefined) this.store.setMeta("settings.restoreSessions", p.restoreSessions ? "1" : "0");
+    if (p.termMemLimitMb !== undefined) this.store.setMeta("settings.termMemLimitMb", String(Math.max(0, Math.round(p.termMemLimitMb))));
+    if (p.termMemAction !== undefined) this.store.setMeta("settings.termMemAction", p.termMemAction === "kill" ? "kill" : "warn");
     return succeed(this.settings());
   }
 
@@ -1481,5 +1493,47 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     let roleId: string | null = null;
     if (roleName !== null) { const r = this.store.listRoles().find((x) => x.name.toLowerCase() === roleName.toLowerCase()); if (!r) return fail("NOT_FOUND", `papel não encontrado: ${roleName}`); roleId = r.roleId; }
     return this.setNodeRole(t.value.nodeId, roleId);
+  }
+
+  // ---------- #80 Monitor de processos do terminal + limite de memória ----------
+  private effectiveRootPid(s: Session): number | null {
+    if (s.state !== "running") return null;
+    if (s.persistent) {
+      try {
+        const out = execFileSync("tmux", ["-L", this.cfg.tmuxSocket, "list-panes", "-t", tmuxSessionName(s.sessionId), "-F", "#{pane_pid}"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+        const p = Number(out.split(/\s+/)[0]);
+        if (Number.isInteger(p) && p > 0) return p;
+      } catch { /* fallback pro pid do pty */ }
+    }
+    return s.pid ?? null;
+  }
+  sessionProcs(sessionId: string): Result<SessionProcs> {
+    const s = this.sessions.get(sessionId);
+    if (!s) return fail("NOT_FOUND", "sessão não encontrada");
+    const node = this.store.getNode(s.nodeId);
+    const cfg = this.settings();
+    const limitMb = (node?.memLimitMb && node.memLimitMb > 0) ? node.memLimitMb : (cfg.termMemLimitMb && cfg.termMemLimitMb > 0 ? cfg.termMemLimitMb : null);
+    const action = cfg.termMemAction === "kill" ? "kill" : "warn";
+    const rootPid = this.effectiveRootPid(s);
+    const processes = rootPid ? readProcTree(rootPid) : [];
+    const totalRssKb = processes.reduce((acc, p) => acc + p.rssKb, 0);
+    const overLimit = limitMb !== null && totalRssKb > limitMb * 1024;
+    if (overLimit && action === "kill" && s.state === "running") {
+      // Encerra o processo filho que mais consome memória (ou a sessão se só houver o shell raiz)
+      const children = processes.filter((p) => p.pid !== rootPid).sort((a, b) => b.rssKb - a.rssKb);
+      if (children[0]) { try { process.kill(children[0].pid, "SIGKILL"); } catch { /* já saiu */ } }
+      else this.sessions.stop(sessionId);
+    }
+    return succeed({ sessionId, nodeId: s.nodeId, rootPid, totalRssKb, limitMb, overLimit, action, processes });
+  }
+  killSessionProc(sessionId: string, input: KillProcInput): Result<{ killed: number }> {
+    const s = this.sessions.get(sessionId);
+    if (!s) return fail("NOT_FOUND", "sessão não encontrada");
+    const rootPid = this.effectiveRootPid(s);
+    if (!rootPid) return fail("SESSION_NOT_RUNNING", "o terminal não está rodando");
+    const tree = readProcTree(rootPid);
+    if (!tree.some((p) => p.pid === input.pid)) return fail("FORBIDDEN", "o processo não pertence à árvore deste terminal");
+    try { process.kill(input.pid, input.signal ?? "SIGTERM"); } catch (e) { return fail("INTERNAL", String((e as Error).message ?? e)); }
+    return succeed({ killed: input.pid });
   }
 }

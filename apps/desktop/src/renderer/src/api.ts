@@ -1,4 +1,4 @@
-import type { InstructionsStatus, PutInstructions, SyncInstructions, ChatAttachment, ExportAttachment, Band, CreateBand, PatchBand, AskBand, BandAskResult, ApiError, Score, SaveScore, PatchScore, PlaceScore, PlaceScoreResult, AttentionItem, FindHit, FindKind, CompanionConfig, NodeGroup, CreateNodeGroup, PatchNodeGroup, RuntimeSettings, PatchRuntimeSettings, PresetInput, Skill, CreateSkill, PatchSkill, TaskSummary, TreeEntry, FileContent, FsOp, SearchHit, CreateFloor, LandFloor, LandResult, PatchConnection, Role, CreateRole, PatchRole, ChatMessage, SendChat, Attachment, CreateAttachment, FileEntry, Connection as WsConnection, CreateDrawing, PatchDrawing, GroupDrawings, CreateFolder, CreateNode, CreateWorkspace, Drawing, Folder, Geometry, PatchFolder, PatchWorkspace, Preset, Node, PatchNode, Session, Sidebar, Workspace, WorkspaceSnapshot, WsClientMessage, WsServerMessage } from "@messai/contracts";
+import type { SessionProcs, KillProcInput, InstructionsStatus, PutInstructions, SyncInstructions, ChatAttachment, ExportAttachment, Band, CreateBand, PatchBand, AskBand, BandAskResult, ApiError, Score, SaveScore, PatchScore, PlaceScore, PlaceScoreResult, AttentionItem, FindHit, FindKind, CompanionConfig, NodeGroup, CreateNodeGroup, PatchNodeGroup, RuntimeSettings, PatchRuntimeSettings, PresetInput, Skill, CreateSkill, PatchSkill, TaskSummary, TreeEntry, FileContent, FsOp, SearchHit, CreateFloor, LandFloor, LandResult, PatchConnection, Role, CreateRole, PatchRole, ChatMessage, SendChat, Attachment, CreateAttachment, FileEntry, Connection as WsConnection, CreateDrawing, PatchDrawing, GroupDrawings, CreateFolder, CreateNode, CreateWorkspace, Drawing, Folder, Geometry, PatchFolder, PatchWorkspace, Preset, Node, PatchNode, Session, Sidebar, Workspace, WorkspaceSnapshot, WsClientMessage, WsServerMessage } from "@messai/contracts";
 
 export type Connection = { baseUrl: string; wsUrl: string; token: string; homeDir?: string };
 export type RunningEntry = { title: string; agentType: string; isAgent: boolean; workspace: string };
@@ -149,6 +149,9 @@ export class Api {
   broadcastBand(id: string, input: AskBand) { return this.req<BandAskResult>("POST", `/v1/bands/${id}/broadcast`, input); }
   restart(nodeId: string) { return this.req<Session>("POST", `/v1/nodes/${nodeId}/restart`); }
   stop(sessionId: string) { return this.req<Session>("POST", `/v1/sessions/${sessionId}/stop`); }
+  // #80 monitor de processos
+  sessionProcs(sessionId: string) { return this.req<SessionProcs>("GET", `/v1/sessions/${sessionId}/procs`); }
+  killSessionProc(sessionId: string, input: KillProcInput) { return this.req<{ killed: number }>("POST", `/v1/sessions/${sessionId}/procs/kill`, input); }
 }
 
 type Listener = (m: WsServerMessage) => void;

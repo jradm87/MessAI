@@ -274,6 +274,9 @@ export type CompanionConfig = Static<typeof CompanionConfig>;
 // Configurações do runtime (#55): valem entre sessões, para todos os clientes desta máquina (persistidas no banco).
 export const RuntimeSettings = Type.Object({
   restoreSessions: Type.Boolean(), // re-abrir sessões persistentes após reboot (ADR-0010); tmux vivo sempre reanexa
+  // #80 limite de memória por terminal (0 = sem limite global; o limite por nó vence) e ação ao estourar
+  termMemLimitMb: Type.Optional(Type.Integer({ minimum: 0, maximum: 1048576 })),
+  termMemAction: Type.Optional(Type.Union([Type.Literal("warn"), Type.Literal("kill")])),
 });
 export type RuntimeSettings = Static<typeof RuntimeSettings>;
 export const PatchRuntimeSettings = Type.Partial(RuntimeSettings);
@@ -374,6 +377,34 @@ export const PutInstructions = Type.Object({
 export type PutInstructions = Static<typeof PutInstructions>;
 export const SyncInstructions = Type.Object({ direction: Type.Union([Type.Literal("claude-to-agents"), Type.Literal("agents-to-claude")]) });
 export type SyncInstructions = Static<typeof SyncInstructions>;
+
+// ---------- #80 Monitor de processos do terminal + limite de memória ----------
+export const ProcEntry = Type.Object({
+  pid: Type.Integer(),
+  ppid: Type.Integer(),
+  name: Type.String(),
+  cmd: Type.String(),
+  rssKb: Type.Integer(),
+  state: Type.String(),
+  depth: Type.Integer(),
+});
+export type ProcEntry = Static<typeof ProcEntry>;
+export const SessionProcs = Type.Object({
+  sessionId: Id,
+  nodeId: Id,
+  rootPid: Type.Union([Type.Integer(), Type.Null()]),
+  totalRssKb: Type.Integer(),
+  limitMb: Type.Union([Type.Integer(), Type.Null()]),
+  overLimit: Type.Boolean(),
+  action: Type.Union([Type.Literal("warn"), Type.Literal("kill")]),
+  processes: Type.Array(ProcEntry),
+});
+export type SessionProcs = Static<typeof SessionProcs>;
+export const KillProcInput = Type.Object({
+  pid: Type.Integer({ minimum: 2 }),
+  signal: Type.Optional(Type.Union([Type.Literal("SIGTERM"), Type.Literal("SIGKILL")])),
+});
+export type KillProcInput = Static<typeof KillProcInput>;
 
 // ---------- Comandos (HTTP) ----------
 export const CreateWorkspace = Type.Object({

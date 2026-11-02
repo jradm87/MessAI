@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, memo } from "react";
 import { useAtomValue } from "jotai";
-import { Search, Eraser, Lock, Eye, Folder, SquareTerminal, Crown } from "lucide-react";
+import { Search, Eraser, Lock, Eye, Folder, SquareTerminal, Crown, Activity } from "lucide-react";
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -19,11 +19,11 @@ import { onTheme, cssVar } from "./theme.js";
 import { EditableTitle } from "./EditableTitle.js";
 import { Composer, type MentionTarget } from "./Composer.js";
 import { ChatLayer } from "./ChatLayer.js";
-import type { ChatMessage, Role, Skill } from "@messai/contracts";
+import type { ChatMessage, Role, Skill, SessionProcs } from "@messai/contracts";
 import type { NodeBand } from "./bands.js";
 
 export type NodeExtras = { onLink: () => void; linkCount: number; onChat: () => void; onRaise: () => void };
-export type ComposerExtras = { composerOpen: boolean; onComposerClose: () => void; onFocus: () => void; workspaceId: string; targets: MentionTarget[]; chatOpen: boolean; onChatClose: () => void; role?: Role; roles: Role[]; onSetRole: (roleId: string | null) => void; onManageRoles: () => void; skills?: Skill[]; skillIds?: string[]; onSetSkills?: (ids: string[]) => void; onManageSkills?: () => void; bands?: NodeBand[]; onOpenBands?: () => void; maestro?: boolean; onMaestro?: (on: boolean) => void };
+export type ComposerExtras = { composerOpen: boolean; onComposerClose: () => void; onFocus: () => void; workspaceId: string; targets: MentionTarget[]; chatOpen: boolean; onChatClose: () => void; role?: Role; roles: Role[]; onSetRole: (roleId: string | null) => void; onManageRoles: () => void; skills?: Skill[]; skillIds?: string[]; onSetSkills?: (ids: string[]) => void; onManageSkills?: () => void; bands?: NodeBand[]; onOpenBands?: () => void; maestro?: boolean; onMaestro?: (on: boolean) => void; memLimitMb?: number; onMemLimit?: (mb: number) => void };
 export type Appearance = { icon?: string | null; color?: string | null; termTheme?: TermTheme | null };
 export type TerminalData = { title: string; sessionId: string; api: Api; stream: Stream; onDelete: () => void; onRename: (t: string) => void; onResume: () => void; editSignal?: number; icon?: string; color?: string; termTheme?: string; onAppearance: (p: Appearance) => void } & NodeExtras & ComposerExtras;
 const THEMES: { id: TermTheme; label: string }[] = [{ id: "system", label: "Sistema" }, { id: "dark", label: "Escuro" }, { id: "light", label: "Claro" }, { id: "custom", label: "Custom" }];
@@ -58,6 +58,16 @@ function TerminalNodeImpl({ id, data, selected }: NodeProps & { data: TerminalDa
   useEffect(() => { fitNow.current?.(); }, [pPadX, pPadY]);
   useEffect(() => { const t = termRef.current; if (t) t.options.scrollback = effectiveScrollback(pMem, pScroll); }, [pMem, pScroll]);
   const [appear, setAppear] = useState(false);
+  // #80 monitor de processos e métrica de memória ao vivo
+  const [procsOpen, setProcsOpen] = useState(false);
+  const [procs, setProcs] = useState<SessionProcs | null>(null);
+  const loadProcs = () => api.sessionProcs(sessionId).then(setProcs).catch(() => {});
+  useEffect(() => {
+    if (session?.state !== "running") { setProcs(null); return; }
+    void loadProcs();
+    const iv = setInterval(() => void loadProcs(), procsOpen ? 1200 : 3000);
+    return () => clearInterval(iv);
+  }, [session?.state, sessionId, procsOpen, data.memLimitMb]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     // Tema do xterm: tokens do app (#54) ou tema do nó/prefs (#56); re-aplicado quando qualquer um muda.
@@ -181,6 +191,11 @@ function TerminalNodeImpl({ id, data, selected }: NodeProps & { data: TerminalDa
         )}
         {data.maestro && <span className="maestro-pill nodrag" title="Modo Maestro: este terminal recruta, dispensa e reatribui agentes (mess maestro …)" data-testid="maestro-pill"><Crown size={11} /></span>}
         {data.bands?.map((b) => <span key={b.id} className={`band-pill nodrag ${b.asking ? "asking" : ""}`} style={{ "--band-color": b.color } as CSSProperties} title={b.asking ? `Banda ${b.name}: pergunta em andamento neste terminal` : `Banda ${b.name} (clique para gerenciar)`} data-testid="band-pill" onClick={(e) => { e.stopPropagation(); data.onOpenBands?.(); }}>{b.name}{b.asking ? " …" : ""}</span>)}
+        {procs && state === "running" && (
+          <span className={`mem-pill nodrag ${procs.overLimit ? "over" : ""}`} data-testid="term-mem-pill" title={`Memória da árvore do terminal: ${(procs.totalRssKb / 1024).toFixed(1)} MB${procs.limitMb ? ` / limite ${procs.limitMb} MB` : ""} (${procs.processes.length} processo(s)) — clique para monitorar`} onClick={(e) => { e.stopPropagation(); setProcsOpen((v) => !v); }}>
+            <Activity size={10} /> {(procs.totalRssKb / 1024).toFixed(1)} MB{procs.limitMb ? `/${procs.limitMb}` : ""}{procs.overLimit ? " ⚠" : ""}
+          </span>
+        )}
         <span className={`st ${state}`} title={`${state}${session?.pid ? ` · pid ${session.pid}` : ""}${session?.lease ? (mine ? " · você controla" : " · observando") : ""}`}>
           {state}
           {session?.persistent && <span className="tag">tmux</span>}
@@ -190,6 +205,7 @@ function TerminalNodeImpl({ id, data, selected }: NodeProps & { data: TerminalDa
         {chatUnread > 0 && <span className="badge chatb" title="respostas no chat (Ctrl+J)">💬 {chatUnread}</span>}
         <span className="sp" />
         {data.onMaestro && <button title={data.maestro ? "Modo Maestro ligado (clique para desligar)" : "Ligar o Modo Maestro (recrutar/dispensar/reatribuir agentes)"} className={`nodrag maestro-toggle ${data.maestro ? "on" : ""}`} data-testid="maestro-toggle" onClick={() => data.onMaestro?.(!data.maestro)}><Crown size={12} /></button>}
+        <button title="Monitor de processos e limite de memória" className={`nodrag ${procsOpen ? "on" : ""}`} data-testid="term-procs-btn" onClick={() => { setProcsOpen((v) => !v); void loadProcs(); }}><Activity size={12} /></button>
         <button title="Buscar no terminal (Ctrl+F)" className="nodrag" onClick={() => setFind((v) => (v === null ? "" : null))}><Search size={12} /></button>
         <button title="Limpar a tela" className="nodrag" onClick={() => termRef.current?.clear()}><Eraser size={12} /></button>
         {state === "running" && <button title="Parar processo" onClick={() => void api.stop(sessionId)}>■</button>}
@@ -198,6 +214,33 @@ function TerminalNodeImpl({ id, data, selected }: NodeProps & { data: TerminalDa
       </div>
       {err && <div className="err">{err}</div>}
       <div className="term-wrap">
+        {procsOpen && (
+          <div className="term-procs nodrag nowheel" data-testid="term-procs-panel" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="row">
+              <b>Processos ({procs?.processes.length ?? 0})</b>
+              <span className="mut">{procs ? `${(procs.totalRssKb / 1024).toFixed(1)} MB RSS total` : "…"}</span>
+              <span className="sp" />
+              <label className="row" style={{ fontSize: 11 }}>
+                Limite (MB):
+                <input type="number" min={0} max={65536} step={32} style={{ width: 68 }} value={data.memLimitMb ?? 0} onChange={(e) => data.onMemLimit?.(Math.max(0, Number(e.target.value) || 0))} data-testid="node-mem-limit" />
+              </label>
+              <button onClick={() => setProcsOpen(false)}>✕</button>
+            </div>
+            {procs?.overLimit && <div className="err" data-testid="term-mem-warn">⚠ Memória acima do limite ({(procs.totalRssKb / 1024).toFixed(1)} MB &gt; {procs.limitMb} MB)</div>}
+            <div className="proc-list" data-testid="proc-list">
+              {(procs?.processes ?? []).map((p) => (
+                <div key={p.pid} className="proc-row" data-testid="proc-row" style={{ paddingLeft: 4 + p.depth * 12 }}>
+                  <span className="mono mut">{p.pid}</span>
+                  <b className="proc-name" title={p.cmd}>{p.name}</b>
+                  <span className="proc-cmd mut mono" title={p.cmd}>{p.cmd}</span>
+                  <span className="mono">{(p.rssKb / 1024).toFixed(1)} MB</span>
+                  <button className="tb danger" title={p.pid === procs?.rootPid ? "Parar processo raiz" : "Parar processo (SIGTERM)"} data-testid={`proc-kill-${p.pid}`} onClick={() => void api.killSessionProc(sessionId, { pid: p.pid, signal: "SIGTERM" }).then(() => setTimeout(loadProcs, 200))}>■</button>
+                </div>
+              ))}
+              {(!procs || procs.processes.length === 0) && <div className="mut">Nenhum processo em execução.</div>}
+            </div>
+          </div>
+        )}
         {find !== null && (
           <div className="term-find nodrag nowheel">
             <input autoFocus value={find} placeholder="Buscar no terminal…"

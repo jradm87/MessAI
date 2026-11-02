@@ -5,7 +5,7 @@ import type { WebSocket } from "ws";
 import {
   BUILD_VERSION, PROTOCOL_VERSION, SendMessage, Ask, CreateConnection, CreateDrawing, CreateNode, CreateWorkspace, DeleteNode, PatchNode, PatchWorkspace, ApplyLayout, WsClientMessage,
   type Capabilities, type WsServerMessage, type ApiError,
- CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, FsOp, PatchRuntimeSettings, PutPresets, CreateSkill, PatchSkill, BackupInput, RestoreInput, MoveDataInput, ResetInput, CreateNodeGroup, PatchNodeGroup, SaveScore, PatchScore, PlaceScore, CreateBand, PatchBand, AskBand, MaestroRecruit, MaestroTarget, MaestroAssign, ExportAttachment, PutInstructions, SyncInstructions, type PresetInput, type Preset } from "@messai/contracts";
+ CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, FsOp, PatchRuntimeSettings, PutPresets, CreateSkill, PatchSkill, BackupInput, RestoreInput, MoveDataInput, ResetInput, CreateNodeGroup, PatchNodeGroup, SaveScore, PatchScore, PlaceScore, CreateBand, PatchBand, AskBand, MaestroRecruit, MaestroTarget, MaestroAssign, ExportAttachment, PutInstructions, SyncInstructions, KillProcInput, type PresetInput, type Preset } from "@messai/contracts";
 import type { Result } from "@messai/domain";
 import { newId, type Config } from "./config.js";
 import type { WorkspaceService } from "./service.js";
@@ -283,6 +283,9 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
     return s ? s : reply.status(404).send({ error: { code: "NOT_FOUND", message: "sessão não encontrada" } });
   });
   app.post<{ Params: { id: string } }>("/v1/sessions/:id/stop", async (req, reply) => send(reply, svc.sessions.stop(req.params.id)));
+  // #80 — monitor de processos do terminal + parar processo da árvore
+  app.get<{ Params: { id: string } }>("/v1/sessions/:id/procs", async (req, reply) => send(reply, svc.sessionProcs(req.params.id)));
+  app.post<{ Params: { id: string } }>("/v1/sessions/:id/procs/kill", async (req, reply) => { const b = body<KillProcInput>(KillProcInput, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.killSessionProc(req.params.id, b)); });
 
   // WebSocket: eventos de espaço e stream de terminal
   if (!opts.unix) {

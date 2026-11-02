@@ -413,7 +413,7 @@ function Canvas({ conn }: { conn: Connection }) {
         data: n.kind === "terminal" ? { title: n.title, sessionId: n.sessionId!, api, stream, onDelete: del, onRename: rename,
             ...(n.icon ? { icon: n.icon } : {}), ...(n.color ? { color: n.color } : {}), ...(n.termTheme ? { termTheme: n.termTheme } : {}), // #56 aparência do nó
             ...(n.groupId ? { groupId: n.groupId } : {}), // #78
-            bands: bandsOfNode(snap.bands, n.nodeId), onOpenBands: () => setBandsOpen(true), ...(n.maestro ? { maestro: true } : {}), onMaestro: (on: boolean) => patchRec(n, { maestro: on }, on ? "ligar Modo Maestro" : "desligar Modo Maestro"), // #70 #29
+            bands: bandsOfNode(snap.bands, n.nodeId), onOpenBands: () => setBandsOpen(true), ...(n.maestro ? { maestro: true } : {}), onMaestro: (on: boolean) => patchRec(n, { maestro: on }, on ? "ligar Modo Maestro" : "desligar Modo Maestro"), ...(n.memLimitMb ? { memLimitMb: n.memLimitMb } : {}), onMemLimit: (memLimitMb: number) => patchRec(n, { memLimitMb }, "limite de memória do terminal"), // #70 #29 #80
             onAppearance: (p: { icon?: string | null; color?: string | null; termTheme?: TermTheme | null }) => patchRec(n, p, "aparência do terminal"), editSignal: renameSig.id === n.nodeId ? renameSig.n : 0, ...extras,
             composerOpen: composerFor === n.nodeId, onComposerClose: () => setComposerFor(null), workspaceId: snap.workspace.workspaceId,
             chatOpen: chatFor === n.nodeId, onChatClose: () => setChatFor(null),
