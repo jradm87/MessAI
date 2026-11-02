@@ -1,7 +1,9 @@
 import Database from "better-sqlite3";
 import type { ChatMessage, Connection, Drawing, Folder, Message, Node, Role, Session, Workspace, Skill, NodeGroup, Score } from "@messai/contracts";
 
-const MIGRATIONS: string[] = [
+/** Migração por função (idempotente). */
+const LATE_SCHEMA = Symbol("late");
+const MIGRATIONS: (string | typeof LATE_SCHEMA)[] = [
   `CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
    CREATE TABLE IF NOT EXISTS workspaces (
      workspace_id TEXT PRIMARY KEY, machine_id TEXT NOT NULL, name TEXT NOT NULL,
@@ -61,11 +63,36 @@ const MIGRATIONS: string[] = [
   `ALTER TABLE sessions ADD COLUMN resume_id TEXT;`, // id de sessão do CLI de IA, para retomar após reboot
   `ALTER TABLE nodes ADD COLUMN icon TEXT;
    ALTER TABLE nodes ADD COLUMN term_theme TEXT;`, // #56 aparência do terminal (preset / edição no nó)
-  // #41 — busca de texto (FTS5): notas/textos (título+corpo) e chats; mantida por TRIGGERS, então nenhum caminho de código precisa lembrar de indexar.
-  `CREATE VIRTUAL TABLE IF NOT EXISTS search USING fts5(kind UNINDEXED, ref_id UNINDEXED, workspace_id UNINDEXED, node_id UNINDEXED, title, body, tokenize='unicode61 remove_diacritics 2');
-   INSERT INTO search(kind, ref_id, workspace_id, node_id, title, body) SELECT 'note', node_id, workspace_id, node_id, title, COALESCE(content,'') FROM nodes WHERE kind IN ('note','text');
-   INSERT INTO search(kind, ref_id, workspace_id, node_id, title, body) SELECT 'chat', chat_id, workspace_id, node_id, '', text FROM chats WHERE role <> 'system';
-   CREATE TRIGGER IF NOT EXISTS search_node_ai AFTER INSERT ON nodes WHEN new.kind IN ('note','text') BEGIN
+  // Passo idempotente (ver lateSchema): substitui as migrações #41/#78/#71/#57, que foram inseridas fora de ordem e quebravam bancos já migrados.
+  LATE_SCHEMA,
+];
+
+/**
+ * Esquema "tardio" (busca FTS5 #41, grupos de nós #78, partituras #71, habilidades #57). Estas migrações foram inseridas FORA DE ORDEM
+ * na lista numerada; como o banco só guarda um número de versão, quem já tinha migrado numa ordem reexecutava ALTER TABLE já feito
+ * ("duplicate column name") e o runtime nem subia. Agora tudo é idempotente (IF NOT EXISTS / coluna só se faltar) e roda uma vez por
+ * banco; bancos antigos (qualquer ordem anterior) são normalizados no primeiro boot. NOVAS migrações vão SEMPRE no fim da lista.
+ */
+function lateSchema(db: Database.Database): void {
+  const hasCol = (t: string, c: string) => (db.prepare(`PRAGMA table_info(${t})`).all() as { name: string }[]).some((r) => r.name === c);
+  const hasTable = (t: string) => !!db.prepare("SELECT 1 FROM sqlite_master WHERE type IN ('table') AND name=?").get(t);
+  db.exec(`CREATE TABLE IF NOT EXISTS node_groups (
+     group_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
+     label TEXT NOT NULL DEFAULT '', color TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL);
+   CREATE TABLE IF NOT EXISTS scores (
+     score_id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', data TEXT NOT NULL, created_at TEXT NOT NULL);
+   CREATE TABLE IF NOT EXISTS skills (
+     skill_id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', instructions TEXT NOT NULL DEFAULT '',
+     created_at TEXT NOT NULL, updated_at TEXT NOT NULL);`);
+  if (!hasCol("nodes", "skill_ids")) db.exec("ALTER TABLE nodes ADD COLUMN skill_ids TEXT;");
+  if (!hasCol("nodes", "group_id")) db.exec("ALTER TABLE nodes ADD COLUMN group_id TEXT REFERENCES node_groups(group_id) ON DELETE SET NULL;");
+  if (!hasCol("nodes", "icon")) db.exec("ALTER TABLE nodes ADD COLUMN icon TEXT;");
+  if (!hasCol("nodes", "term_theme")) db.exec("ALTER TABLE nodes ADD COLUMN term_theme TEXT;");
+  const fresh = !hasTable("search");
+  db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS search USING fts5(kind UNINDEXED, ref_id UNINDEXED, workspace_id UNINDEXED, node_id UNINDEXED, title, body, tokenize='unicode61 remove_diacritics 2');`);
+  if (fresh) db.exec(`INSERT INTO search(kind, ref_id, workspace_id, node_id, title, body) SELECT 'note', node_id, workspace_id, node_id, title, COALESCE(content,'') FROM nodes WHERE kind IN ('note','text');
+INSERT INTO search(kind, ref_id, workspace_id, node_id, title, body) SELECT 'chat', chat_id, workspace_id, node_id, '', text FROM chats WHERE role <> 'system';`); // backfill só quando o índice acabou de ser criado (senão duplicaria)
+  db.exec(`   CREATE TRIGGER IF NOT EXISTS search_node_ai AFTER INSERT ON nodes WHEN new.kind IN ('note','text') BEGIN
      INSERT INTO search(kind, ref_id, workspace_id, node_id, title, body) VALUES ('note', new.node_id, new.workspace_id, new.node_id, new.title, COALESCE(new.content,'')); END;
    CREATE TRIGGER IF NOT EXISTS search_node_au AFTER UPDATE OF title, content ON nodes WHEN new.kind IN ('note','text') BEGIN
      DELETE FROM search WHERE kind='note' AND ref_id=new.node_id;
@@ -74,18 +101,8 @@ const MIGRATIONS: string[] = [
      DELETE FROM search WHERE kind='note' AND ref_id=old.node_id; DELETE FROM search WHERE kind='chat' AND node_id=old.node_id; END;
    CREATE TRIGGER IF NOT EXISTS search_chat_ai AFTER INSERT ON chats WHEN new.role <> 'system' BEGIN
      INSERT INTO search(kind, ref_id, workspace_id, node_id, title, body) VALUES ('chat', new.chat_id, new.workspace_id, new.node_id, '', new.text); END;
-   CREATE TRIGGER IF NOT EXISTS search_chat_ad AFTER DELETE ON chats BEGIN DELETE FROM search WHERE kind='chat' AND ref_id=old.chat_id; END;`,
-  `CREATE TABLE IF NOT EXISTS node_groups (
-     group_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
-     label TEXT NOT NULL DEFAULT '', color TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL);
-   ALTER TABLE nodes ADD COLUMN group_id TEXT REFERENCES node_groups(group_id) ON DELETE SET NULL;`, // #78 grupos de nós
-  `CREATE TABLE IF NOT EXISTS scores (
-     score_id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', data TEXT NOT NULL, created_at TEXT NOT NULL);`, // #71 partituras
-  `CREATE TABLE IF NOT EXISTS skills (
-     skill_id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', instructions TEXT NOT NULL DEFAULT '',
-     created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
-   ALTER TABLE nodes ADD COLUMN skill_ids TEXT;`, // #57 habilidades (JSON de ids por nó)
-];
+   CREATE TRIGGER IF NOT EXISTS search_chat_ad AFTER DELETE ON chats BEGIN DELETE FROM search WHERE kind='chat' AND ref_id=old.chat_id; END;`);
+}
 type DrwRow = { drawing_id: string; workspace_id: string; kind: Drawing["kind"]; points: string; color: string; width: number; created_at: string; group_id: string | null };
 const drwFrom = (r: DrwRow): Drawing => ({ drawingId: r.drawing_id, workspaceId: r.workspace_id, kind: r.kind, points: JSON.parse(r.points) as Drawing["points"], color: r.color, width: r.width, createdAt: r.created_at, ...(r.group_id ? { groupId: r.group_id } : {}) });
 type MsgRow = { message_id: string; workspace_id: string; from_node_id: string; to_node_id: string; text: string; reply_to: string | null; created_at: string; read_at: string | null; delivered: number };
@@ -152,9 +169,17 @@ export class Store {
   }
   private migrate(): void {
     const v = this.db.pragma("user_version", { simple: true }) as number;
-    for (let i = v; i < MIGRATIONS.length; i++) {
+    const late = MIGRATIONS.indexOf(LATE_SCHEMA); // posição do passo idempotente
+    const flagged = v > 0 && !!this.db.prepare("SELECT 1 FROM meta WHERE key='schema.late'").get();
+    // Banco que passou pela cauda ANTIGA (versão > posição do passo tardio, sem a marca): normaliza de uma vez, qualquer que tenha sido a ordem.
+    if (v > late && !flagged) {
+      this.db.transaction(() => { lateSchema(this.db); this.setMeta("schema.late", "1"); this.db.pragma(`user_version = ${late + 1}`); })();
+    }
+    const from = Math.min(this.db.pragma("user_version", { simple: true }) as number, MIGRATIONS.length);
+    for (let i = from; i < MIGRATIONS.length; i++) {
       this.db.transaction(() => {
-        this.db.exec(MIGRATIONS[i]!);
+        const m = MIGRATIONS[i]!;
+        if (m === LATE_SCHEMA) { lateSchema(this.db); this.setMeta("schema.late", "1"); } else this.db.exec(m);
         this.db.pragma(`user_version = ${i + 1}`);
       })();
     }
