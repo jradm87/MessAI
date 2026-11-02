@@ -3,6 +3,9 @@ import { ChevronDown, ChevronRight, Plus, Settings, FolderPlus, Folder as Folder
 import type { Folder, Sidebar as SidebarData, Workspace } from "@messai/contracts";
 import { WsIcon } from "./wsicons.js";
 import { useHint } from "./shortcuts.js";
+import { signalTitle, type WsSignal } from "./presence.js";
+/** #47 selo de atenção do espaço: bolinha âmbar com a contagem (concluiu + não lidas + encerrados). */
+function Signal({ s }: { s?: WsSignal }) { if (!s || !s.total) return null; const n = s.finished + s.unread + s.dead; return <span className={`att-badge ${s.dead && !s.finished && !s.unread ? "dead" : ""}`} data-testid="ws-signal" title={signalTitle(s)}>{n}</span>; }
 
 export type SidebarActions = {
   select: (id: string) => void;
@@ -23,7 +26,7 @@ const STATUS_COLOR: Record<string, string> = { working: "#5aa9ff", blocked: "#ff
 type Ctx = { x: number; y: number; ws?: Workspace; folder?: Folder };
 
 /** Barra lateral: filtro, botão +, WORKSPACES com pastas/subpastas recolhíveis, grupos (divisores) e rodapé. */
-export function Sidebar({ data, current, collapsed, machine, act }: { data: SidebarData; current: string | null; collapsed: boolean; machine: string; act: SidebarActions }) {
+export function Sidebar({ data, current, collapsed, machine, act, signals = {} }: { signals?: Record<string, WsSignal>; data: SidebarData; current: string | null; collapsed: boolean; machine: string; act: SidebarActions }) {
   const hNew = useHint("ws.new"); const hPrefs = useHint("prefs.toggle"); // #58
   const [filter, setFilter] = useState("");
   const [ctx, setCtx] = useState<Ctx | null>(null);
@@ -54,13 +57,13 @@ export function Sidebar({ data, current, collapsed, machine, act }: { data: Side
       <li key={w.workspaceId} className={`ws ${w.workspaceId === current && !hasFloors ? "on" : ""} ${hasFloors ? "parent" : ""}`} style={{ paddingLeft: 8 + depth * 14 }} draggable onDragStart={(e) => onDragStart(e, "ws", w.workspaceId)}
         onClick={() => act.select(w.workspaceId)} onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtx({ x: e.clientX, y: e.clientY, ws: w }); }} title={w.cwd}>
         <WsIcon icon={w.icon} color={w.color} size={13} />
-        {!collapsed && <><span className="nm">{w.name}</span>{hasFloors && <span className="cnt floors" title={`${floors.length} andar(es) — Ctrl+Shift+\\ abre a visão geral`} onClick={(e) => { e.stopPropagation(); act.overview(w); }}><Layers size={11} /></span>}{n > 0 && <span className="cnt" title={`${n} terminais`}><Terminal size={11} /> {n}</span>}</>}
+        {!collapsed && <><span className="nm">{w.name}</span>{hasFloors && <span className="cnt floors" title={`${floors.length} andar(es) — Ctrl+Shift+\\ abre a visão geral`} onClick={(e) => { e.stopPropagation(); act.overview(w); }}><Layers size={11} /></span>}{n > 0 && <span className="cnt" title={`${n} terminais`}><Terminal size={11} /> {n}</span>}<Signal s={signals[w.workspaceId]} /></>}
       </li>,
       ...floors.map((f) => (
         <li key={f.workspaceId} className={`ws floor ${f.workspaceId === current ? "on" : ""}`} style={{ paddingLeft: 8 + (depth + 1) * 14 }} data-testid="side-floor"
           onClick={() => act.select(f.workspaceId)} onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtx({ x: e.clientX, y: e.clientY, ws: f }); }} title={`${f.branch ?? ""} · ${f.cwd}`}>
           <span className="fl-dot" style={{ background: STATUS_COLOR[f.status ?? "working"] }} /><GitBranch size={12} className="mut" />
-          {!collapsed && <><span className="nm">{f.name}</span>{(data.terminals[f.workspaceId] ?? 0) > 0 && <span className="cnt"><Terminal size={11} /> {data.terminals[f.workspaceId]}</span>}</>}
+          {!collapsed && <><span className="nm">{f.name}</span>{(data.terminals[f.workspaceId] ?? 0) > 0 && <span className="cnt"><Terminal size={11} /> {data.terminals[f.workspaceId]}</span>}<Signal s={signals[f.workspaceId]} /></>}
         </li>
       )),
       ...(hasFloors ? [

@@ -18,6 +18,7 @@ import { AgentUsage } from "./AgentUsage.js";
 import { AgentIcon, agentKind } from "./agentIcons.js";
 import { Api, ApiClientError, Stream, type Connection } from "./api.js";
 import { store, sessStateMapAtom, unreadMapAtom, attentionAtom, finishedMapAtom, summaryMapAtom } from "./atoms.js";
+import { agentPresence, attentionByWorkspace, presenceTitle, type AgentPresence, type WsSignal } from "./presence.js";
 import { TerminalNode } from "./TerminalNode.js";
 import { NoteNode } from "./NoteNode.js";
 import { TextNode } from "./TextNode.js";
@@ -52,7 +53,7 @@ function freeSpot(nodes: { geometry: Geometry }[], size: { w: number; h: number 
 const isTyping = () => { const el = document.activeElement as HTMLElement | null; return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable || el.classList.contains("xterm-helper-textarea")); };
 
 type UndoProps = { canUndo: boolean; canRedo: boolean; undoLabel: string | null; redoLabel: string | null; onUndo: () => void; onRedo: () => void };
-function ZoomBar({ minimap, setMinimap, onUsage, agents, wsName, inFloors, onFloors, hud, onHud, history }: { minimap: boolean; setMinimap: (v: boolean) => void; onUsage: () => void; agents: string[]; wsName?: string; inFloors: boolean; onFloors: () => void; hud: boolean; onHud: () => void; history: UndoProps }) {
+function ZoomBar({ minimap, setMinimap, onUsage, agents, wsName, inFloors, onFloors, hud, onHud, history }: { minimap: boolean; setMinimap: (v: boolean) => void; onUsage: () => void; agents: AgentPresence[]; wsName?: string; inFloors: boolean; onFloors: () => void; hud: boolean; onHud: () => void; history: UndoProps }) {
   const rf = useReactFlow(); const [z, setZ] = useState(100);
   useOnViewportChange({ onChange: (v) => setZ(Math.round(v.zoom * 100)) });
   useAtomValue(themeAtom); // re-renderiza o botão quando o tema efetivo muda
@@ -61,11 +62,11 @@ function ZoomBar({ minimap, setMinimap, onUsage, agents, wsName, inFloors, onFlo
   const hMini = useHint("minimap.toggle"); const hIn = useHint("zoom.in"); const hOut = useHint("zoom.out"); const hMagnet = useHint("snap.toggle"); // #58 tooltips seguem o keymap
   const magnetOn = usePref("snapMagnetic"); // #78
   const usageOn = usePref("usageEnabled"); const hidden = new Set(usePref("usageDisabled").split(",").filter(Boolean));
-  const shownAgents = usageOn ? agents.filter((a) => !hidden.has(a)) : [];
+  const shownAgents = usageOn ? agents.filter((a) => !hidden.has(a.kind)) : [];
   return (
     <div className="botbar">
       {wsName && <button className={`bb-pill ${inFloors ? "on" : ""}`} title="Andares" onClick={onFloors} data-testid="ws-pill"><Layers size={15} /><span className="bb-name">{inFloors ? "Floors" : wsName}</span></button>}
-      {shownAgents.slice(0, 5).map((a) => <button key={a} className="bb-circle" title={`${a} — Agent Usage`} data-testid="bb-agent" onClick={onUsage}><AgentIcon id={a} size={20} /></button>)}
+      {shownAgents.slice(0, 6).map((a) => <button key={a.kind} className={`bb-circle presence ${a.state}`} title={`${presenceTitle(a)} — clique abre o Agent Usage`} data-testid="bb-agent" data-state={a.state} onClick={onUsage}><AgentIcon id={a.kind} size={20} />{a.count > 1 && <span className="pr-count">{a.count}</span>}<span className="pr-dot" /></button>)}
       {usageOn && shownAgents.length === 0 && <button className="bb-circle" title="Agent Usage" data-testid="bb-usage" onClick={onUsage}><Activity size={15} /></button>}
       <button className="bb-circle" title={`Tema: ${THEME_LABEL[pref]} (clique alterna Sistema → Claro → Escuro)`} data-testid="theme-toggle" onClick={() => setThemePref(nextTheme(pref))}><ThemeIcon size={15} /></button>
       <button className={`bb-circle ${magnetOn ? "on" : ""}`} title={`Encaixe magnético ao arrastar: ${magnetOn ? "ligado" : "desligado"}${hMagnet}`} data-testid="snap-toggle" onClick={() => setPref("snapMagnetic", !magnetOn)}><Magnet size={15} /></button>
@@ -716,13 +717,18 @@ function Canvas({ conn }: { conn: Connection }) {
   };
   const drawings: Drawing[] = snap?.drawings ?? [];
   const selectMode = tool === "select";
-  const barAgents = (() => { const set = new Set<string>(); for (const n of snap?.nodes ?? []) if (n.kind === "terminal") set.add(agentKind(n.title)); return [...set]; })();
+  // #47 presença: agentes do espaço com estado (atenção > encerrado > rodando) e sinais de atenção global por espaço na sidebar
+  const sessMap = useAtomValue(sessStateMapAtom); const finMap = useAtomValue(finishedMapAtom); const unrMap = useAtomValue(unreadMapAtom);
+  const barAgents = agentPresence((snap?.nodes ?? []).filter((n) => n.kind === "terminal").map((n) => ({ id: n.nodeId, kind: agentKind(n.title) })), sessMap, (id) => !!finMap[id] || (unrMap[id] ?? 0) > 0);
+  const [attnItems, setAttnItems] = useState<import("@messai/contracts").AttentionItem[]>([]);
+  useEffect(() => { let alive = true; const load = () => api.attentionList().then((a) => { if (alive) setAttnItems(a); }).catch(() => {}); void load(); const t = setInterval(load, 5000); const off = stream.on((m) => { if (m.type === "taskFinished" || m.type === "message" || m.type === "session") void load(); }); return () => { alive = false; clearInterval(t); off(); }; }, [api, stream]);
+  const wsSignals = attentionByWorkspace(attnItems, Object.fromEntries(side.workspaces.filter((w) => w.parentId).map((w) => [w.workspaceId, w.parentId])));
   const curWs = side.workspaces.find((w) => w.workspaceId === current);
   const grd = groundOf(current);
 
   return (
     <div className={`app ${sideMini ? "mini" : ""}`}>
-      <Sidebar data={side} current={current} collapsed={sideMini} machine={conn.baseUrl.replace("http://", "")} act={sideActions} />
+      <Sidebar signals={wsSignals} data={side} current={current} collapsed={sideMini} machine={conn.baseUrl.replace("http://", "")} act={sideActions} />
       <main className={`canvas tool-${tool} ${linking ? "linking" : ""}`}
         onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) e.preventDefault(); }}
         onDrop={(e) => {
