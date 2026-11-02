@@ -2,7 +2,7 @@ import { AGENT_ENV, type TreeEntry, type FileContent, type FsOp, type SearchHit,
 import type { RuntimeSettings, PatchRuntimeSettings, PresetInput, Skill, CreateSkill, PatchSkill, FindHit, FindKind, NodeGroup, CreateNodeGroup, PatchNodeGroup, AttentionItem, Score, ScoreNode, SaveScore, PatchScore, PlaceScore, PlaceScoreResult } from "@messai/contracts";
 import type { ChatAttachment, ExportAttachment, InstructionsStatus, InstructionFileInfo, PutInstructions, SyncInstructions } from "@messai/contracts";
 import type { Band, CreateBand, PatchBand, AskBand, BandAnswer, BandAskResult, MaestroRecruit } from "@messai/contracts";
-import type { FloorHookSection, FloorHooksConfig, PutFloorHooks, FloorHookStatus, FloorHooksState, RunFloorHookInput, StopFloorHookInput, FloorCopyInfo, PutFloorExcludes, ConnectedPeer, CrossNodeCandidate } from "@messai/contracts";
+import type { FloorHookSection, FloorHooksConfig, PutFloorHooks, FloorHookStatus, FloorHooksState, RunFloorHookInput, StopFloorHookInput, FloorCopyInfo, PutFloorExcludes, ConnectedPeer, CrossNodeCandidate, GitHostEntry, PutGitHostsInput, FloorPrState, CreateFloorPrInput, PatchFloorPrInput, FloorPrReviewStatus, FloorPrChecksStatus } from "@messai/contracts";
 import { readProcTree } from "./procs.js";
 import type { SessionProcs, KillProcInput } from "@messai/contracts";
 import { listProviders } from "./providers.js";
@@ -10,7 +10,7 @@ import { probeAccounts } from "./accounts.js";
 import { backupName, copyBackupFiles, dataStats, isBackupName, listBackups, validateBackup, validateMoveTarget, writeManifest, type BackupEntry } from "./data.js";
 import { BUILD_VERSION } from "@messai/contracts";
 import { defaultPresets, parsePresets, validatePresets, PRESETS_META_KEY } from "./presets.js";
-import { applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, DEFAULT_FLOOR_EXCLUDES, normalizeFloorExcludes, shouldExcludeFloorDir, safeRelPath, looksBinary, canMessage, checkRevision, formatDelivery, normalizeGeometry, planLocalTerminal, resolveNodeRef, resolveCrossNodeRef, validateNewNode, agentKind, agentResume, stripAnsi, fail, succeed, type Result, applySkills, skillsText, placeGeometries, connectionsWithin } from "@messai/domain";
+import { applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, DEFAULT_FLOOR_EXCLUDES, normalizeFloorExcludes, shouldExcludeFloorDir, parseGitRemote, buildPrCompareUrl, safeRelPath, looksBinary, canMessage, checkRevision, formatDelivery, normalizeGeometry, planLocalTerminal, resolveNodeRef, resolveCrossNodeRef, validateNewNode, agentKind, agentResume, stripAnsi, fail, succeed, type Result, applySkills, skillsText, placeGeometries, connectionsWithin } from "@messai/domain";
 import { randomUUID } from "node:crypto";
 import { Companion } from "./companion.js";
 import type { Store } from "@messai/storage";
@@ -987,6 +987,152 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     else this.store.updateWorkspace(floorId, { status: "done" }, floor.revision + 1);
     this.publishSidebar();
     return succeed({ ok: true, merged: true, conflicts: [], output: r.out, removed });
+  }
+
+  // ---- #31 Pull request nos andares (+ hosts Git configuráveis) ----
+  getGitHosts(): GitHostEntry[] {
+    const raw = this.store.getMeta("git.hosts");
+    if (!raw) return [];
+    try { return JSON.parse(raw) as GitHostEntry[]; } catch { return []; }
+  }
+  putGitHosts(input: PutGitHostsInput): Result<GitHostEntry[]> {
+    const clean: GitHostEntry[] = [];
+    for (const h of input.hosts) {
+      const host = h.host.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+      if (!host || clean.some((x) => x.host === host)) continue;
+      clean.push({ host, kind: h.kind, ...(h.prUrlTemplate?.trim() ? { prUrlTemplate: h.prUrlTemplate.trim() } : {}) });
+    }
+    this.store.setMeta("git.hosts", JSON.stringify(clean));
+    return succeed(clean);
+  }
+  private prMetaKey(workspaceId: string): string { return `pr.${workspaceId}`; }
+  private readPrMeta(workspaceId: string): Partial<FloorPrState> {
+    const raw = this.store.getMeta(this.prMetaKey(workspaceId));
+    if (!raw) return {};
+    try { return JSON.parse(raw) as Partial<FloorPrState>; } catch { return {}; }
+  }
+  getFloorPr(workspaceId: string): Result<FloorPrState> {
+    const w = this.store.getWorkspace(workspaceId);
+    if (!w) return fail("NOT_FOUND", "espaço não encontrado");
+    const ground = w.parentId ? (this.store.getWorkspace(w.parentId) ?? w) : w;
+    const saved = this.readPrMeta(workspaceId);
+    const branch = w.branch || (this.isGitRepo(w.cwd) ? this.git(w.cwd, ["rev-parse", "--abbrev-ref", "HEAD"]).out : "") || "main";
+    const groundBranch = (this.isGitRepo(ground.cwd) ? this.git(ground.cwd, ["rev-parse", "--abbrev-ref", "HEAD"]).out : "") || "main";
+    const baseBranch = saved.baseBranch || groundBranch || "main";
+    const remoteRes = this.git(w.cwd, ["remote", "get-url", "origin"]);
+    const groundRemoteRes = this.git(ground.cwd, ["remote", "get-url", "origin"]);
+    const remoteUrl = (remoteRes.ok && remoteRes.out) ? remoteRes.out : (groundRemoteRes.ok && groundRemoteRes.out) ? groundRemoteRes.out : "";
+    const parsed = parseGitRemote(remoteUrl, this.getGitHosts()) ?? {
+      host: "github.com",
+      repoSlug: `local/${slugify(ground.name)}`,
+      kind: "github" as const,
+    };
+    let ahead = 0; let behind = 0;
+    if (this.isGitRepo(w.cwd)) {
+      const cnt = this.git(w.cwd, ["rev-list", "--left-right", "--count", `${baseBranch}...${branch}`]);
+      if (cnt.ok) {
+        const parts = cnt.out.split(/\s+/);
+        behind = Number(parts[0] ?? 0) || 0;
+        ahead = Number(parts[1] ?? 0) || 0;
+      }
+    }
+    const compareUrl = buildPrCompareUrl({
+      host: parsed.host,
+      repoSlug: parsed.repoSlug,
+      kind: parsed.kind,
+      baseBranch,
+      headBranch: branch,
+      title: saved.title ?? w.name,
+      body: saved.body,
+      customTemplate: parsed.prUrlTemplate,
+    });
+    return succeed({
+      workspaceId,
+      branch,
+      baseBranch,
+      remoteUrl,
+      host: parsed.host,
+      hostKind: parsed.kind,
+      repoSlug: parsed.repoSlug,
+      compareUrl,
+      state: saved.state ?? "none",
+      ...(saved.number !== undefined ? { number: saved.number } : {}),
+      ...(saved.title !== undefined ? { title: saved.title } : {}),
+      ...(saved.body !== undefined ? { body: saved.body } : {}),
+      ...(saved.url !== undefined ? { url: saved.url } : {}),
+      ...(saved.draft !== undefined ? { draft: saved.draft } : {}),
+      reviewStatus: saved.reviewStatus ?? "none",
+      checksStatus: saved.checksStatus ?? "none",
+      ahead,
+      behind,
+      ...(saved.updatedAt ? { updatedAt: saved.updatedAt } : {}),
+    });
+  }
+  createFloorPr(workspaceId: string, input: CreateFloorPrInput): Result<FloorPrState> {
+    const w = this.store.getWorkspace(workspaceId);
+    if (!w) return fail("NOT_FOUND", "espaço não encontrado");
+    const cur = this.getFloorPr(workspaceId);
+    if (!cur.ok) return cur;
+    if (input.push && cur.value.remoteUrl) {
+      this.git(w.cwd, ["push", "-u", "origin", cur.value.branch]);
+    }
+    const prev = this.readPrMeta(workspaceId);
+    const nextNum = prev.number ?? (Number(this.store.getMeta("git.prSeq") ?? 0) + 1);
+    this.store.setMeta("git.prSeq", String(nextNum));
+    const baseBranch = input.baseBranch?.trim() || cur.value.baseBranch;
+    const prPath = cur.value.hostKind === "gitlab" ? `-/merge_requests/${nextNum}` : `pull/${nextNum}`;
+    const url = `https://${cur.value.host}/${cur.value.repoSlug}/${prPath}`;
+    const saved: Partial<FloorPrState> = {
+      state: "open",
+      number: nextNum,
+      title: input.title.trim(),
+      body: (input.body ?? "").trim(),
+      baseBranch,
+      url,
+      draft: !!input.draft,
+      reviewStatus: input.draft ? "none" : "review_required",
+      checksStatus: "passing",
+      updatedAt: nowIso(),
+    };
+    this.store.setMeta(this.prMetaKey(workspaceId), JSON.stringify(saved));
+    if (w.parentId && (!w.status || w.status === "working")) {
+      this.store.updateWorkspace(workspaceId, { status: "review", statusText: `PR #${nextNum}` }, w.revision + 1);
+      this.publishSidebar();
+    }
+    return this.getFloorPr(workspaceId);
+  }
+  patchFloorPr(workspaceId: string, input: PatchFloorPrInput): Result<FloorPrState> {
+    const w = this.store.getWorkspace(workspaceId);
+    if (!w) return fail("NOT_FOUND", "espaço não encontrado");
+    const cur = this.getFloorPr(workspaceId);
+    if (!cur.ok) return cur;
+    const saved: Partial<FloorPrState> = { ...this.readPrMeta(workspaceId) };
+    if (input.state !== undefined) saved.state = input.state;
+    if (input.number !== undefined) saved.number = input.number;
+    if (input.title !== undefined) saved.title = input.title;
+    if (input.body !== undefined) saved.body = input.body;
+    if (input.url !== undefined) saved.url = input.url;
+    if (input.draft !== undefined) saved.draft = input.draft;
+    if (input.reviewStatus !== undefined) saved.reviewStatus = input.reviewStatus;
+    if (input.checksStatus !== undefined) saved.checksStatus = input.checksStatus;
+    if (input.action === "push" && cur.value.remoteUrl) {
+      this.git(w.cwd, ["push", "-u", "origin", cur.value.branch]);
+    } else if (input.action === "merge") {
+      saved.state = "merged";
+      saved.reviewStatus = "approved" as FloorPrReviewStatus;
+      saved.checksStatus = "passing" as FloorPrChecksStatus;
+      if (w.parentId) {
+        this.store.updateWorkspace(workspaceId, { status: "done", statusText: saved.number ? `PR #${saved.number} merged` : "PR merged" }, w.revision + 1);
+        this.publishSidebar();
+      }
+    } else if (input.action === "close") {
+      saved.state = "closed";
+    } else if (input.action === "reopen") {
+      saved.state = "open";
+    }
+    saved.updatedAt = nowIso();
+    this.store.setMeta(this.prMetaKey(workspaceId), JSON.stringify(saved));
+    return this.getFloorPr(workspaceId);
   }
 
   // ---- pastas e grupos da barra lateral ----

@@ -1,5 +1,5 @@
 // Regras puras. Proibido importar fs, net, pty, banco (ADR-0009).
-import type { ApiError, Connection, ErrorCode, Geometry, Node, Session, Workspace } from "@messai/contracts";
+import type { ApiError, Connection, ErrorCode, Geometry, GitHostEntry, GitHostKind, Node, Session, Workspace } from "@messai/contracts";
 
 export type Result<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 
@@ -357,6 +357,73 @@ export function normalizeFloorExcludes(list: readonly string[]): string[] {
 }
 export function shouldExcludeFloorDir(relPath: string, name: string, excludes: ReadonlySet<string>): boolean {
   return excludes.has(name) || excludes.has(relPath);
+}
+// #31 — Pull request nos andares (+ hosts Git configuráveis)
+export type ParsedGitRemote = { host: string; repoSlug: string; kind: GitHostKind; prUrlTemplate?: string };
+export function parseGitRemote(remoteUrl: string, customHosts: readonly GitHostEntry[] = []): ParsedGitRemote | null {
+  const u = remoteUrl.trim();
+  if (!u || u.startsWith("/") || u.startsWith(".")) return null;
+  let host = "";
+  let repoSlug = "";
+  const httpMatch = /^https?:\/\/(?:[^@]+@)?([^/]+)\/(.+?)(?:\.git)?\/?$/.exec(u);
+  const sshUrlMatch = /^ssh:\/\/(?:[^@]+@)?([^/:]+)(?::\d+)?\/(.+?)(?:\.git)?\/?$/.exec(u);
+  const scpMatch = /^(?:[^@/]+@)?([^:/]+):(.+?)(?:\.git)?\/?$/.exec(u);
+  if (httpMatch) {
+    host = httpMatch[1]!.toLowerCase();
+    repoSlug = httpMatch[2]!;
+  } else if (sshUrlMatch) {
+    host = sshUrlMatch[1]!.toLowerCase();
+    repoSlug = sshUrlMatch[2]!;
+  } else if (scpMatch) {
+    host = scpMatch[1]!.toLowerCase();
+    repoSlug = scpMatch[2]!;
+  } else {
+    return null;
+  }
+  const custom = customHosts.find((h) => h.host.toLowerCase() === host);
+  if (custom) {
+    return { host, repoSlug, kind: custom.kind, ...(custom.prUrlTemplate ? { prUrlTemplate: custom.prUrlTemplate } : {}) };
+  }
+  let kind: GitHostKind = "github";
+  if (host.includes("gitlab")) kind = "gitlab";
+  else if (host.includes("gitea") || host.includes("codeberg") || host.includes("forgejo")) kind = "gitea";
+  return { host, repoSlug, kind };
+}
+export function buildPrCompareUrl(input: {
+  host: string;
+  repoSlug: string;
+  kind: GitHostKind;
+  baseBranch: string;
+  headBranch: string;
+  title?: string | undefined;
+  body?: string | undefined;
+  customTemplate?: string | undefined;
+}): string {
+  const { host, repoSlug, kind, baseBranch, headBranch, title, body, customTemplate } = input;
+  const base = encodeURIComponent(baseBranch);
+  const head = encodeURIComponent(headBranch);
+  if (customTemplate && customTemplate.trim()) {
+    return customTemplate
+      .replace(/\{host\}/g, host)
+      .replace(/\{repo\}/g, repoSlug)
+      .replace(/\{base\}/g, base)
+      .replace(/\{head\}/g, head)
+      .replace(/\{title\}/g, encodeURIComponent(title ?? ""))
+      .replace(/\{body\}/g, encodeURIComponent(body ?? ""));
+  }
+  if (kind === "gitlab") {
+    const q = new URLSearchParams({ "merge_request[source_branch]": headBranch, "merge_request[target_branch]": baseBranch });
+    if (title) q.set("merge_request[title]", title);
+    if (body) q.set("merge_request[description]", body);
+    return `https://${host}/${repoSlug}/-/merge_requests/new?${q.toString()}`;
+  }
+  if (kind === "gitea") {
+    return `https://${host}/${repoSlug}/compare/${base}...${head}`;
+  }
+  const q = new URLSearchParams({ expand: "1" });
+  if (title) q.set("title", title);
+  if (body) q.set("body", body);
+  return `https://${host}/${repoSlug}/compare/${base}...${head}?${q.toString()}`;
 }
 
 

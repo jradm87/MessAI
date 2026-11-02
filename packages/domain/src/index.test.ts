@@ -1,5 +1,5 @@
 import {  describe, expect, it } from "vitest";
-import { canMessage, formatDelivery, resolveNodeRef, parseCrossRef, resolveCrossNodeRef, canWrite, checkRevision, decideLease, normalizeGeometry, trimBuffer, MAX_BUFFER_BYTES, applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxAttachPlan, shellQuote, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, alignGeometries, gridLayout, agentKind, agentResume, stripAnsi } from "./index.js";
+import { canMessage, formatDelivery, resolveNodeRef, parseCrossRef, resolveCrossNodeRef, parseGitRemote, buildPrCompareUrl, canWrite, checkRevision, decideLease, normalizeGeometry, trimBuffer, MAX_BUFFER_BYTES, applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxAttachPlan, shellQuote, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, alignGeometries, gridLayout, agentKind, agentResume, stripAnsi } from "./index.js";
 
 describe("revisão", () => {
   it("aceita revisão igual e devolve próxima", () => {
@@ -219,6 +219,29 @@ describe("andares", () => {
       ok: true,
       value: allNodes[2],
     });
+  });
+
+  it("interpreta remotes git (SSH/HTTPS) e monta URLs de Pull Request para GitHub, GitLab, Gitea e hosts customizados (#31)", () => {
+    expect(parseGitRemote("git@github.com:jradm87/MessAI.git")).toEqual({
+      host: "github.com",
+      repoSlug: "jradm87/MessAI",
+      kind: "github",
+    });
+    expect(parseGitRemote("https://gitlab.empresa.com.br/time/api.git", [{ host: "gitlab.empresa.com.br", kind: "gitlab" }])).toEqual({
+      host: "gitlab.empresa.com.br",
+      repoSlug: "time/api",
+      kind: "gitlab",
+    });
+    const customUrl = buildPrCompareUrl({
+      host: "git.interno.local",
+      repoSlug: "core/app",
+      kind: "custom",
+      baseBranch: "main",
+      headBranch: "feat/pr",
+      title: "Novo recurso",
+      customTemplate: "https://{host}/projects/{repo}/pr?from={head}&to={base}&title={title}",
+    });
+    expect(customUrl).toBe("https://git.interno.local/projects/core/app/pr?from=feat%2Fpr&to=main&title=Novo%20recurso");
   });
 });
 

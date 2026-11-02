@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus, GitBranch, PlaneLanding, Trash2, Home, Terminal, Play, Square } from "lucide-react";
-import type { FloorHookSection, FloorHooksState, FloorStatus, LandResult, Workspace } from "@messai/contracts";
+import { Plus, GitBranch, GitPullRequest, PlaneLanding, Trash2, Home, Terminal, Play, Square, ExternalLink, RefreshCw, Upload, CheckCircle2 } from "lucide-react";
+import type { FloorHookSection, FloorHooksState, FloorPrChecksStatus, FloorPrReviewStatus, FloorPrState, FloorStatus, GitHostEntry, GitHostKind, LandResult, Workspace } from "@messai/contracts";
 import type { Api, Stream } from "./api.js";
 
 export const STATUS_LABEL: Record<FloorStatus, string> = { working: "Trabalhando", blocked: "Bloqueado", review: "Pronto para revisão", done: "Concluído" };
 export const STATUS_COLOR: Record<FloorStatus, string> = { working: "#5aa9ff", blocked: "#ff6b6b", review: "#f6c344", done: "#4cd964" };
 const NODE_COLOR: Record<string, string> = { terminal: "#5aa9ff", note: "#f6c344", tree: "#4cd964", text: "#8a8a90" };
+const REVIEW_LABEL: Record<FloorPrReviewStatus, string> = { none: "sem revisão", review_required: "revisão pendente", approved: "aprovado", changes_requested: "ajustes pedidos" };
+const CHECKS_LABEL: Record<FloorPrChecksStatus, string> = { none: "sem checks", pending: "checks rodando", passing: "checks verdes", failing: "checks falhando" };
 const HOOK_SECTIONS: { key: FloorHookSection; label: string; desc: string }[] = [
   { key: "setup", label: "Setup (ao criar)", desc: "Roda automaticamente quando o andar é criado." },
   { key: "run", label: "Run (sob demanda)", desc: "Serviços ou tarefas iniciados manualmente." },
@@ -22,6 +24,8 @@ export function FloorOverview({ ground, floors, current, terminals, api, stream,
 }) {
   const [land, setLand] = useState<{ floor: Workspace; mode: "merge" | "squash"; keep: boolean; delBranch: boolean; result?: LandResult; busy?: boolean } | null>(null);
   const [hooksModal, setHooksModal] = useState<{ w: Workspace; state: FloorHooksState; setup: string; run: string; teardown: string; activeLog: FloorHookSection; busy?: boolean } | null>(null);
+  const [prs, setPrs] = useState<Record<string, FloorPrState>>({});
+  const [prModal, setPrModal] = useState<{ w: Workspace; pr: FloorPrState; title: string; body: string; baseBranch: string; draft: boolean; push: boolean; showHosts: boolean; hosts: GitHostEntry[]; newHost: string; newHostKind: GitHostKind; newHostTpl: string; busy?: boolean } | null>(null);
   const [minis, setMinis] = useState<Record<string, Mini>>({});
   const levels = useMemo(() => [ground, ...floors], [ground, floors]);
   const key = levels.map((w) => w.workspaceId).join(",");
@@ -31,6 +35,8 @@ export function FloorOverview({ ground, floors, current, terminals, api, stream,
       .then((s) => [w.workspaceId, { nodes: s.nodes.map((n) => ({ ...n.geometry, kind: n.kind, id: n.nodeId })), conns: (s.connections ?? []).map((c) => [c.sourceNodeId, c.targetNodeId] as [string, string]) }] as const)
       .catch(() => [w.workspaceId, { nodes: [], conns: [] }] as const)))
       .then((entries) => { if (alive) setMinis(Object.fromEntries(entries)); });
+    void Promise.all(floors.map((f) => api.floorPr(f.workspaceId).then((p) => [f.workspaceId, p] as const).catch(() => null)))
+      .then((entries) => { if (alive) setPrs(Object.fromEntries(entries.filter((x): x is [string, FloorPrState] => !!x))); });
     return () => { alive = false; };
   }, [key, api]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -81,6 +87,81 @@ export function FloorOverview({ ground, floors, current, terminals, api, stream,
     } catch (e) { onError(String(e)); }
   };
 
+  const openPrModal = async (w: Workspace) => {
+    try {
+      const [pr, hosts] = await Promise.all([api.floorPr(w.workspaceId), api.gitHosts()]);
+      setPrModal({
+        w,
+        pr,
+        title: pr.title ?? w.name,
+        body: pr.body ?? "",
+        baseBranch: pr.baseBranch,
+        draft: pr.draft ?? false,
+        push: true,
+        showHosts: false,
+        hosts,
+        newHost: "",
+        newHostKind: "github",
+        newHostTpl: "",
+      });
+    } catch (e) { onError(String(e)); }
+  };
+  const submitCreatePr = async () => {
+    if (!prModal || !prModal.title.trim()) return;
+    setPrModal({ ...prModal, busy: true });
+    try {
+      const pr = await api.createFloorPr(prModal.w.workspaceId, {
+        title: prModal.title.trim(),
+        body: prModal.body,
+        baseBranch: prModal.baseBranch,
+        draft: prModal.draft,
+        push: prModal.push,
+      });
+      setPrs((cur) => ({ ...cur, [prModal.w.workspaceId]: pr }));
+      setPrModal((cur) => (cur ? { ...cur, pr, busy: false } : null));
+      onChanged();
+    } catch (e) {
+      setPrModal((cur) => (cur ? { ...cur, busy: false } : null));
+      onError(String(e));
+    }
+  };
+  const doPrPatch = async (input: Parameters<typeof api.patchFloorPr>[1]) => {
+    if (!prModal) return;
+    setPrModal({ ...prModal, busy: true });
+    try {
+      const pr = await api.patchFloorPr(prModal.w.workspaceId, input);
+      setPrs((cur) => ({ ...cur, [prModal.w.workspaceId]: pr }));
+      setPrModal((cur) => (cur ? { ...cur, pr, busy: false } : null));
+      onChanged();
+    } catch (e) {
+      setPrModal((cur) => (cur ? { ...cur, busy: false } : null));
+      onError(String(e));
+    }
+  };
+  const addGitHost = async () => {
+    if (!prModal || !prModal.newHost.trim()) return;
+    try {
+      const next = [...prModal.hosts.filter((h) => h.host.toLowerCase() !== prModal.newHost.trim().toLowerCase()), {
+        host: prModal.newHost.trim(),
+        kind: prModal.newHostKind,
+        ...(prModal.newHostTpl.trim() ? { prUrlTemplate: prModal.newHostTpl.trim() } : {}),
+      }];
+      const saved = await api.putGitHosts(next);
+      const pr = await api.floorPr(prModal.w.workspaceId);
+      setPrs((cur) => ({ ...cur, [prModal.w.workspaceId]: pr }));
+      setPrModal((cur) => (cur ? { ...cur, hosts: saved, pr, newHost: "", newHostTpl: "" } : null));
+    } catch (e) { onError(String(e)); }
+  };
+  const removeGitHost = async (host: string) => {
+    if (!prModal) return;
+    try {
+      const saved = await api.putGitHosts(prModal.hosts.filter((h) => h.host !== host));
+      const pr = await api.floorPr(prModal.w.workspaceId);
+      setPrs((cur) => ({ ...cur, [prModal.w.workspaceId]: pr }));
+      setPrModal((cur) => (cur ? { ...cur, hosts: saved, pr } : null));
+    } catch (e) { onError(String(e)); }
+  };
+
   const setStatus = (f: Workspace, status: FloorStatus) => api.patchWorkspace(f.workspaceId, { expectedRevision: f.revision, status }).then(onChanged).catch((e) => onError(String(e)));
   const doLand = async () => {
     if (!land) return; setLand({ ...land, busy: true });
@@ -109,28 +190,43 @@ export function FloorOverview({ ground, floors, current, terminals, api, stream,
     );
   };
 
-  const Level = ({ w, isGround }: { w: Workspace; isGround: boolean }) => (
-    <div className={`f3d-level ${current === w.workspaceId ? "on" : ""}`} data-testid={isGround ? "ov-ground" : "ov-floor"}>
-      <div className="f3d-label">
-        {isGround ? <Home size={13} /> : <span className="ov-dot" style={{ background: STATUS_COLOR[w.status ?? "working"] }} />}
-        <b>{isGround ? `Térreo · ${w.name}` : w.name}</b>
-        {!isGround && <span className="mut br"><GitBranch size={11} /> {w.branch}</span>}
-        <span className="sp" />
-        <span className="mut">{terminals[w.workspaceId] ?? 0} term.</span>
-        <button className="tb" title="Hooks de ciclo de vida (setup / run / teardown)" data-testid={isGround ? "ground-hooks-btn" : "floor-hooks-btn"} onClick={() => void openHooks(w)}><Terminal size={13} /> Hooks</button>
-        {!isGround && <>
-          <select className="f3d-status" value={w.status ?? "working"} onChange={(e) => void setStatus(w, e.target.value as FloorStatus)}>
-            {(Object.keys(STATUS_LABEL) as FloorStatus[]).map((k) => <option key={k} value={k}>{STATUS_LABEL[k]}</option>)}
-          </select>
-          {w.floorType === "worktree" && <button className="tb" title="Pousar (merge no térreo)" onClick={() => setLand({ floor: w, mode: "merge", keep: false, delBranch: false })}><PlaneLanding size={13} /></button>}
-          <button className="tb danger" title="Excluir andar" onClick={() => del(w)}><Trash2 size={13} /></button>
-        </>}
+  const Level = ({ w, isGround }: { w: Workspace; isGround: boolean }) => {
+    const pr = prs[w.workspaceId];
+    return (
+      <div className={`f3d-level ${current === w.workspaceId ? "on" : ""}`} data-testid={isGround ? "ov-ground" : "ov-floor"}>
+        <div className="f3d-label">
+          {isGround ? <Home size={13} /> : <span className="ov-dot" style={{ background: STATUS_COLOR[w.status ?? "working"] }} />}
+          <b>{isGround ? `Térreo · ${w.name}` : w.name}</b>
+          {!isGround && <span className="mut br"><GitBranch size={11} /> {w.branch}</span>}
+          {!isGround && pr && pr.state !== "none" && (
+            <>
+              <span className="badge" data-testid="floor-pr-badge" title={pr.title ?? ""}>
+                PR #{pr.number} · {pr.state === "merged" ? "merged" : pr.state === "closed" ? "fechado" : pr.draft ? "rascunho" : "aberto"}
+              </span>
+              <span className="badge" data-testid="floor-pr-review">{REVIEW_LABEL[pr.reviewStatus]}</span>
+              <span className="badge" data-testid="floor-pr-checks">{CHECKS_LABEL[pr.checksStatus]}</span>
+            </>
+          )}
+          <span className="sp" />
+          <span className="mut">{terminals[w.workspaceId] ?? 0} term.</span>
+          <button className="tb" title="Hooks de ciclo de vida (setup / run / teardown)" data-testid={isGround ? "ground-hooks-btn" : "floor-hooks-btn"} onClick={() => void openHooks(w)}><Terminal size={13} /> Hooks</button>
+          {!isGround && <>
+            <button className="tb" title="Pull Request do andar (abrir PR, revisão, checks e ações rápidas)" data-testid="floor-pr-btn" onClick={() => void openPrModal(w)}>
+              <GitPullRequest size={13} /> {pr && pr.state !== "none" ? `PR #${pr.number}` : "Pull Request"}
+            </button>
+            <select className="f3d-status" value={w.status ?? "working"} onChange={(e) => void setStatus(w, e.target.value as FloorStatus)}>
+              {(Object.keys(STATUS_LABEL) as FloorStatus[]).map((k) => <option key={k} value={k}>{STATUS_LABEL[k]}</option>)}
+            </select>
+            {w.floorType === "worktree" && <button className="tb" title="Pousar (merge no térreo)" onClick={() => setLand({ floor: w, mode: "merge", keep: false, delBranch: false })}><PlaneLanding size={13} /></button>}
+            <button className="tb danger" title="Excluir andar" onClick={() => del(w)}><Trash2 size={13} /></button>
+          </>}
+        </div>
+        <div className={`f3d-plane ${isGround ? "ground" : ""}`} onClick={() => onOpen(w.workspaceId)} title={`Abrir ${w.name}`}>
+          <Preview m={minis[w.workspaceId]} />
+        </div>
       </div>
-      <div className={`f3d-plane ${isGround ? "ground" : ""}`} onClick={() => onOpen(w.workspaceId)} title={`Abrir ${w.name}`}>
-        <Preview m={minis[w.workspaceId]} />
-      </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div className="overview" data-testid="overview" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -206,6 +302,103 @@ export function FloorOverview({ ground, floors, current, terminals, api, stream,
                 <button type="button" onClick={() => setHooksModal(null)}>Fechar</button>
                 <button type="button" className="pri" data-testid="hook-save" onClick={() => void saveHooks()}>Salvar hooks</button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {prModal && (
+        <div className="modal-backdrop" onMouseDown={() => !prModal.busy && setPrModal(null)}>
+          <div className="modal land-modal" data-testid="floor-pr-modal" style={{ width: 620, maxWidth: "92vw" }} onMouseDown={(e) => e.stopPropagation()}>
+            <h2>Pull Request · {prModal.w.name}</h2>
+            <div className="form">
+              <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+                <span className="mut">
+                  <code>{prModal.pr.branch}</code> → <code>{prModal.pr.baseBranch}</code> · +{prModal.pr.ahead}/-{prModal.pr.behind} · host <b>{prModal.pr.host}</b> ({prModal.pr.hostKind})
+                </span>
+                <button type="button" className="tb" data-testid="git-hosts-toggle" onClick={() => setPrModal({ ...prModal, showHosts: !prModal.showHosts })}>
+                  Hosts Git ({prModal.hosts.length})
+                </button>
+              </div>
+              {prModal.showHosts && (
+                <div style={{ padding: 8, border: "1px solid var(--border, #2a2a30)", borderRadius: 6, display: "flex", flexDirection: "column", gap: 6 }} data-testid="git-hosts-section">
+                  <b>Hosts Git configuráveis (GitHub Enterprise, GitLab self-hosted, Gitea, custom)</b>
+                  <div className="row" style={{ gap: 6 }}>
+                    <input value={prModal.newHost} onChange={(e) => setPrModal({ ...prModal, newHost: e.target.value })} placeholder="ex.: gitlab.minhaempresa.com.br" data-testid="git-host-input" style={{ flex: 1 }} />
+                    <select value={prModal.newHostKind} onChange={(e) => setPrModal({ ...prModal, newHostKind: e.target.value as GitHostKind })} data-testid="git-host-kind">
+                      <option value="github">GitHub</option>
+                      <option value="gitlab">GitLab</option>
+                      <option value="gitea">Gitea / Forgejo</option>
+                      <option value="custom">Custom</option>
+                    </select>
+                    <button type="button" className="tb" data-testid="git-host-add" onClick={() => void addGitHost()}>Adicionar</button>
+                  </div>
+                  {prModal.newHostKind === "custom" && (
+                    <input value={prModal.newHostTpl} onChange={(e) => setPrModal({ ...prModal, newHostTpl: e.target.value })} placeholder="Template URL: https://{host}/{repo}/pr?from={head}&to={base}" data-testid="git-host-tpl" />
+                  )}
+                  {prModal.hosts.map((h) => (
+                    <div key={h.host} className="row" style={{ justifyContent: "space-between", fontSize: 12 }} data-testid="git-host-row">
+                      <span><b>{h.host}</b> ({h.kind}) {h.prUrlTemplate ? `· ${h.prUrlTemplate}` : ""}</span>
+                      <button type="button" className="tb danger" onClick={() => void removeGitHost(h.host)}>Remover</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {prModal.pr.state === "none" ? (
+                <>
+                  <label>Título do Pull Request<input value={prModal.title} onChange={(e) => setPrModal({ ...prModal, title: e.target.value })} data-testid="pr-title-input" /></label>
+                  <label>Descrição<input value={prModal.body} onChange={(e) => setPrModal({ ...prModal, body: e.target.value })} placeholder="Resumo das mudanças deste andar…" data-testid="pr-body-input" /></label>
+                  <label>Branch alvo (base)<input value={prModal.baseBranch} onChange={(e) => setPrModal({ ...prModal, baseBranch: e.target.value })} data-testid="pr-base-input" /></label>
+                  <div className="row" style={{ gap: 16 }}>
+                    <label className="chk"><input type="checkbox" checked={prModal.draft} onChange={(e) => setPrModal({ ...prModal, draft: e.target.checked })} data-testid="pr-draft-chk" /> Rascunho (Draft)</label>
+                    <label className="chk"><input type="checkbox" checked={prModal.push} onChange={(e) => setPrModal({ ...prModal, push: e.target.checked })} data-testid="pr-push-chk" /> Fazer push da branch ao abrir</label>
+                  </div>
+                  <div className="mut" style={{ fontSize: 11 }}>URL de comparação: <code data-testid="pr-compare-url">{prModal.pr.compareUrl}</code></div>
+                  <div className="actions">
+                    <button type="button" onClick={() => setPrModal(null)}>Cancelar</button>
+                    <button type="button" className="tb" data-testid="pr-open-compare" onClick={() => void window.messai?.openExternal?.(prModal.pr.compareUrl)}><ExternalLink size={12} /> Abrir comparação na web</button>
+                    <button type="button" className="pri" disabled={prModal.busy || !prModal.title.trim()} data-testid="pr-create-submit" onClick={() => void submitCreatePr()}>
+                      {prModal.busy ? "Criando…" : "Abrir Pull Request"}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <span className="badge" data-testid="pr-modal-state">PR #{prModal.pr.number} · {prModal.pr.state}</span>
+                    <b>{prModal.pr.title}</b>
+                    {prModal.pr.draft && <span className="badge">Draft</span>}
+                  </div>
+                  <div className="mut" style={{ fontSize: 12 }}>URL: <code data-testid="pr-modal-url">{prModal.pr.url}</code></div>
+                  <div className="row" style={{ gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                    <label className="row" style={{ gap: 6, fontSize: 12 }}>
+                      Revisão:
+                      <select value={prModal.pr.reviewStatus} data-testid="pr-review-select" onChange={(e) => void doPrPatch({ reviewStatus: e.target.value as FloorPrReviewStatus })}>
+                        {(Object.keys(REVIEW_LABEL) as FloorPrReviewStatus[]).map((k) => <option key={k} value={k}>{REVIEW_LABEL[k]}</option>)}
+                      </select>
+                    </label>
+                    <label className="row" style={{ gap: 6, fontSize: 12 }}>
+                      Checks:
+                      <select value={prModal.pr.checksStatus} data-testid="pr-checks-select" onChange={(e) => void doPrPatch({ checksStatus: e.target.value as FloorPrChecksStatus })}>
+                        {(Object.keys(CHECKS_LABEL) as FloorPrChecksStatus[]).map((k) => <option key={k} value={k}>{CHECKS_LABEL[k]}</option>)}
+                      </select>
+                    </label>
+                  </div>
+                  <div className="row" style={{ gap: 8, flexWrap: "wrap", marginTop: 6 }} data-testid="pr-quick-actions">
+                    <button type="button" className="tb" data-testid="pr-open-web" onClick={() => prModal.pr.url && void window.messai?.openExternal?.(prModal.pr.url)}><ExternalLink size={12} /> Abrir no navegador</button>
+                    <button type="button" className="tb" data-testid="pr-action-push" disabled={prModal.busy} onClick={() => void doPrPatch({ action: "push" })}><Upload size={12} /> Push da branch</button>
+                    <button type="button" className="tb" data-testid="pr-action-refresh" disabled={prModal.busy} onClick={() => void doPrPatch({ action: "refresh" })}><RefreshCw size={12} /> Atualizar status</button>
+                    {prModal.pr.state === "open" && (
+                      <>
+                        <button type="button" className="pri" data-testid="pr-action-merge" disabled={prModal.busy} onClick={() => void doPrPatch({ action: "merge" })}><CheckCircle2 size={12} /> Fazer Merge do PR</button>
+                        <button type="button" className="tb danger" data-testid="pr-action-close" disabled={prModal.busy} onClick={() => void doPrPatch({ action: "close" })}>Fechar PR</button>
+                      </>
+                    )}
+                  </div>
+                  <div className="actions">
+                    <button type="button" onClick={() => setPrModal(null)}>Fechar</button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>

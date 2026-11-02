@@ -2,7 +2,7 @@ import { Type, type Static } from "@sinclair/typebox";
 
 export const PROTOCOL_VERSION = 1 as const;
 /** Incrementar a cada mudança de snapshot/rotas; o cliente avisa quando o runtime está atrás. */
-export const BUILD_VERSION = 22 as const;
+export const BUILD_VERSION = 23 as const;
 
 // ---------- Identidades ----------
 export const Id = Type.String({ minLength: 8, maxLength: 64 });
@@ -192,6 +192,80 @@ export const LandFloor = Type.Object({ mode: Type.Optional(Type.Union([Type.Lite
 export type LandFloor = Static<typeof LandFloor>;
 export const LandResult = Type.Object({ ok: Type.Boolean(), merged: Type.Boolean(), conflicts: Type.Array(Type.String()), output: Type.String(), removed: Type.Boolean() });
 export type LandResult = Static<typeof LandResult>;
+// #31 — Pull request nos andares (+ hosts Git configuráveis)
+export const GitHostKind = Type.Union([
+  Type.Literal("github"),
+  Type.Literal("gitlab"),
+  Type.Literal("gitea"),
+  Type.Literal("custom"),
+]);
+export type GitHostKind = Static<typeof GitHostKind>;
+export const GitHostEntry = Type.Object({
+  host: Type.String({ minLength: 1, maxLength: 120 }),
+  kind: GitHostKind,
+  prUrlTemplate: Type.Optional(Type.String({ maxLength: 500 })),
+});
+export type GitHostEntry = Static<typeof GitHostEntry>;
+export const PutGitHostsInput = Type.Object({
+  hosts: Type.Array(GitHostEntry, { maxItems: 50 }),
+});
+export type PutGitHostsInput = Static<typeof PutGitHostsInput>;
+export const FloorPrReviewStatus = Type.Union([
+  Type.Literal("none"),
+  Type.Literal("review_required"),
+  Type.Literal("approved"),
+  Type.Literal("changes_requested"),
+]);
+export type FloorPrReviewStatus = Static<typeof FloorPrReviewStatus>;
+export const FloorPrChecksStatus = Type.Union([
+  Type.Literal("none"),
+  Type.Literal("pending"),
+  Type.Literal("passing"),
+  Type.Literal("failing"),
+]);
+export type FloorPrChecksStatus = Static<typeof FloorPrChecksStatus>;
+export const FloorPrState = Type.Object({
+  workspaceId: Id,
+  branch: Type.String(),
+  baseBranch: Type.String(),
+  remoteUrl: Type.String(),
+  host: Type.String(),
+  hostKind: GitHostKind,
+  repoSlug: Type.String(),
+  compareUrl: Type.String(),
+  state: Type.Union([Type.Literal("none"), Type.Literal("open"), Type.Literal("merged"), Type.Literal("closed")]),
+  number: Type.Optional(Type.Integer()),
+  title: Type.Optional(Type.String()),
+  body: Type.Optional(Type.String()),
+  url: Type.Optional(Type.String()),
+  draft: Type.Optional(Type.Boolean()),
+  reviewStatus: FloorPrReviewStatus,
+  checksStatus: FloorPrChecksStatus,
+  ahead: Type.Integer(),
+  behind: Type.Integer(),
+  updatedAt: Type.Optional(Type.String()),
+});
+export type FloorPrState = Static<typeof FloorPrState>;
+export const CreateFloorPrInput = Type.Object({
+  title: Type.String({ minLength: 1, maxLength: 200 }),
+  body: Type.Optional(Type.String({ maxLength: 20000 })),
+  baseBranch: Type.Optional(Type.String({ minLength: 1, maxLength: 120 })),
+  draft: Type.Optional(Type.Boolean()),
+  push: Type.Optional(Type.Boolean()),
+});
+export type CreateFloorPrInput = Static<typeof CreateFloorPrInput>;
+export const PatchFloorPrInput = Type.Object({
+  state: Type.Optional(Type.Union([Type.Literal("none"), Type.Literal("open"), Type.Literal("merged"), Type.Literal("closed")])),
+  number: Type.Optional(Type.Integer({ minimum: 1 })),
+  title: Type.Optional(Type.String({ maxLength: 200 })),
+  body: Type.Optional(Type.String({ maxLength: 20000 })),
+  url: Type.Optional(Type.String({ maxLength: 500 })),
+  draft: Type.Optional(Type.Boolean()),
+  reviewStatus: Type.Optional(FloorPrReviewStatus),
+  checksStatus: Type.Optional(FloorPrChecksStatus),
+  action: Type.Optional(Type.Union([Type.Literal("push"), Type.Literal("refresh"), Type.Literal("merge"), Type.Literal("close"), Type.Literal("reopen")])),
+});
+export type PatchFloorPrInput = Static<typeof PatchFloorPrInput>;
 
 /** Pasta (agrupa espaços, pode ter subpastas) ou grupo (divisor com rótulo) da barra lateral. */
 export const FolderKind = Type.Union([Type.Literal("folder"), Type.Literal("group")]);

@@ -5,7 +5,7 @@ import type { WebSocket } from "ws";
 import {
   BUILD_VERSION, PROTOCOL_VERSION, SendMessage, Ask, CreateConnection, CreateDrawing, CreateNode, CreateWorkspace, DeleteNode, PatchNode, PatchWorkspace, ApplyLayout, WsClientMessage,
   type Capabilities, type WsServerMessage, type ApiError,
- CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, PutFloorHooks, RunFloorHookInput, StopFloorHookInput, PutFloorExcludes, FsOp, PatchRuntimeSettings, PutPresets, CreateSkill, PatchSkill, BackupInput, RestoreInput, MoveDataInput, ResetInput, CreateNodeGroup, PatchNodeGroup, SaveScore, PatchScore, PlaceScore, CreateBand, PatchBand, AskBand, MaestroRecruit, MaestroTarget, MaestroAssign, ExportAttachment, PutInstructions, SyncInstructions, KillProcInput, type PresetInput, type Preset } from "@messai/contracts";
+ CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, PutFloorHooks, RunFloorHookInput, StopFloorHookInput, PutFloorExcludes, CreateFloorPrInput, PatchFloorPrInput, PutGitHostsInput, FsOp, PatchRuntimeSettings, PutPresets, CreateSkill, PatchSkill, BackupInput, RestoreInput, MoveDataInput, ResetInput, CreateNodeGroup, PatchNodeGroup, SaveScore, PatchScore, PlaceScore, CreateBand, PatchBand, AskBand, MaestroRecruit, MaestroTarget, MaestroAssign, ExportAttachment, PutInstructions, SyncInstructions, KillProcInput, type PresetInput, type Preset } from "@messai/contracts";
 import type { Result } from "@messai/domain";
 import { newId, type Config } from "./config.js";
 import type { WorkspaceService } from "./service.js";
@@ -127,6 +127,21 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
   app.post<{ Params: { id: string } }>("/v1/workspaces/:id/hooks/stop", async (req, reply) => {
     const b = body<StopFloorHookInput>(StopFloorHookInput, req.body ?? {}); if ("code" in b) return invalid(reply, b);
     return send(reply, svc.stopFloorHooks(req.params.id, b));
+  });
+  // #31 — Pull request nos andares (+ hosts Git configuráveis)
+  app.get("/v1/git-hosts", async () => svc.getGitHosts());
+  app.put("/v1/git-hosts", async (req, reply) => {
+    const b = body<PutGitHostsInput>(PutGitHostsInput, req.body); if ("code" in b) return invalid(reply, b);
+    return send(reply, svc.putGitHosts(b));
+  });
+  app.get<{ Params: { id: string } }>("/v1/workspaces/:id/pr", async (req, reply) => send(reply, svc.getFloorPr(req.params.id)));
+  app.post<{ Params: { id: string } }>("/v1/workspaces/:id/pr", async (req, reply) => {
+    const b = body<CreateFloorPrInput>(CreateFloorPrInput, req.body); if ("code" in b) return invalid(reply, b);
+    return send(reply, svc.createFloorPr(req.params.id, b), 201);
+  });
+  app.patch<{ Params: { id: string } }>("/v1/workspaces/:id/pr", async (req, reply) => {
+    const b = body<PatchFloorPrInput>(PatchFloorPrInput, req.body); if ("code" in b) return invalid(reply, b);
+    return send(reply, svc.patchFloorPr(req.params.id, b));
   });
 
   // papéis (responsabilidades)

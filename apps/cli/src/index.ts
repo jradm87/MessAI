@@ -2,7 +2,7 @@
 // CLI mínima para agentes e humanos dentro de um terminal REA. Fala com o runtime pelo socket Unix.
 import { request } from "node:http";
 import { resolve as resolvePath } from "node:path";
-import { AGENT_ENV, type Band, type BandAskResult, type AskResult, type ChatMessage, type FloorCopyInfo, type FloorHooksState, type Message, type Node, type Workspace, type WorkspaceSnapshot } from "@messai/contracts";
+import { AGENT_ENV, type Band, type BandAskResult, type AskResult, type ChatMessage, type FloorCopyInfo, type FloorHooksState, type FloorPrState, type GitHostEntry, type Message, type Node, type Workspace, type WorkspaceSnapshot } from "@messai/contracts";
 
 const env = (k: keyof typeof AGENT_ENV) => process.env[AGENT_ENV[k]];
 const socketPath = env("socket"), token = env("token"), workspaceId = env("workspaceId"), nodeId = env("nodeId");
@@ -133,7 +133,45 @@ try {
         const h = await call<FloorHooksState>("GET", `/v1/workspaces/${me.workspaceId}/hooks`);
         console.log(h.status[sec]?.log || "(sem saída)");
       } else throw new Error("uso: mess floor hooks [set|run|stop|logs]");
-    } else throw new Error("uso: mess floor list|create|status|land|delete|hooks");
+    } else if (sub === "pr") {
+      const op = args.shift() ?? "status";
+      if (op === "status") {
+        const pr = await call<FloorPrState>("GET", `/v1/workspaces/${me.workspaceId}/pr`);
+        if (pr.state === "none") console.log(`sem PR aberto (${pr.branch} -> ${pr.baseBranch}, +${pr.ahead}/-${pr.behind}) · comparar: ${pr.compareUrl}`);
+        else console.log(`PR #${pr.number} [${pr.state}${pr.draft ? " draft" : ""}] "${pr.title}" (${pr.branch} -> ${pr.baseBranch}) revisão=${pr.reviewStatus} checks=${pr.checksStatus}\n${pr.url}`);
+      } else if (op === "create") {
+        const bodyText = flag("--body"); const baseBranch = flag("--base"); const draft = has("--draft"); const push = has("--push");
+        const title = args.join(" ").trim() || me.name;
+        const pr = await call<FloorPrState>("POST", `/v1/workspaces/${me.workspaceId}/pr`, { title, ...(bodyText ? { body: bodyText } : {}), ...(baseBranch ? { baseBranch } : {}), ...(draft ? { draft: true } : {}), ...(push ? { push: true } : {}) });
+        console.log(`PR #${pr.number} criado: ${pr.url}`);
+      } else if (op === "merge" || op === "close" || op === "reopen" || op === "push" || op === "refresh") {
+        const pr = await call<FloorPrState>("PATCH", `/v1/workspaces/${me.workspaceId}/pr`, { action: op });
+        console.log(`PR #${pr.number ?? "-"} [${pr.state}] revisão=${pr.reviewStatus} checks=${pr.checksStatus}`);
+      } else if (op === "review") {
+        const reviewStatus = args[0];
+        if (!reviewStatus || !["none", "review_required", "approved", "changes_requested"].includes(reviewStatus)) throw new Error("uso: mess floor pr review <none|review_required|approved|changes_requested>");
+        const pr = await call<FloorPrState>("PATCH", `/v1/workspaces/${me.workspaceId}/pr`, { reviewStatus });
+        console.log(`revisão=${pr.reviewStatus}`);
+      } else if (op === "checks") {
+        const checksStatus = args[0];
+        if (!checksStatus || !["none", "pending", "passing", "failing"].includes(checksStatus)) throw new Error("uso: mess floor pr checks <none|pending|passing|failing>");
+        const pr = await call<FloorPrState>("PATCH", `/v1/workspaces/${me.workspaceId}/pr`, { checksStatus });
+        console.log(`checks=${pr.checksStatus}`);
+      } else throw new Error("uso: mess floor pr [status|create|merge|close|reopen|push|refresh|review|checks]");
+    } else if (sub === "hosts") {
+      const op = args.shift() ?? "list";
+      const hosts = await call<GitHostEntry[]>("GET", "/v1/git-hosts");
+      if (op === "list") {
+        if (!hosts.length) console.log("nenhum host Git customizado");
+        for (const h of hosts) console.log(`${h.host.padEnd(28)} ${h.kind.padEnd(10)} ${h.prUrlTemplate ?? ""}`);
+      } else if (op === "add") {
+        const [host, kind, prUrlTemplate] = args;
+        if (!host || !kind || !["github", "gitlab", "gitea", "custom"].includes(kind)) throw new Error("uso: mess floor hosts add <host> <github|gitlab|gitea|custom> [template]");
+        const next = [...hosts.filter((h) => h.host.toLowerCase() !== host.toLowerCase()), { host, kind: kind as GitHostEntry["kind"], ...(prUrlTemplate ? { prUrlTemplate } : {}) }];
+        await call<GitHostEntry[]>("PUT", "/v1/git-hosts", { hosts: next });
+        console.log(`host ${host} (${kind}) salvo`);
+      } else throw new Error("uso: mess floor hosts [list|add]");
+    } else throw new Error("uso: mess floor list|create|status|land|delete|hooks|pr|hosts");
   } else if (cmd === "say") {
     if (!nodeId) throw new Error("sem MESS_NODE_ID");
     const args = [sub, ...rest].filter((a): a is string => a !== undefined);
