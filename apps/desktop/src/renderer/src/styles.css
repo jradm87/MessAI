@@ -636,3 +636,11 @@ button.danger:hover { border-color: var(--danger); color: var(--danger-fg); }
 .band-results { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow: auto; }
 .band-answer pre { margin: 2px 0 0; padding: 6px; background: var(--term-bg, #0a0a0b); color: var(--term-fg, #e4e4e7); border-radius: 6px; font-size: 11px; white-space: pre-wrap; max-height: 140px; overflow: auto; }
 .spin { animation: spin 1s linear infinite; }
+
+/* #79 cards de anexo no chat */
+.chat-atts { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.chat-att-card { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; background: var(--surface-2); border: 1px solid var(--line); cursor: pointer; user-select: none; }
+.chat-att-card:hover { border-color: var(--acc); }
+.chat-att-thumb { width: 32px; height: 32px; object-fit: cover; border-radius: 4px; background: var(--bar); }
+.chat-att-meta { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.chat-att-name { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

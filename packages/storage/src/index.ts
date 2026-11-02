@@ -71,6 +71,7 @@ const MIGRATIONS: (string | typeof LATE_SCHEMA)[] = [
      name TEXT NOT NULL, color TEXT NOT NULL DEFAULT '', node_ids TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL);`,
   `ALTER TABLE nodes ADD COLUMN maestro INTEGER NOT NULL DEFAULT 0;`,
   `ALTER TABLE nodes ADD COLUMN mem_limit_mb INTEGER;`,
+  `ALTER TABLE chats ADD COLUMN attachments TEXT;`, // #79 anexos do chat (JSON)
 ];
 
 /**
@@ -117,8 +118,9 @@ type ConnRow = { connection_id: string; workspace_id: string; source_node_id: st
 const connFrom = (r: ConnRow): Connection => ({ connectionId: r.connection_id, workspaceId: r.workspace_id, sourceNodeId: r.source_node_id, targetNodeId: r.target_node_id, createdAt: r.created_at, ...(r.label !== null ? { label: r.label } : {}), ...(r.style ? { style: r.style } : {}) });
 
 type WsRow = { workspace_id: string; machine_id: string; name: string; cwd: string; icon: string; color: string; folder_id: string | null; sort_order: number; revision: number; created_at: string; parent_id: string | null; branch: string | null; floor_type: Workspace["floorType"] | null; status: Workspace["status"] | null; status_text: string | null };
-type ChatRow = { chat_id: string; workspace_id: string; node_id: string; thread: number; role: ChatMessage["role"]; text: string; created_at: string };
-const chatFrom = (r: ChatRow): ChatMessage => ({ chatId: r.chat_id, workspaceId: r.workspace_id, nodeId: r.node_id, thread: r.thread, role: r.role, text: r.text, createdAt: r.created_at });
+type ChatRow = { chat_id: string; workspace_id: string; node_id: string; thread: number; role: ChatMessage["role"]; text: string; created_at: string; attachments?: string | null };
+const chatAtt = (raw: string | null | undefined): ChatMessage["attachments"] => { if (!raw) return undefined; try { const j = JSON.parse(raw) as ChatMessage["attachments"]; return Array.isArray(j) && j.length ? j : undefined; } catch { return undefined; } };
+const chatFrom = (r: ChatRow): ChatMessage => ({ chatId: r.chat_id, workspaceId: r.workspace_id, nodeId: r.node_id, thread: r.thread, role: r.role, text: r.text, createdAt: r.created_at, ...(chatAtt(r.attachments) ? { attachments: chatAtt(r.attachments)! } : {}) });
 type FolderRow = { folder_id: string; name: string; kind: Folder["kind"]; parent_id: string | null; sort_order: number; collapsed: number; created_at: string };
 const folderFrom = (r: FolderRow): Folder => ({ folderId: r.folder_id, name: r.name, kind: r.kind, sortOrder: r.sort_order, collapsed: r.collapsed === 1, createdAt: r.created_at, ...(r.parent_id ? { parentId: r.parent_id } : {}) });
 type NodeRow = { node_id: string; workspace_id: string; kind: Node["kind"]; title: string; x: number; y: number; w: number; h: number; session_id: string | null; content: string | null; created_at: string; role_id: string | null; locked: number; color: string | null; icon: string | null; term_theme: string | null; skill_ids: string | null; group_id: string | null; file_path: string | null; title_auto: number; maestro?: number; mem_limit_mb?: number | null };
@@ -233,7 +235,13 @@ export class Store {
       .all(...[nodeId, ...(thread ? [thread] : []), ...(since ? [since] : []), limit]) as ChatRow[];
     return rows.map(chatFrom);
   }
-  insertChat(m: ChatMessage): void { this.db.prepare("INSERT INTO chats VALUES(?,?,?,?,?,?,?)").run(m.chatId, m.workspaceId, m.nodeId, m.thread, m.role, m.text, m.createdAt); }
+  insertChat(m: ChatMessage): void { this.db.prepare("INSERT INTO chats(chat_id,workspace_id,node_id,thread,role,text,created_at,attachments) VALUES(?,?,?,?,?,?,?,?)").run(m.chatId, m.workspaceId, m.nodeId, m.thread, m.role, m.text, m.createdAt, m.attachments?.length ? JSON.stringify(m.attachments) : null); }
+  /** #79 mensagem que contém o anexo (a lista é JSON; o LIKE só pré-filtra, a checagem exata é em JS). */
+  getChatByAttachment(attachmentId: string): ChatMessage | undefined {
+    for (const r of this.db.prepare("SELECT * FROM chats WHERE attachments LIKE ?").all(`%${attachmentId}%`) as ChatRow[]) { const m = chatFrom(r); if (m.attachments?.some((a) => a.attachmentId === attachmentId)) return m; }
+    return undefined;
+  }
+  setChatAttachments(chatId: string, list: NonNullable<ChatMessage["attachments"]>): void { this.db.prepare("UPDATE chats SET attachments=? WHERE chat_id=?").run(list.length ? JSON.stringify(list) : null, chatId); }
   clearChat(nodeId: string, thread?: number): number {
     return Number((thread ? this.db.prepare("DELETE FROM chats WHERE node_id=? AND thread=?").run(nodeId, thread) : this.db.prepare("DELETE FROM chats WHERE node_id=?").run(nodeId)).changes);
   }

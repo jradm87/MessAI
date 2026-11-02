@@ -5,13 +5,14 @@ import type { WebSocket } from "ws";
 import {
   BUILD_VERSION, PROTOCOL_VERSION, SendMessage, Ask, CreateConnection, CreateDrawing, CreateNode, CreateWorkspace, DeleteNode, PatchNode, PatchWorkspace, ApplyLayout, WsClientMessage,
   type Capabilities, type WsServerMessage, type ApiError,
- CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, FsOp, PatchRuntimeSettings, PutPresets, CreateSkill, PatchSkill, BackupInput, RestoreInput, MoveDataInput, ResetInput, CreateNodeGroup, PatchNodeGroup, SaveScore, PatchScore, PlaceScore, CreateBand, PatchBand, AskBand, MaestroRecruit, MaestroTarget, MaestroAssign, type PresetInput, type Preset } from "@messai/contracts";
+ CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, FsOp, PatchRuntimeSettings, PutPresets, CreateSkill, PatchSkill, BackupInput, RestoreInput, MoveDataInput, ResetInput, CreateNodeGroup, PatchNodeGroup, SaveScore, PatchScore, PlaceScore, CreateBand, PatchBand, AskBand, MaestroRecruit, MaestroTarget, MaestroAssign, ExportAttachment, type PresetInput, type Preset } from "@messai/contracts";
 import type { Result } from "@messai/domain";
 import { newId, type Config } from "./config.js";
 import type { WorkspaceService } from "./service.js";
 import { SessionManager } from "./sessions.js";
 import { DEFAULT_PRESET_IDS } from "./presets.js";
 import { whichOnPath } from "./providers.js";
+import { createReadStream } from "node:fs";
 
 const STATUS: Record<ApiError["code"], number> = {
   UNAUTHORIZED: 401, FORBIDDEN: 403, NOT_FOUND: 404, CONFLICT: 409, INVALID: 400,
@@ -158,6 +159,13 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
   app.delete<{ Params: { id: string }; Querystring: { thread?: string } }>("/v1/nodes/:id/chat", async (req, reply) =>
     send(reply, svc.clearChat(req.params.id, req.query.thread ? Number(req.query.thread) : undefined)));
 
+  // #79 anexos do chat: bytes (com o tipo certo), excluir e copiar para uma pasta do espaço
+  app.get<{ Params: { id: string } }>("/v1/chat-attachments/:id/raw", async (req, reply) => {
+    const r = svc.chatAttachment(req.params.id); if (!r.ok) return send(reply, r);
+    return reply.header("content-type", r.value.att.mime).header("content-disposition", `inline; filename*=UTF-8''${encodeURIComponent(r.value.att.name)}`).header("x-content-type-options", "nosniff").send(createReadStream(r.value.att.path));
+  });
+  app.delete<{ Params: { id: string } }>("/v1/chat-attachments/:id", async (req, reply) => send(reply, svc.deleteChatAttachment(req.params.id), 204));
+  app.post<{ Params: { id: string } }>("/v1/chat-attachments/:id/export", async (req, reply) => { const b = body<ExportAttachment>(ExportAttachment, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.exportChatAttachment(req.params.id, b), 201); });
   // compositor: arquivos do diretório do nó (#) e anexos (clipe/colar)
   app.get<{ Params: { id: string }; Querystring: { q?: string; limit?: string } }>("/v1/nodes/:id/files", async (req, reply) =>
     send(reply, svc.listFiles(req.params.id, req.query.q ?? "", Math.min(200, Number(req.query.limit ?? 50) || 50))));

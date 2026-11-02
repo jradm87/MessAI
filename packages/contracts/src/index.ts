@@ -342,11 +342,19 @@ export type Session = Static<typeof Session>;
 /** Chat por terminal: camada sobre o PTY; o agente responde com `mess say`, sem parsing de saída. 7 tópicos fixos. */
 export const ChatRole = Type.Union([Type.Literal("user"), Type.Literal("agent"), Type.Literal("system")]);
 export type ChatRole = Static<typeof ChatRole>;
-export const ChatMessage = Type.Object({ chatId: Id, workspaceId: Id, nodeId: Id, thread: Type.Integer({ minimum: 1, maximum: 7 }), role: ChatRole, text: Type.String(), createdAt: Type.String() });
+/** #79 — anexo de uma mensagem do chat (o arquivo vive em <dados>/attachments/<espaço>/). */
+export const ChatAttachment = Type.Object({ attachmentId: Id, name: Type.String(), path: Type.String(), size: Type.Integer(), mime: Type.String() });
+export type ChatAttachment = Static<typeof ChatAttachment>;
+export const ChatMessage = Type.Object({ chatId: Id, workspaceId: Id, nodeId: Id, thread: Type.Integer({ minimum: 1, maximum: 7 }), role: ChatRole, text: Type.String(), createdAt: Type.String(), attachments: Type.Optional(Type.Array(ChatAttachment)) });
 export type ChatMessage = Static<typeof ChatMessage>;
 // O papel NÃO vem do cliente (segurança MESS-03): o servidor deriva do canal autenticado (http=user, socket=agent).
-export const SendChat = Type.Object({ text: Type.String({ minLength: 1 }), thread: Type.Optional(Type.Integer({ minimum: 1, maximum: 7 })) });
+export const SendChat = Type.Object({ text: Type.String({ minLength: 1 }), thread: Type.Optional(Type.Integer({ minimum: 1, maximum: 7 })),
+  /** #79 arquivos locais a anexar à mensagem (são COPIADOS para o diretório de anexos; máx. 10 · 25 MB cada). */
+  attachments: Type.Optional(Type.Array(Type.Object({ path: Type.String({ minLength: 1 }), name: Type.Optional(Type.String({ maxLength: 200 })) }), { maxItems: 10 })) });
 export type SendChat = Static<typeof SendChat>;
+/** #79 copiar um anexo do chat para uma pasta do espaço (arrastar para a árvore). `dir` relativo à raiz do espaço ("" = raiz). */
+export const ExportAttachment = Type.Object({ workspaceId: Id, dir: Type.String(), name: Type.Optional(Type.String({ maxLength: 200 })) });
+export type ExportAttachment = Static<typeof ExportAttachment>;
 
 // ---------- Comandos (HTTP) ----------
 export const CreateWorkspace = Type.Object({

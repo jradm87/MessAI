@@ -818,9 +818,26 @@ function Canvas({ conn }: { conn: Connection }) {
     <div className={`app ${sideMini ? "mini" : ""}`}>
       <Sidebar signals={wsSignals} data={side} current={current} collapsed={sideMini} machine={conn.baseUrl.replace("http://", "")} act={sideActions} />
       <main className={`canvas tool-${tool} ${linking ? "linking" : ""}`}
-        onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) e.preventDefault(); }}
+        onDragOver={(e) => { if (e.dataTransfer.types.includes("Files") || e.dataTransfer.types.includes("application/x-mess-chat-att")) e.preventDefault(); }}
         onDrop={(e) => {
-          if (!e.dataTransfer.files.length || !current) return; e.preventDefault();
+          if (!current) return;
+          const chatAtt = e.dataTransfer.getData("application/x-mess-chat-att");
+          if (chatAtt) {
+            e.preventDefault();
+            const at = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+            const att = JSON.parse(chatAtt) as { attachmentId: string; name: string; path: string; mime: string };
+            void (async () => {
+              let content = `![${att.name}](${att.path})
+
+\`${att.path}\``;
+              if (att.mime.startsWith("text/") || /\.(md|markdown|txt|json|csv|log|ts|js|py|sh|ya?ml)$/i.test(att.name)) {
+                try { content = await api.chatAttachmentText(att.attachmentId); } catch { /* mantém referência */ }
+              }
+              await mutate((r) => api.createNode(current, { expectedRevision: r, kind: "note", title: att.name, content, geometry: { x: at.x, y: at.y, w: 320, h: 220 } }));
+            })();
+            return;
+          }
+          if (!e.dataTransfer.files.length) return; e.preventDefault();
           const at = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
           [...e.dataTransfer.files].forEach((f, i) => {
             const path = window.messai.pathForFile?.(f);

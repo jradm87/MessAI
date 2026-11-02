@@ -45,10 +45,16 @@ function TreeNodeImpl({ id, data, selected }: NodeProps & { data: TreeData }) {
   const rename = (e: TreeEntry) => void askText("Novo nome", e.name).then((name) => { if (name && name !== e.name) void op({ op: "rename", path: e.path, to: e.path.includes("/") ? `${e.path.slice(0, e.path.lastIndexOf("/"))}/${name}` : name }); });
   const del = (e: TreeEntry) => { if (confirm(`Excluir ${e.dir ? "a pasta" : "o arquivo"} "${e.path}"?`)) void op({ op: "delete", path: e.path }); };
   const dragStart = (ev: React.DragEvent, e: TreeEntry) => { ev.dataTransfer.setData("text/plain", e.path); ev.dataTransfer.setData("text/mess-path", e.path); ev.dataTransfer.effectAllowed = "copy"; };
+  const dropAtt = (ev: React.DragEvent, dir: string) => {
+    const raw = ev.dataTransfer.getData("application/x-mess-chat-att"); if (!raw) return;
+    ev.preventDefault(); ev.stopPropagation();
+    const att = JSON.parse(raw) as { attachmentId: string; name: string };
+    void api.exportChatAttachment(att.attachmentId, { workspaceId, dir }).then((r) => { refresh(); data.toast(`Salvo em ${r.path}`); }).catch((e) => setErr(String(e)));
+  };
   const title = state.root ? state.root.split("/").pop()! : (data.title || "Arquivos");
 
   const rows = (rel: string, depth: number): React.ReactNode[] => (dirs[rel] ?? []).flatMap((e) => [
-    <div key={e.path} className={`tr-row ${e.dir ? "dir" : ""}`} style={{ paddingLeft: 6 + depth * 14 }} draggable onDragStart={(ev) => dragStart(ev, e)} onClick={() => activate(e)} onDoubleClick={() => e.dir && go(e.path)}
+    <div key={e.path} className={`tr-row ${e.dir ? "dir" : ""}`} style={{ paddingLeft: 6 + depth * 14 }} draggable onDragStart={(ev) => dragStart(ev, e)} onDragOver={(ev) => { if (e.dir && ev.dataTransfer.types.includes("application/x-mess-chat-att")) { ev.preventDefault(); ev.stopPropagation(); } }} onDrop={(ev) => { if (e.dir) dropAtt(ev, e.path); }} onClick={() => activate(e)} onDoubleClick={() => e.dir && go(e.path)}
       onContextMenu={(ev) => { ev.preventDefault(); ev.stopPropagation(); setMenu({ x: ev.clientX, y: ev.clientY, e }); }} title={`${e.path}${e.git ? ` · ${GIT_TITLE[e.git] ?? e.git}` : ""}`} data-testid="tree-row">
       <span className="tr-ic">{iconFor(e, open.has(e.path))}</span><span className={`tr-nm ${e.git ? `git-${e.git === "??" ? "new" : e.git === "•" ? "dirty" : "mod"}` : ""}`}>{e.name}</span>
       {e.git && e.git !== "•" && <span className="tr-git">{e.git === "??" ? "U" : e.git}</span>}
@@ -74,7 +80,7 @@ function TreeNodeImpl({ id, data, selected }: NodeProps & { data: TreeData }) {
         <button className="ib nodrag" title="Remover nó" onClick={data.onDelete}>✕</button>
       </div>
       {err && <div className="err">{err}</div>}
-      <div className={`tr-body nodrag nowheel ${state.mode}`} data-testid="tree-body">
+      <div className={`tr-body nodrag nowheel ${state.mode}`} data-testid="tree-body" onDragOver={(ev) => { if (ev.dataTransfer.types.includes("application/x-mess-chat-att")) { ev.preventDefault(); ev.stopPropagation(); } }} onDrop={(ev) => dropAtt(ev, state.root)}>
         {hits ? (hits.length ? hits.map((h, i) => (
           <div key={`${h.path}:${h.line ?? i}`} className="tr-row" draggable onDragStart={(ev) => { ev.dataTransfer.setData("text/plain", h.path); }} onClick={() => (/\.(md|markdown|txt)$/i.test(h.path) ? data.onOpenNote(h.path) : data.onPreview(h.path))} title={h.path}>
             <span className="tr-ic"><FileIcon size={14} /></span><span className="tr-nm">{h.path}{h.line ? <span className="mut">:{h.line}</span> : null}</span>{h.text && <span className="tr-snip mut">{h.text}</span>}

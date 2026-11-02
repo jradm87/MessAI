@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // CLI mínima para agentes e humanos dentro de um terminal REA. Fala com o runtime pelo socket Unix.
 import { request } from "node:http";
+import { resolve as resolvePath } from "node:path";
 import { AGENT_ENV, type Band, type BandAskResult, type AskResult, type ChatMessage, type Message, type Node, type Workspace, type WorkspaceSnapshot } from "@messai/contracts";
 
 const env = (k: keyof typeof AGENT_ENV) => process.env[AGENT_ENV[k]];
@@ -44,7 +45,7 @@ try {
   mess check <id|título>            lê a tela atual de um nó conectado (sem enviar nada)
   mess reply <idMsg> <texto>        responde uma mensagem recebida
   mess inbox [--all]                mensagens recebidas (marca como lidas)
-  mess say <texto> [--thread N]     responde no chat do seu terminal (Markdown; aparece em balões)
+  mess say <texto> [--thread N] [--attach arquivo]...   responde no chat do seu terminal (Markdown; anexos viram cards)
   mess chat [--thread N] [--all]    histórico do chat do seu terminal (padrão: 30 recentes)
   mess band list                    bandas do espaço (grupos de terminais) e seus membros
   mess band create <nome> [nó...]   cria uma banda · add/remove <banda> <nó> · delete <banda>
@@ -97,9 +98,10 @@ try {
     if (!nodeId) throw new Error("sem MESS_NODE_ID");
     const args = [sub, ...rest].filter((a): a is string => a !== undefined);
     const ti = args.indexOf("--thread"); const thread = ti >= 0 ? Number(args[ti + 1]) : undefined; if (ti >= 0) args.splice(ti, 2);
-    const text = args.join(" ").trim(); if (!text) throw new Error("uso: mess say <texto> [--thread N]");
-    const m = await call<ChatMessage>("POST", `/v1/nodes/${nodeId}/chat`, { text, ...(thread ? { thread } : {}) });
-    console.log(`ok (tópico ${m.thread})`);
+    const files: string[] = []; for (let i = args.indexOf("--attach"); i >= 0; i = args.indexOf("--attach")) { const f = args[i + 1]; args.splice(i, 2); if (f) files.push(resolvePath(f)); }
+    const text = args.join(" ").trim() || (files.length ? `📎 ${files.length} arquivo(s)` : ""); if (!text) throw new Error("uso: mess say <texto> [--thread N] [--attach arquivo]...");
+    const m = await call<ChatMessage>("POST", `/v1/nodes/${nodeId}/chat`, { text, ...(thread ? { thread } : {}), ...(files.length ? { attachments: files.map((path) => ({ path })) } : {}) });
+    console.log(`ok (tópico ${m.thread}${m.attachments?.length ? `, ${m.attachments.length} anexo(s)` : ""})`);
   } else if (cmd === "chat") {
     if (!nodeId) throw new Error("sem MESS_NODE_ID");
     const args = [sub, ...rest].filter((a): a is string => a !== undefined);

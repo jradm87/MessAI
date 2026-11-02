@@ -1,5 +1,6 @@
 import { AGENT_ENV, type TreeEntry, type FileContent, type FsOp, type SearchHit, type CreateFloor, type LandFloor, type LandResult, type Role, type CreateRole, type PatchRole, type ChatMessage, type SendChat, type Attachment, type CreateAttachment, type FileEntry, type Connection, type CreateConnection, type PatchConnection, type CreateDrawing, type PatchDrawing, type GroupDrawings, type CreateFolder, type CreateNode, type Drawing, type Folder, type Message, type PatchFolder, type SendMessage, type Sidebar, type CreateWorkspace, type Node, type PatchNode, type PatchWorkspace, type Session, type Workspace, type WorkspaceSnapshot, type TaskFinished, type TaskSummary } from "@messai/contracts";
 import type { RuntimeSettings, PatchRuntimeSettings, PresetInput, Skill, CreateSkill, PatchSkill, FindHit, FindKind, NodeGroup, CreateNodeGroup, PatchNodeGroup, AttentionItem, Score, ScoreNode, SaveScore, PatchScore, PlaceScore, PlaceScoreResult } from "@messai/contracts";
+import type { ChatAttachment, ExportAttachment } from "@messai/contracts";
 import type { Band, CreateBand, PatchBand, AskBand, BandAnswer, BandAskResult, MaestroRecruit } from "@messai/contracts";
 import { listProviders } from "./providers.js";
 import { probeAccounts } from "./accounts.js";
@@ -12,8 +13,8 @@ import { Companion } from "./companion.js";
 import type { Store } from "@messai/storage";
 import { EventEmitter } from "node:events";
 import { newId, nowIso, type Config } from "./config.js";
-import { dirname, join, delimiter, basename, extname, relative, isAbsolute } from "node:path";
-import { closeSync, existsSync, mkdirSync, openSync, readSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname, join, delimiter, basename, extname, relative, isAbsolute, resolve } from "node:path";
+import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, realpathSync, readSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { execFile, execFileSync, spawnSync } from "node:child_process";
 import { promisify } from "node:util";
@@ -22,6 +23,9 @@ import { fileURLToPath } from "node:url";
 const CLI_DIR = process.env["MESS_RESOURCES"] ? join(process.env["MESS_RESOURCES"], "cli") : join(dirname(fileURLToPath(import.meta.url)), "../../cli/bin");
 import { SessionManager } from "./sessions.js";
 import { watch, type FSWatcher } from "chokidar";
+
+const MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", svg: "image/svg+xml", pdf: "application/pdf", md: "text/markdown", markdown: "text/markdown", txt: "text/plain", json: "application/json", csv: "text/csv", html: "text/html", log: "text/plain", ts: "text/plain", js: "text/plain", py: "text/plain", sh: "text/plain", yml: "text/plain", yaml: "text/plain" };
+export const mimeOf = (name: string): string => MIME[extname(name).slice(1).toLowerCase()] ?? "application/octet-stream";
 
 export type ServiceEvents = { workspace: [snapshot: WorkspaceSnapshot]; message: [message: Message]; sidebar: [sidebar: Sidebar]; chat: [message: ChatMessage]; taskSummary: [summary: TaskSummary] };
 
@@ -406,10 +410,60 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const node = this.store.getNode(nodeId);
     if (!node) return fail("NOT_FOUND", "nó não encontrado");
     if (node.kind !== "terminal") return fail("INVALID", "chat só existe em terminais");
-    const m: ChatMessage = { chatId: newId(), workspaceId: node.workspaceId, nodeId, thread: input.thread ?? 1, role: defaultRole, text: input.text, createdAt: nowIso() };
+    const atts: ChatAttachment[] = [];
+    for (const a of input.attachments ?? []) { const r = this.importChatAttachment(node.workspaceId, a.path, a.name); if (!r.ok) { for (const x of atts) { try { unlinkSync(x.path); } catch { /* já removido */ } } return r; } atts.push(r.value); }
+    const m: ChatMessage = { chatId: newId(), workspaceId: node.workspaceId, nodeId, thread: input.thread ?? 1, role: defaultRole, text: input.text, createdAt: nowIso(), ...(atts.length ? { attachments: atts } : {}) };
     this.store.insertChat(m);
     this.emit("chat", m);
     return succeed(m);
+  }
+
+  // ---- #79 anexos do chat como cards ----
+  private attachmentsDir(workspaceId: string): string { return join(this.cfg.dataDir, "attachments", workspaceId); }
+  /** Copia um arquivo local para o diretório de anexos do espaço (o agente aponta o caminho; o original não é tocado). */
+  private importChatAttachment(workspaceId: string, srcPath: string, name?: string): Result<ChatAttachment> {
+    if (!isAbsolute(srcPath)) return fail("INVALID", `caminho do anexo precisa ser absoluto: ${srcPath}`);
+    let st; try { st = statSync(srcPath); } catch { return fail("NOT_FOUND", `arquivo não encontrado: ${srcPath}`); }
+    if (!st.isFile()) return fail("INVALID", `não é um arquivo: ${srcPath}`);
+    if (st.size === 0) return fail("INVALID", `anexo vazio: ${srcPath}`);
+    if (st.size > 25 * 1024 * 1024) return fail("INVALID", `anexo maior que 25 MB: ${srcPath}`);
+    const id = newId(); const label = (name ?? basename(srcPath)).slice(0, 200);
+    const dir = this.attachmentsDir(workspaceId); mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const dest = join(dir, `${id.slice(0, 8)}-${basename(label).replace(/[^\w.\-]+/g, "_").slice(0, 80) || "anexo"}`);
+    try { copyFileSync(srcPath, dest); } catch (e) { return fail("INTERNAL", String((e as Error).message ?? e)); }
+    return succeed({ attachmentId: id, name: label, path: dest, size: st.size, mime: mimeOf(label) });
+  }
+  /** Localiza um anexo e a mensagem dele; só serve arquivos dentro de <dados>/attachments. */
+  chatAttachment(attachmentId: string): Result<{ att: ChatAttachment; msg: ChatMessage }> {
+    const msg = this.store.getChatByAttachment(attachmentId);
+    const att = msg?.attachments?.find((a) => a.attachmentId === attachmentId);
+    if (!msg || !att) return fail("NOT_FOUND", "anexo não encontrado");
+    const root = join(this.cfg.dataDir, "attachments") + "/";
+    if (!resolve(att.path).startsWith(root)) return fail("FORBIDDEN", "anexo fora do diretório de anexos");
+    return succeed({ att, msg });
+  }
+  deleteChatAttachment(attachmentId: string): Result<void> {
+    const r = this.chatAttachment(attachmentId); if (!r.ok) return r;
+    try { unlinkSync(r.value.att.path); } catch { /* já removido do disco */ }
+    this.store.setChatAttachments(r.value.msg.chatId, (r.value.msg.attachments ?? []).filter((a) => a.attachmentId !== attachmentId));
+    this.emit("chat", { chatId: newId(), workspaceId: r.value.msg.workspaceId, nodeId: r.value.msg.nodeId, thread: r.value.msg.thread, role: "system", text: "__cleared__", createdAt: nowIso() }); // a UI recarrega o chat
+    return succeed(undefined);
+  }
+  /** Copia o anexo para uma pasta do espaço (arrastar para a árvore). Nome repetido ganha sufixo; nunca sobrescreve. */
+  exportChatAttachment(attachmentId: string, input: ExportAttachment): Result<{ path: string }> {
+    const r = this.chatAttachment(attachmentId); if (!r.ok) return r;
+    const root = this.wsRoot(input.workspaceId); if (!root.ok) return root;
+    const d = this.resolveIn(root.value, input.dir); if (!d.ok) return d;
+    try {
+      mkdirSync(d.value.abs, { recursive: true });
+      if (!realpathSync(d.value.abs).startsWith(realpathSync(root.value))) return fail("FORBIDDEN", "destino fora do espaço");
+      const base = (input.name ?? r.value.att.name).replace(/[\\/\0]+/g, "_") || "anexo";
+      const ext = extname(base); const stem = ext ? base.slice(0, -ext.length) : base;
+      let dest = join(d.value.abs, base);
+      for (let i = 1; existsSync(dest); i++) dest = join(d.value.abs, `${stem}-${i}${ext}`);
+      copyFileSync(r.value.att.path, dest);
+      return succeed({ path: relative(root.value, dest) });
+    } catch (e) { return fail("INTERNAL", String((e as Error).message ?? e)); }
   }
   listChat(nodeId: string, thread: number | undefined, limit: number, since?: string): Result<ChatMessage[]> {
     if (!this.store.getNode(nodeId)) return fail("NOT_FOUND", "nó não encontrado");
