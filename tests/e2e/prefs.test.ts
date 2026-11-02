@@ -42,13 +42,13 @@ describe("Preferências (#64)", () => {
     await page.waitForSelector('[data-testid="prefs"]');
     await page.waitForSelector('[data-testid="prefs-pane-general"]');
     expect(await page.locator('[data-testid="prefs-tab-general"]').getAttribute("aria-selected")).toBe("true");
-    await page.click('[data-testid="prefs-tab-data"]');
-    await page.waitForSelector('[data-testid="prefs-pane-data"] [data-testid="prefs-soon"]'); // aba ainda não construída diz isso, não finge
+    await page.click('[data-testid="prefs-tab-remote"]');
+    await page.waitForSelector('[data-testid="prefs-pane-remote"] [data-testid="prefs-soon"]'); // aba ainda não construída diz isso, não finge
     await page.keyboard.press("Escape");
     await page.waitForSelector('[data-testid="prefs"]', { state: "detached" });
-    expect(JSON.parse(await page.evaluate(() => localStorage.getItem("mess.prefs") ?? "{}") as string)).toMatchObject({ prefsTab: "data" });
+    expect(JSON.parse(await page.evaluate(() => localStorage.getItem("mess.prefs") ?? "{}") as string)).toMatchObject({ prefsTab: "remote" });
     await page.click('[data-testid="settings"]');
-    await page.waitForSelector('[data-testid="prefs-pane-data"]');
+    await page.waitForSelector('[data-testid="prefs-pane-remote"]');
     await page.click('[data-testid="prefs-close"]');
     await page.waitForSelector('[data-testid="prefs"]', { state: "detached" });
   }, 20_000);

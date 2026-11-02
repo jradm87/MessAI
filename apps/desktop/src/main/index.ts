@@ -100,11 +100,11 @@ async function ensureRuntime(): Promise<void> {
   const log = openSync(join(DATA_DIR, "runtime.log"), "a");
   const child = spawn(nodeBin, [entry], { detached: true, stdio: ["ignore", log, log], env });
   child.unref();
-  for (let i = 0; i < 40; i++) {
+  for (let i = 0; i < 160; i++) { // até 40 s: trocar um runtime antigo (versão nova do app) + subir o novo pode passar de 10 s em máquinas lentas
     if (compatible(await runtimeHealth())) return;
     await new Promise((r) => setTimeout(r, 250));
   }
-  throw new Error("runtime não respondeu em 10 s");
+  throw new Error("runtime não respondeu em 40 s (veja ~/.messai/runtime.log)");
 }
 
 let mainWin: BrowserWindow | null = null;

@@ -32,10 +32,20 @@ export class ApiClientError extends Error { constructor(readonly error: ApiError
 export class Api {
   constructor(readonly conn: Connection) {}
   private async req<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const r = await fetch(this.conn.baseUrl + path, {
-      method, headers: { authorization: `Bearer ${this.conn.token}`, ...(body ? { "content-type": "application/json" } : {}) },
-      body: body ? JSON.stringify(body) : null,
-    });
+    // Leituras (GET) repetem quando o runtime ainda está subindo (rede recusada → TypeError): ~15 s de tolerância na abertura do app.
+    // Escritas NÃO repetem (poderiam duplicar a operação).
+    let r: Response | undefined;
+    for (let attempt = 0; !r; attempt++) {
+      try {
+        r = await fetch(this.conn.baseUrl + path, {
+          method, headers: { authorization: `Bearer ${this.conn.token}`, ...(body ? { "content-type": "application/json" } : {}) },
+          body: body ? JSON.stringify(body) : null,
+        });
+      } catch (e) {
+        if (method !== "GET" || attempt >= 30) throw e;
+        await new Promise((res) => setTimeout(res, 500));
+      }
+    }
     if (r.status === 204) return undefined as T;
     const j = (await r.json()) as T | { error: ApiError };
     if (!r.ok) throw new ApiClientError((j as { error: ApiError }).error, r.status);

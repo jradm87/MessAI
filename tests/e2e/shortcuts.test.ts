@@ -88,4 +88,19 @@ describe("Atalhos (#58)", () => {
     expect(JSON.parse(await page.evaluate(() => localStorage.getItem("mess.prefs") ?? "{}") as string).keymap ?? "").toBe("");
     await closePrefs();
   }, 30_000);
+
+  it("o painel de Preferências rola (não vaza do modal) mesmo com uma lista longa como a de Atalhos", async () => {
+    await openShortcuts();
+    const m = await page.evaluate(() => {
+      const modal = document.querySelector('[data-testid="prefs"]') as HTMLElement; const pane = document.querySelector(".prefs-pane") as HTMLElement;
+      const r = modal.getBoundingClientRect();
+      return { modalBottom: r.bottom, vh: window.innerHeight, scrollable: pane.scrollHeight > pane.clientHeight, overflowY: getComputedStyle(pane).overflowY };
+    });
+    expect(m.modalBottom).toBeLessThanOrEqual(m.vh); // o modal cabe na janela
+    expect(m.scrollable).toBe(true); expect(m.overflowY).toBe("auto");
+    const top = await page.evaluate(async () => { const pane = document.querySelector(".prefs-pane") as HTMLElement; pane.scrollTop = pane.scrollHeight; await new Promise((r) => setTimeout(r, 100)); return pane.scrollTop; });
+    expect(top).toBeGreaterThan(0); // dá para chegar ao fim da lista
+    await closePrefs();
+  }, 20_000);
 });
+
