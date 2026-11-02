@@ -50,7 +50,7 @@ function PresetEditor({ initial, isNew, onSave, onCancel }: { initial: PresetInp
           <label>Nome <input value={p.label} onChange={(e) => up({ label: e.target.value })} data-testid="preset-label" autoFocus /></label>
           <label>Comando <input value={cmd} onChange={(e) => setCmd(e.target.value)} placeholder="ex.: claude --model opus" data-testid="preset-command" /></label>
           {hasHint(initial) && <div className="mut hint">Este preset injeta a dica do MessAI para o agente (argumentos ocultos). Mantendo o comando igual, ela continua.</div>}
-          <label className="switch-row"><span>Maestro <small className="mut">— guardado para o modo Maestro (#29); ainda sem efeito</small></span><Toggle on={p.maestro} onChange={(v) => up({ maestro: v })} /></label>
+          <label className="switch-row"><span>Maestro <small className="mut">— o terminal criado por este preset já nasce condutor (recruta, dispensa e reatribui agentes)</small></span><Toggle on={p.maestro} onChange={(v) => up({ maestro: v })} /></label>
         </div>
       ) : (
         <div className="form">

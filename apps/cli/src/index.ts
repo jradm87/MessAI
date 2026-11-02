@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // CLI mínima para agentes e humanos dentro de um terminal REA. Fala com o runtime pelo socket Unix.
 import { request } from "node:http";
-import { AGENT_ENV, type AskResult, type ChatMessage, type Message, type Node, type Workspace, type WorkspaceSnapshot } from "@messai/contracts";
+import { AGENT_ENV, type Band, type BandAskResult, type AskResult, type ChatMessage, type Message, type Node, type Workspace, type WorkspaceSnapshot } from "@messai/contracts";
 
 const env = (k: keyof typeof AGENT_ENV) => process.env[AGENT_ENV[k]];
 const socketPath = env("socket"), token = env("token"), workspaceId = env("workspaceId"), nodeId = env("nodeId");
@@ -46,6 +46,14 @@ try {
   mess inbox [--all]                mensagens recebidas (marca como lidas)
   mess say <texto> [--thread N]     responde no chat do seu terminal (Markdown; aparece em balões)
   mess chat [--thread N] [--all]    histórico do chat do seu terminal (padrão: 30 recentes)
+  mess band list                    bandas do espaço (grupos de terminais) e seus membros
+  mess band create <nome> [nó...]   cria uma banda · add/remove <banda> <nó> · delete <banda>
+  mess band ask <banda> <texto>     pergunta a TODOS os membros e espera as respostas [--timeout seg]
+  mess band say <banda> <texto>     transmite (broadcast) sem esperar resposta
+  mess maestro recruit (--preset p | --command c [--arg a]...) [--name n] [--role r] [--band b] [--cwd d]
+                                    (só condutor) recruta um terminal ligado a você
+  mess maestro dismiss <nó>         (só condutor) encerra e remove um terminal ligado a você
+  mess maestro assign <nó> <papel|->  (só condutor) reatribui o papel (- remove)
   mess floor list                   andares do térreo deste espaço
   mess floor create <nome> [--branch b] [--base ref] [--no-git]
   mess floor status <working|blocked|review|done> [texto]   status do andar atual
@@ -105,6 +113,7 @@ try {
     const me = s.nodes.find((n) => n.nodeId === nodeId);
     console.log(`Espaço: ${s.workspace.name} (${s.workspace.cwd}) rev ${s.workspace.revision}`);
     console.log(`Seu nó: ${me ? `${me.title} [${short(me.nodeId)}]` : nodeId ?? "?"}`);
+    if (process.env["MESS_MAESTRO"] === "1") console.log("Modo Maestro: você é o condutor — pode `mess maestro recruit|dismiss|assign` e `mess band ask|say`.");
     if (process.env["MESS_ROLE"]) console.log(`Seu papel: ${process.env["MESS_ROLE"]}\n${process.env["MESS_ROLE_INSTRUCTIONS"] ?? ""}`);
     const conn = nodeId ? await call<{ node: Node; direction: string }[]>("GET", `/v1/nodes/${nodeId}/connected`) : [];
     if (conn.length === 0) { console.log("Nenhum nó conectado ao seu."); }
@@ -170,6 +179,55 @@ try {
     const r = await call<{ messages: (Message & { fromTitle: string })[] }>("GET", `/v1/nodes/${nodeId}/inbox?unread=${all ? 0 : 1}&mark=1`);
     if (!r.messages.length) console.log(all ? "Sem mensagens." : "Sem mensagens novas.");
     for (const m of r.messages) console.log(`[${short(m.messageId)}] ${m.createdAt.slice(11, 19)} de "${m.fromTitle}"${m.replyTo ? ` (resposta a ${short(m.replyTo)})` : ""}:\n  ${m.text}`);
+  } else if (cmd === "band") {
+    const args = [sub, ...rest].filter((a): a is string => a !== undefined);
+    const op = args.shift();
+    const bands = () => call<Band[]>("GET", `/v1/workspaces/${workspaceId}/bands`);
+    const needBand = async (ref: string | undefined) => { const r = (ref ?? "").toLowerCase(); const b = (await bands()).find((x) => x.bandId.startsWith(r) || x.name.toLowerCase() === r); if (!b || !r) throw new Error(`banda não encontrada: ${ref ?? ""}`); return b; };
+    const ids = async (refs: string[]) => { const s = await snapshot(); return refs.map((r) => { const n = findNode(s.nodes, r); if (!n || n.kind !== "terminal") throw new Error(`terminal não encontrado: ${r}`); return n.nodeId; }); };
+    const flagNum = (f: string) => { const i = args.indexOf(f); if (i < 0) return undefined; const v = Math.round(Number(args[i + 1]) * 1000); args.splice(i, 2); return v; };
+    if (op === "list" || !op) {
+      const list = await bands(); const s = await snapshot();
+      if (!list.length) console.log("nenhuma banda");
+      for (const b of list) console.log(`${short(b.bandId)}  ${b.name.padEnd(20)} ${b.nodeIds.map((id) => s.nodes.find((n) => n.nodeId === id)?.title ?? short(id)).join(", ") || "(vazia)"}`);
+    } else if (op === "create") {
+      const [name, ...members] = args; if (!name) throw new Error("uso: mess band create <nome> [nó...]");
+      const b = await call<Band>("POST", `/v1/workspaces/${workspaceId}/bands`, { name, nodeIds: await ids(members) });
+      console.log(`banda "${b.name}" criada [${short(b.bandId)}] com ${b.nodeIds.length} membro(s)`);
+    } else if (op === "add" || op === "remove") {
+      const [ref, ...members] = args; const b = await needBand(ref); if (!members.length) throw new Error(`uso: mess band ${op} <banda> <nó...>`);
+      const r = await call<Band>("PATCH", `/v1/bands/${b.bandId}`, op === "add" ? { addNodeIds: await ids(members) } : { removeNodeIds: await ids(members) });
+      console.log(`banda "${r.name}": ${r.nodeIds.length} membro(s)`);
+    } else if (op === "delete") {
+      const b = await needBand(args[0]); await call("DELETE", `/v1/bands/${b.bandId}`); console.log(`banda "${b.name}" removida`);
+    } else if (op === "ask" || op === "say") {
+      if (!nodeId) throw new Error("sem MESS_NODE_ID");
+      const timeoutMs = flagNum("--timeout"); const [ref, ...text] = args; if (!ref || !text.length) throw new Error(`uso: mess band ${op} <banda> <texto>`);
+      const b = await needBand(ref);
+      const r = await call<BandAskResult>("POST", `/v1/bands/${b.bandId}/${op === "say" ? "broadcast" : "ask"}`, { text: text.join(" "), fromNodeId: nodeId, ...(timeoutMs && op === "ask" ? { timeoutMs } : {}) });
+      for (const a of r.answers) {
+        if (a.error) console.log(`--- ${a.title}: (erro) ${a.error}`);
+        else if (op === "say") console.log(`--- ${a.title}: ${a.delivered ? "enviado" : "não está rodando"}`);
+        else console.log(`--- ${a.title}${a.timedOut ? " (tempo limite; resposta pode estar incompleta)" : ""}\n${a.response || "(sem saída)"}`);
+      }
+    } else throw new Error("uso: mess band list|create|add|remove|delete|ask|say");
+  } else if (cmd === "maestro") {
+    if (!nodeId) throw new Error("sem MESS_NODE_ID");
+    const args = [sub, ...rest].filter((a): a is string => a !== undefined);
+    const op = args.shift();
+    const flags = (f: string) => { const out: string[] = []; for (let i = args.indexOf(f); i >= 0; i = args.indexOf(f)) { const v = args[i + 1]; args.splice(i, 2); if (v !== undefined) out.push(v); } return out; };
+    if (op === "recruit") {
+      const [preset] = flags("--preset"), [command] = flags("--command"), [name] = flags("--name"), [roleName] = flags("--role"), [band] = flags("--band"), [cwd] = flags("--cwd"); const a = flags("--arg");
+      if (!preset && !command) throw new Error("uso: mess maestro recruit (--preset <id> | --command <cmd> [--arg a]...) [--name n] [--role r] [--band b] [--cwd d]");
+      const r = await call<{ node: Node; bandId?: string }>("POST", `/v1/nodes/${nodeId}/maestro/recruit`, { ...(preset ? { preset } : {}), ...(command ? { command } : {}), ...(a.length ? { args: a } : {}), ...(name ? { name } : {}), ...(roleName ? { roleName } : {}), ...(band ? { band } : {}), ...(cwd ? { cwd } : {}) });
+      console.log(`recrutado "${r.node.title}" [${short(r.node.nodeId)}]${r.bandId ? ` na banda ${band}` : ""}`);
+    } else if (op === "dismiss") {
+      const [ref] = args; if (!ref) throw new Error("uso: mess maestro dismiss <nó>");
+      const r = await call<{ title: string }>("POST", `/v1/nodes/${nodeId}/maestro/dismiss`, { ref }); console.log(`dispensado "${r.title}"`);
+    } else if (op === "assign") {
+      const [ref, role] = args; if (!ref || !role) throw new Error("uso: mess maestro assign <nó> <papel|->");
+      const r = await call<Node>("POST", `/v1/nodes/${nodeId}/maestro/assign`, { ref, roleName: role === "-" ? null : role }); console.log(`"${r.title}": ${role === "-" ? "sem papel" : `papel ${role}`}`);
+    } else throw new Error("uso: mess maestro recruit|dismiss|assign");
   } else if (cmd === "connect") {
     if (!nodeId) throw new Error("sem MESS_NODE_ID");
     const s = await snapshot(); const n = findNode(s.nodes, sub ?? "");

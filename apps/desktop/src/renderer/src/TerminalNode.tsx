@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, memo } from "react";
 import { useAtomValue } from "jotai";
-import { Search, Eraser, Lock, Eye, Folder, SquareTerminal } from "lucide-react";
+import { Search, Eraser, Lock, Eye, Folder, SquareTerminal, Crown } from "lucide-react";
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -20,9 +20,10 @@ import { EditableTitle } from "./EditableTitle.js";
 import { Composer, type MentionTarget } from "./Composer.js";
 import { ChatLayer } from "./ChatLayer.js";
 import type { ChatMessage, Role, Skill } from "@messai/contracts";
+import type { NodeBand } from "./bands.js";
 
 export type NodeExtras = { onLink: () => void; linkCount: number; onChat: () => void; onRaise: () => void };
-export type ComposerExtras = { composerOpen: boolean; onComposerClose: () => void; onFocus: () => void; workspaceId: string; targets: MentionTarget[]; chatOpen: boolean; onChatClose: () => void; role?: Role; roles: Role[]; onSetRole: (roleId: string | null) => void; onManageRoles: () => void; skills?: Skill[]; skillIds?: string[]; onSetSkills?: (ids: string[]) => void; onManageSkills?: () => void };
+export type ComposerExtras = { composerOpen: boolean; onComposerClose: () => void; onFocus: () => void; workspaceId: string; targets: MentionTarget[]; chatOpen: boolean; onChatClose: () => void; role?: Role; roles: Role[]; onSetRole: (roleId: string | null) => void; onManageRoles: () => void; skills?: Skill[]; skillIds?: string[]; onSetSkills?: (ids: string[]) => void; onManageSkills?: () => void; bands?: NodeBand[]; onOpenBands?: () => void; maestro?: boolean; onMaestro?: (on: boolean) => void };
 export type Appearance = { icon?: string | null; color?: string | null; termTheme?: TermTheme | null };
 export type TerminalData = { title: string; sessionId: string; api: Api; stream: Stream; onDelete: () => void; onRename: (t: string) => void; onResume: () => void; editSignal?: number; icon?: string; color?: string; termTheme?: string; onAppearance: (p: Appearance) => void } & NodeExtras & ComposerExtras;
 const THEMES: { id: TermTheme; label: string }[] = [{ id: "system", label: "Sistema" }, { id: "dark", label: "Escuro" }, { id: "light", label: "Claro" }, { id: "custom", label: "Custom" }];
@@ -142,7 +143,7 @@ function TerminalNodeImpl({ id, data, selected }: NodeProps & { data: TerminalDa
     });
   }, [id, api, stream]);
   return (
-    <div className={`node terminal ${selected ? "sel" : ""} ${attention ? "att" : ""}`}>
+    <div className={`node terminal ${selected ? "sel" : ""} ${attention ? "att" : ""} ${data.bands?.length ? "inband" : ""}`} style={data.bands?.length ? ({ "--band-color": data.bands[0]!.color } as CSSProperties) : undefined}>
       <NodeResizer minWidth={240} minHeight={160} isVisible={selected} />
       <Composer open={data.composerOpen} nodeId={id} workspaceId={data.workspaceId} sessionId={sessionId} title={data.title} targets={data.targets} api={api} stream={stream} onClose={data.onComposerClose} {...(data.chatOpen ? { chatThread: thread } : {})} />
       <div className={`bar nodrag-off ${data.color ? "tinted" : ""}`} style={data.color ? ({ "--node-color": data.color } as CSSProperties) : undefined}>
@@ -178,6 +179,8 @@ function TerminalNodeImpl({ id, data, selected }: NodeProps & { data: TerminalDa
             <div className="mi" onClick={() => { setRoleMenu(false); data.onManageSkills?.(); }}>Gerenciar habilidades…</div>
           </div>
         )}
+        {data.maestro && <span className="maestro-pill nodrag" title="Modo Maestro: este terminal recruta, dispensa e reatribui agentes (mess maestro …)" data-testid="maestro-pill"><Crown size={11} /></span>}
+        {data.bands?.map((b) => <span key={b.id} className={`band-pill nodrag ${b.asking ? "asking" : ""}`} style={{ "--band-color": b.color } as CSSProperties} title={b.asking ? `Banda ${b.name}: pergunta em andamento neste terminal` : `Banda ${b.name} (clique para gerenciar)`} data-testid="band-pill" onClick={(e) => { e.stopPropagation(); data.onOpenBands?.(); }}>{b.name}{b.asking ? " …" : ""}</span>)}
         <span className={`st ${state}`} title={`${state}${session?.pid ? ` · pid ${session.pid}` : ""}${session?.lease ? (mine ? " · você controla" : " · observando") : ""}`}>
           {state}
           {session?.persistent && <span className="tag">tmux</span>}
@@ -186,6 +189,7 @@ function TerminalNodeImpl({ id, data, selected }: NodeProps & { data: TerminalDa
         {unread > 0 && <span className="badge" title="mensagens não lidas de outros agentes (mess inbox)">✉ {unread}</span>}
         {chatUnread > 0 && <span className="badge chatb" title="respostas no chat (Ctrl+J)">💬 {chatUnread}</span>}
         <span className="sp" />
+        {data.onMaestro && <button title={data.maestro ? "Modo Maestro ligado (clique para desligar)" : "Ligar o Modo Maestro (recrutar/dispensar/reatribuir agentes)"} className={`nodrag maestro-toggle ${data.maestro ? "on" : ""}`} data-testid="maestro-toggle" onClick={() => data.onMaestro?.(!data.maestro)}><Crown size={12} /></button>}
         <button title="Buscar no terminal (Ctrl+F)" className="nodrag" onClick={() => setFind((v) => (v === null ? "" : null))}><Search size={12} /></button>
         <button title="Limpar a tela" className="nodrag" onClick={() => termRef.current?.clear()}><Eraser size={12} /></button>
         {state === "running" && <button title="Parar processo" onClick={() => void api.stop(sessionId)}>■</button>}

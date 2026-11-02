@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import type { ChatMessage, Connection, Drawing, Folder, Message, Node, Role, Session, Workspace, Skill, NodeGroup, Score } from "@messai/contracts";
+import type { ChatMessage, Connection, Drawing, Folder, Message, Node, Role, Session, Workspace, Skill, NodeGroup, Score, Band } from "@messai/contracts";
 
 /** Migração por função (idempotente). */
 const LATE_SCHEMA = Symbol("late");
@@ -65,6 +65,12 @@ const MIGRATIONS: (string | typeof LATE_SCHEMA)[] = [
    ALTER TABLE nodes ADD COLUMN term_theme TEXT;`, // #56 aparência do terminal (preset / edição no nó)
   // Passo idempotente (ver lateSchema): substitui as migrações #41/#78/#71/#57, que foram inseridas fora de ordem e quebravam bancos já migrados.
   LATE_SCHEMA,
+  // Fase 4 (sempre no FIM): bandas #70 · condutor #29 e limite de memória #80 por nó. Cada passo roda uma vez (versão numerada).
+  `CREATE TABLE IF NOT EXISTS bands (
+     band_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
+     name TEXT NOT NULL, color TEXT NOT NULL DEFAULT '', node_ids TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL);`,
+  `ALTER TABLE nodes ADD COLUMN maestro INTEGER NOT NULL DEFAULT 0;`,
+  `ALTER TABLE nodes ADD COLUMN mem_limit_mb INTEGER;`,
 ];
 
 /**
@@ -115,12 +121,14 @@ type ChatRow = { chat_id: string; workspace_id: string; node_id: string; thread:
 const chatFrom = (r: ChatRow): ChatMessage => ({ chatId: r.chat_id, workspaceId: r.workspace_id, nodeId: r.node_id, thread: r.thread, role: r.role, text: r.text, createdAt: r.created_at });
 type FolderRow = { folder_id: string; name: string; kind: Folder["kind"]; parent_id: string | null; sort_order: number; collapsed: number; created_at: string };
 const folderFrom = (r: FolderRow): Folder => ({ folderId: r.folder_id, name: r.name, kind: r.kind, sortOrder: r.sort_order, collapsed: r.collapsed === 1, createdAt: r.created_at, ...(r.parent_id ? { parentId: r.parent_id } : {}) });
-type NodeRow = { node_id: string; workspace_id: string; kind: Node["kind"]; title: string; x: number; y: number; w: number; h: number; session_id: string | null; content: string | null; created_at: string; role_id: string | null; locked: number; color: string | null; icon: string | null; term_theme: string | null; skill_ids: string | null; group_id: string | null; file_path: string | null; title_auto: number };
+type NodeRow = { node_id: string; workspace_id: string; kind: Node["kind"]; title: string; x: number; y: number; w: number; h: number; session_id: string | null; content: string | null; created_at: string; role_id: string | null; locked: number; color: string | null; icon: string | null; term_theme: string | null; skill_ids: string | null; group_id: string | null; file_path: string | null; title_auto: number; maestro?: number; mem_limit_mb?: number | null };
 type SkillRow = { skill_id: string; name: string; description: string; instructions: string; created_at: string; updated_at: string };
 const skillFrom = (r: SkillRow): Skill => ({ skillId: r.skill_id, name: r.name, description: r.description, instructions: r.instructions, createdAt: r.created_at, updatedAt: r.updated_at });
 const parseIds = (raw: string | null): string[] | undefined => { if (!raw) return undefined; try { const j = JSON.parse(raw) as unknown; return Array.isArray(j) && j.length ? j.filter((x): x is string => typeof x === "string") : undefined; } catch { return undefined; } };
 type ScoreRow = { score_id: string; name: string; description: string; data: string; created_at: string };
 const scoreFrom = (r: ScoreRow): Score => { let d: { nodes?: Score["nodes"]; connections?: Score["connections"] } = {}; try { d = JSON.parse(r.data) as typeof d; } catch { /* partitura corrompida: vazia */ } return { scoreId: r.score_id, name: r.name, description: r.description, nodes: d.nodes ?? [], connections: d.connections ?? [], createdAt: r.created_at }; };
+type BandRow = { band_id: string; workspace_id: string; name: string; color: string; node_ids: string; created_at: string };
+const bandFrom = (r: BandRow): Band => ({ bandId: r.band_id, workspaceId: r.workspace_id, name: r.name, color: r.color, nodeIds: parseIds(r.node_ids) ?? [], asking: [], createdAt: r.created_at });
 type GroupRow = { group_id: string; workspace_id: string; label: string; color: string; created_at: string };
 const groupFrom = (r: GroupRow): NodeGroup => ({ groupId: r.group_id, workspaceId: r.workspace_id, label: r.label, color: r.color, createdAt: r.created_at });
 type RoleRow = { role_id: string; name: string; badge: string; instructions: string; created_at: string; updated_at: string };
@@ -139,6 +147,8 @@ const nodeFrom = (r: NodeRow): Node => ({
   ...(r.term_theme ? { termTheme: r.term_theme } : {}),
   ...(parseIds(r.skill_ids) ? { skillIds: parseIds(r.skill_ids)! } : {}),
   ...(r.group_id ? { groupId: r.group_id } : {}),
+  ...(r.maestro ? { maestro: true } : {}),
+  ...(r.mem_limit_mb ? { memLimitMb: r.mem_limit_mb } : {}),
   ...(r.file_path ? { filePath: r.file_path } : {}),
   ...(r.content !== null ? { content: r.content } : {}),
 });
@@ -279,9 +289,9 @@ export class Store {
     return r ? nodeFrom(r) : undefined;
   }
   insertNode(n: Node, titleAuto = true): void {
-    this.db.prepare("INSERT INTO nodes(node_id,workspace_id,kind,title,x,y,w,h,session_id,content,created_at,role_id,locked,color,file_path,title_auto,icon,term_theme,skill_ids,group_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(
+    this.db.prepare("INSERT INTO nodes(node_id,workspace_id,kind,title,x,y,w,h,session_id,content,created_at,role_id,locked,color,file_path,title_auto,icon,term_theme,skill_ids,group_id,maestro,mem_limit_mb) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(
       n.nodeId, n.workspaceId, n.kind, n.title, n.geometry.x, n.geometry.y, n.geometry.w, n.geometry.h,
-      n.sessionId ?? null, n.content ?? null, n.createdAt, n.roleId ?? null, n.locked ? 1 : 0, n.color ?? null, n.filePath ?? null, titleAuto ? 1 : 0, n.icon ?? null, n.termTheme ?? null, n.skillIds?.length ? JSON.stringify(n.skillIds) : null, n.groupId ?? null);
+      n.sessionId ?? null, n.content ?? null, n.createdAt, n.roleId ?? null, n.locked ? 1 : 0, n.color ?? null, n.filePath ?? null, titleAuto ? 1 : 0, n.icon ?? null, n.termTheme ?? null, n.skillIds?.length ? JSON.stringify(n.skillIds) : null, n.groupId ?? null, n.maestro ? 1 : 0, n.memLimitMb ?? null);
   }
   setNodeRole(id: string, roleId: string | null): void { this.db.prepare("UPDATE nodes SET role_id=? WHERE node_id=?").run(roleId, id); }
   // #71 partituras (data = JSON {nodes, connections})
@@ -291,6 +301,14 @@ export class Store {
   insertScore(sc: Score): void { this.db.prepare("INSERT INTO scores VALUES(?,?,?,?,?)").run(sc.scoreId, sc.name, sc.description, JSON.stringify({ nodes: sc.nodes, connections: sc.connections }), sc.createdAt); }
   updateScore(id: string, p: { name?: string | undefined; description?: string | undefined }): void { this.db.prepare("UPDATE scores SET name=COALESCE(?,name), description=COALESCE(?,description) WHERE score_id=?").run(p.name ?? null, p.description ?? null, id); }
   deleteScore(id: string): void { this.db.prepare("DELETE FROM scores WHERE score_id=?").run(id); }
+  // #70 bandas (node_ids = JSON; ids de nós apagados são filtrados na leitura pelo serviço)
+  listBands(workspaceId: string): Band[] { return (this.db.prepare("SELECT * FROM bands WHERE workspace_id=? ORDER BY created_at").all(workspaceId) as BandRow[]).map(bandFrom); }
+  getBand(id: string): Band | undefined { const r = this.db.prepare("SELECT * FROM bands WHERE band_id=?").get(id) as BandRow | undefined; return r ? bandFrom(r) : undefined; }
+  insertBand(b: Band): void { this.db.prepare("INSERT INTO bands VALUES(?,?,?,?,?,?)").run(b.bandId, b.workspaceId, b.name, b.color, JSON.stringify(b.nodeIds), b.createdAt); }
+  updateBand(id: string, p: { name?: string | undefined; color?: string | undefined; nodeIds?: string[] | undefined }): void {
+    this.db.prepare("UPDATE bands SET name=COALESCE(?,name), color=COALESCE(?,color), node_ids=COALESCE(?,node_ids) WHERE band_id=?").run(p.name ?? null, p.color ?? null, p.nodeIds ? JSON.stringify(p.nodeIds) : null, id);
+  }
+  deleteBand(id: string): void { this.db.prepare("DELETE FROM bands WHERE band_id=?").run(id); }
   // #78 grupos de nós
   listGroups(workspaceId: string): NodeGroup[] { return (this.db.prepare("SELECT * FROM node_groups WHERE workspace_id=? ORDER BY created_at").all(workspaceId) as GroupRow[]).map(groupFrom); }
   getGroup(id: string): NodeGroup | undefined { const r = this.db.prepare("SELECT * FROM node_groups WHERE group_id=?").get(id) as GroupRow | undefined; return r ? groupFrom(r) : undefined; }
@@ -327,7 +345,7 @@ export class Store {
   }
   deleteRole(id: string): void { this.db.transaction(() => { this.db.prepare("UPDATE nodes SET role_id=NULL WHERE role_id=?").run(id); this.db.prepare("DELETE FROM roles WHERE role_id=?").run(id); })(); }
   nodesWithRole(id: string): Node[] { return (this.db.prepare("SELECT * FROM nodes WHERE role_id=?").all(id) as NodeRow[]).map(nodeFrom); }
-  updateNode(id: string, patch: { title?: string | undefined; geometry?: Node["geometry"] | undefined; content?: string | undefined; sessionId?: string | undefined; locked?: boolean | undefined; color?: string | null | undefined; filePath?: string | undefined; titleAuto?: boolean | undefined; icon?: string | null | undefined; termTheme?: string | null | undefined; groupId?: string | null | undefined }): void {
+  updateNode(id: string, patch: { title?: string | undefined; geometry?: Node["geometry"] | undefined; content?: string | undefined; sessionId?: string | undefined; locked?: boolean | undefined; color?: string | null | undefined; filePath?: string | undefined; titleAuto?: boolean | undefined; icon?: string | null | undefined; termTheme?: string | null | undefined; groupId?: string | null | undefined; maestro?: boolean | undefined; memLimitMb?: number | null | undefined }): void {
     const g = patch.geometry;
     const sets = ["title=COALESCE(?,title)", "x=COALESCE(?,x)", "y=COALESCE(?,y)", "w=COALESCE(?,w)", "h=COALESCE(?,h)", "content=COALESCE(?,content)", "session_id=COALESCE(?,session_id)"];
     const vals: unknown[] = [patch.title ?? null, g?.x ?? null, g?.y ?? null, g?.w ?? null, g?.h ?? null, patch.content ?? null, patch.sessionId ?? null];
@@ -338,6 +356,8 @@ export class Store {
     if (patch.icon !== undefined) { sets.push("icon=?"); vals.push(patch.icon); }
     if (patch.termTheme !== undefined) { sets.push("term_theme=?"); vals.push(patch.termTheme); }
     if (patch.groupId !== undefined) { sets.push("group_id=?"); vals.push(patch.groupId); }
+    if (patch.maestro !== undefined) { sets.push("maestro=?"); vals.push(patch.maestro ? 1 : 0); }
+    if (patch.memLimitMb !== undefined) { sets.push("mem_limit_mb=?"); vals.push(patch.memLimitMb); }
     this.db.prepare(`UPDATE nodes SET ${sets.join(",")} WHERE node_id=?`).run(...vals, id);
   }
   isTitleAuto(id: string): boolean { return ((this.db.prepare("SELECT title_auto t FROM nodes WHERE node_id=?").get(id) as { t: number } | undefined)?.t ?? 0) === 1; }

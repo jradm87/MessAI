@@ -613,3 +613,26 @@ button.danger:hover { border-color: var(--danger); color: var(--danger-fg); }
 .bd-menu { position: absolute; left: 80%; top: 0; z-index: 20; min-width: 170px; }
 .bd-text { flex: 1; min-width: 0; resize: none; border: 0; background: transparent; color: var(--fg); padding: 8px 10px; font: 13px/1.5 ui-monospace, "JetBrains Mono", monospace; outline: none; }
 .bd-tab { overflow: visible; }
+
+/* #70 bandas · #29 maestro */
+.node.terminal.inband { outline: 2px solid color-mix(in srgb, var(--band-color) 70%, transparent); outline-offset: 2px; }
+.band-pill { display: inline-flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 8px; font-size: 10px; cursor: pointer; color: #fff; background: var(--band-color); max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.band-pill.asking { animation: band-pulse 1s ease-in-out infinite; }
+@keyframes band-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+.maestro-pill { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 16px; border-radius: 8px; background: #e5a23a; color: #1a1205; }
+.maestro-toggle.on { color: #e5a23a; }
+.bands-modal { width: 720px; max-height: 84vh; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
+.band-list { display: flex; flex-direction: column; gap: 10px; }
+.band-card { border: 1px solid var(--line); border-left: 4px solid var(--acc); border-radius: 8px; background: var(--surface-2); padding: 8px 10px; display: flex; flex-direction: column; gap: 8px; }
+.band-head { display: flex; align-items: center; gap: 8px; }
+.band-dot { width: 10px; height: 10px; border-radius: 50%; }
+.band-members { display: flex; flex-wrap: wrap; gap: 6px; }
+.band-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 12px; font-size: 12px; cursor: pointer; }
+.band-chip.on { background: var(--acc); color: #fff; border-color: transparent; }
+.band-chip.asking { animation: band-pulse 1s ease-in-out infinite; }
+.band-chip input { display: none; }
+.band-ask textarea { width: 100%; resize: vertical; }
+.band-actions { display: flex; gap: 8px; margin-top: 6px; }
+.band-results { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow: auto; }
+.band-answer pre { margin: 2px 0 0; padding: 6px; background: var(--term-bg, #0a0a0b); color: var(--term-fg, #e4e4e7); border-radius: 6px; font-size: 11px; white-space: pre-wrap; max-height: 140px; overflow: auto; }
+.spin { animation: spin 1s linear infinite; }

@@ -2,7 +2,7 @@ import { Type, type Static } from "@sinclair/typebox";
 
 export const PROTOCOL_VERSION = 1 as const;
 /** Incrementar a cada mudança de snapshot/rotas; o cliente avisa quando o runtime está atrás. */
-export const BUILD_VERSION = 18 as const;
+export const BUILD_VERSION = 19 as const;
 
 // ---------- Identidades ----------
 export const Id = Type.String({ minLength: 8, maxLength: 64 });
@@ -76,6 +76,8 @@ export const Node = Type.Object({
   termTheme: Type.Optional(Type.String()),
   skillIds: Type.Optional(Type.Array(Id)), // #57 habilidades anexadas (terminal)
   groupId: Type.Optional(Id), // #78 grupo de nós
+  maestro: Type.Optional(Type.Boolean()), // #29 terminal condutor (recruta/dispensa/reatribui agentes)
+  memLimitMb: Type.Optional(Type.Integer({ minimum: 0 })), // #80 limite de memória do terminal (0/ausente = sem limite)
   createdAt: Type.String(),
 });
 export type Node = Static<typeof Node>;
@@ -196,12 +198,38 @@ export const GroupDrawings = Type.Object({
 });
 export type GroupDrawings = Static<typeof GroupDrawings>;
 
+// #70 — banda: grupo nomeado de terminais/agentes para perguntar/transmitir em lote. `asking` = membros com pergunta em andamento (efêmero).
+export const Band = Type.Object({ bandId: Id, workspaceId: Id, name: Type.String(), color: Type.String(), nodeIds: Type.Array(Id), asking: Type.Array(Id), createdAt: Type.String() });
+export type Band = Static<typeof Band>;
+export const CreateBand = Type.Object({ name: Type.String({ minLength: 1, maxLength: 40 }), color: Type.Optional(Type.String({ maxLength: 12 })), nodeIds: Type.Optional(Type.Array(Id, { maxItems: 50 })) });
+export type CreateBand = Static<typeof CreateBand>;
+export const PatchBand = Type.Object({ name: Type.Optional(Type.String({ minLength: 1, maxLength: 40 })), color: Type.Optional(Type.String({ maxLength: 12 })), addNodeIds: Type.Optional(Type.Array(Id, { maxItems: 50 })), removeNodeIds: Type.Optional(Type.Array(Id, { maxItems: 50 })) });
+export type PatchBand = Static<typeof PatchBand>;
+/** Pergunta/transmissão em lote. Sem `fromNodeId` é o humano (o texto é digitado nos membros); com ele é um agente (mensagem rastreável, exige conexão ou mesma banda). */
+export const AskBand = Type.Object({ text: Type.String({ minLength: 1, maxLength: 20000 }), fromNodeId: Type.Optional(Id), timeoutMs: Type.Optional(Type.Integer({ minimum: 1000, maximum: 600000 })), noWait: Type.Optional(Type.Boolean()) });
+export type AskBand = Static<typeof AskBand>;
+export type BandAnswer = { nodeId: string; title: string; agentType: string; delivered: boolean; response: string; timedOut: boolean; error?: string };
+export type BandAskResult = { bandId: string; name: string; answers: BandAnswer[] };
+
+// #29 — Modo Maestro: o condutor recruta/dispensa/reatribui terminais ligados a ele.
+export const MaestroRecruit = Type.Object({
+  preset: Type.Optional(Type.String({ maxLength: 60 })), command: Type.Optional(Type.String({ maxLength: 300 })), args: Type.Optional(Type.Array(Type.String({ maxLength: 4000 }), { maxItems: 50 })),
+  name: Type.Optional(Type.String({ maxLength: 60 })), roleName: Type.Optional(Type.String({ maxLength: 60 })), band: Type.Optional(Type.String({ maxLength: 40 })),
+  cwd: Type.Optional(Type.String({ minLength: 1 })), persistent: Type.Optional(Type.Boolean()),
+});
+export type MaestroRecruit = Static<typeof MaestroRecruit>;
+export const MaestroTarget = Type.Object({ ref: Type.String({ minLength: 1 }) });
+export type MaestroTarget = Static<typeof MaestroTarget>;
+export const MaestroAssign = Type.Object({ ref: Type.String({ minLength: 1 }), roleName: Type.Union([Type.String({ minLength: 1 }), Type.Null()]) });
+export type MaestroAssign = Static<typeof MaestroAssign>;
+
 export const WorkspaceSnapshot = Type.Object({
   workspace: Workspace,
   nodes: Type.Array(Node),
   connections: Type.Array(Connection),
   drawings: Type.Array(Drawing),
   groups: Type.Optional(Type.Array(NodeGroup)), // #78 (opcional para clientes antigos)
+  bands: Type.Optional(Type.Array(Band)), // #70
 });
 export type WorkspaceSnapshot = Static<typeof WorkspaceSnapshot>;
 
@@ -362,6 +390,7 @@ export const CreateNode = Type.Object({
   icon: Type.Optional(Type.String({ maxLength: 40 })),
   termTheme: Type.Optional(TermTheme),
   skillIds: Type.Optional(Type.Array(Id, { maxItems: 20 })), // #57
+  maestro: Type.Optional(Type.Boolean()), // #29 nasce condutor (preset com Maestro)
 });
 export type CreateNode = Static<typeof CreateNode>;
 
@@ -384,6 +413,9 @@ export const PatchNode = Type.Object({
   skillIds: Type.Optional(Type.Array(Id, { maxItems: 20 })),
   /** #78 entrar/sair de um grupo (null sai). */
   groupId: Type.Optional(Type.Union([Id, Type.Null()])),
+  /** #29 promover/rebaixar condutor · #80 limite de memória em MB (0 remove). */
+  maestro: Type.Optional(Type.Boolean()),
+  memLimitMb: Type.Optional(Type.Integer({ minimum: 0, maximum: 1048576 })),
 });
 export type PatchNode = Static<typeof PatchNode>;
 
@@ -478,7 +510,7 @@ export const PresetInput = Type.Object({
   enabled: Type.Boolean(),
   icon: Type.String({ maxLength: 40 }), // "" = ícone do agente deduzido pelo comando
   color: Type.String({ maxLength: 12 }), // "" = sem cor
-  maestro: Type.Boolean(), // promove o terminal a condutor (#29) — só guardado por enquanto
+  maestro: Type.Boolean(), // #29 o terminal criado por este preset já nasce condutor (Modo Maestro)
   target: PresetTarget,
   theme: TermTheme,
 });
@@ -506,6 +538,7 @@ export const AGENT_ENV = {
   sessionId: "MESS_SESSION_ID",
   skills: "MESS_SKILLS", // #57 nomes das habilidades anexadas, separados por vírgula
   skillsText: "MESS_SKILLS_TEXT", // #57 instruções completas das habilidades
+  maestro: "MESS_MAESTRO", // #29 "1" quando o terminal é condutor
 } as const;
 
 // #57 — Skills: conjuntos de instruções reutilizáveis anexáveis a um terminal (vários por nó), injetadas como o papel.

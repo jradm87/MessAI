@@ -1,5 +1,6 @@
 import { AGENT_ENV, type TreeEntry, type FileContent, type FsOp, type SearchHit, type CreateFloor, type LandFloor, type LandResult, type Role, type CreateRole, type PatchRole, type ChatMessage, type SendChat, type Attachment, type CreateAttachment, type FileEntry, type Connection, type CreateConnection, type PatchConnection, type CreateDrawing, type PatchDrawing, type GroupDrawings, type CreateFolder, type CreateNode, type Drawing, type Folder, type Message, type PatchFolder, type SendMessage, type Sidebar, type CreateWorkspace, type Node, type PatchNode, type PatchWorkspace, type Session, type Workspace, type WorkspaceSnapshot, type TaskFinished, type TaskSummary } from "@messai/contracts";
 import type { RuntimeSettings, PatchRuntimeSettings, PresetInput, Skill, CreateSkill, PatchSkill, FindHit, FindKind, NodeGroup, CreateNodeGroup, PatchNodeGroup, AttentionItem, Score, ScoreNode, SaveScore, PatchScore, PlaceScore, PlaceScoreResult } from "@messai/contracts";
+import type { Band, CreateBand, PatchBand, AskBand, BandAnswer, BandAskResult, MaestroRecruit } from "@messai/contracts";
 import { listProviders } from "./providers.js";
 import { probeAccounts } from "./accounts.js";
 import { backupName, copyBackupFiles, dataStats, isBackupName, listBackups, validateBackup, validateMoveTarget, writeManifest, type BackupEntry } from "./data.js";
@@ -111,7 +112,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
   snapshot(workspaceId: string): WorkspaceSnapshot | undefined {
     const workspace = this.store.getWorkspace(workspaceId);
     if (!workspace) return undefined;
-    return { workspace, nodes: this.store.listNodes(workspaceId).map((n) => this.syncNoteFromDisk(n)), connections: this.store.listConnections(workspaceId), drawings: this.store.listDrawings(workspaceId), groups: this.store.listGroups(workspaceId) };
+    return { workspace, nodes: this.store.listNodes(workspaceId).map((n) => this.syncNoteFromDisk(n)), connections: this.store.listConnections(workspaceId), drawings: this.store.listDrawings(workspaceId), groups: this.store.listGroups(workspaceId), bands: this.listBands(workspaceId) };
   }
 
   // ---- notas em arquivo .md real ----
@@ -695,6 +696,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       ...(input.kind === "terminal" && input.icon ? { icon: input.icon } : {}),
       ...(input.kind === "terminal" && input.termTheme && input.termTheme !== "system" ? { termTheme: input.termTheme } : {}),
       ...(input.kind === "terminal" && input.skillIds?.length ? { skillIds: input.skillIds } : {}),
+      ...(input.kind === "terminal" && input.maestro ? { maestro: true } : {}), // #29
     };
     for (const id of node.skillIds ?? []) if (!this.store.getSkill(id)) return fail("NOT_FOUND", `habilidade não encontrada: ${id}`);
     if (node.roleId && !this.store.getRole(node.roleId)) return fail("NOT_FOUND", "papel não encontrado");
@@ -753,6 +755,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       const sess = node.sessionId ? this.store.getSession(node.sessionId) : undefined;
       if (sess) { input.command = sess.command; input.args = sess.args; input.cwd = sess.cwd; if (sess.persistent) input.persistent = true; }
       if (node.roleId) input.roleId = node.roleId;
+      if (node.maestro) input.maestro = true;
     } else {
       // nota/texto/árvore: copia o conteúdo. Nota ligada a arquivo vira nota do app com o mesmo conteúdo (não liga dois nós ao mesmo .md).
       input.content = node.content ?? "";
@@ -791,6 +794,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       [AGENT_ENV.socket]: this.cfg.socketPath, [AGENT_ENV.token]: this.cfg.token,
       [AGENT_ENV.workspaceId]: w.workspaceId, [AGENT_ENV.workspaceName]: w.name, [AGENT_ENV.workspaceDir]: w.cwd,
       [AGENT_ENV.nodeId]: node.nodeId, [AGENT_ENV.sessionId]: s.sessionId,
+      ...(node.maestro ? { [AGENT_ENV.maestro]: "1" } : {}), // #29
       SHELL: this.cfg.defaultShell,
       // Empacotado: o launcher `mess` roda o CLI com o Node do Electron (sem Node do sistema).
       ...(process.env["MESS_RESOURCES"] ? { MESS_ELECTRON: process.execPath } : {}),
@@ -1096,14 +1100,14 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
    * devolvendo a "última tela" como resposta. Para shell cru isso traz a saída do comando; para
    * agente de IA, a resposta dele. Timeout/quiescência dependem do tipo (agente anima enquanto pensa).
    */
-  async ask(fromNodeId: string, input: { to: string; text: string; timeoutMs?: number; noWait?: boolean; replyTo?: string }): Promise<Result<{ messageId: string; delivered: boolean; response: string; timedOut: boolean; agentType: string }>> {
+  async ask(fromNodeId: string, input: { to: string; text: string; timeoutMs?: number; noWait?: boolean; replyTo?: string }, opts: { bypassConnection?: boolean } = {}): Promise<Result<{ messageId: string; delivered: boolean; response: string; timedOut: boolean; agentType: string }>> {
     const from = this.store.getNode(fromNodeId);
     if (!from) return fail("NOT_FOUND", "nó de origem não encontrado");
     const nodes = this.store.listNodes(from.workspaceId);
     const to = resolveNodeRef(nodes, input.to);
     if (!to.ok) return to;
     if (to.value.kind !== "terminal") return fail("INVALID", "o destino precisa ser um terminal");
-    const allowed = canMessage(this.store.listConnections(from.workspaceId), fromNodeId, to.value.nodeId);
+    const allowed = opts.bypassConnection && fromNodeId !== to.value.nodeId ? succeed(undefined) : canMessage(this.store.listConnections(from.workspaceId), fromNodeId, to.value.nodeId); // #70 mesma banda dispensa a ligação
     if (!allowed.ok) return allowed;
     const kind = this.kindOfNode(to.value);
     const m: Message = { messageId: newId(), workspaceId: from.workspaceId, fromNodeId, toNodeId: to.value.nodeId, text: input.text, createdAt: nowIso(), delivered: false, ...(input.replyTo ? { replyTo: input.replyTo } : {}) };
@@ -1186,7 +1190,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       }
     }
     this.store.transaction(() => {
-      this.store.updateNode(nodeId, { title, geometry: input.geometry ? normalizeGeometry(input.geometry) : undefined, content: input.content, locked: input.locked, color: input.color, filePath, titleAuto, icon: input.icon, termTheme: input.termTheme === "system" ? null : input.termTheme, groupId: input.groupId });
+      this.store.updateNode(nodeId, { title, geometry: input.geometry ? normalizeGeometry(input.geometry) : undefined, content: input.content, locked: input.locked, color: input.color, filePath, titleAuto, icon: input.icon, termTheme: input.termTheme === "system" ? null : input.termTheme, groupId: input.groupId, maestro: node.kind === "terminal" ? input.maestro : undefined, memLimitMb: node.kind === "terminal" && input.memLimitMb !== undefined ? (input.memLimitMb || null) : undefined });
       if (input.groupId !== undefined) this.store.pruneEmptyGroups(node.workspaceId); // #78 sair de um grupo pode esvaziá-lo
       this.store.bumpRevision(node.workspaceId, rev.value);
     });
@@ -1214,9 +1218,178 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       if (node.sessionId) this.store.deleteSession(node.sessionId);
       this.store.deleteNode(nodeId);
       if (node.groupId) this.store.pruneEmptyGroups(node.workspaceId); // #78
+      for (const b of this.store.listBands(node.workspaceId)) if (b.nodeIds.includes(nodeId)) this.store.updateBand(b.bandId, { nodeIds: b.nodeIds.filter((i) => i !== nodeId) }); // #70
       this.store.bumpRevision(node.workspaceId, rev.value);
     });
     this.publish(node.workspaceId);
     return succeed(undefined);
+  }
+
+  // ---------- #70 Bandas ----------
+  private asking = new Map<string, Set<string>>(); // bandId -> nós com pergunta em andamento (efêmero)
+  private bandView(b: Band): Band {
+    const alive = new Set(this.store.listNodes(b.workspaceId).filter((n) => n.kind === "terminal").map((n) => n.nodeId));
+    return { ...b, nodeIds: b.nodeIds.filter((id) => alive.has(id)), asking: [...(this.asking.get(b.bandId) ?? [])] };
+  }
+  listBands(workspaceId: string): Band[] { return this.store.listBands(workspaceId).map((b) => this.bandView(b)); }
+  private validBandNodes(workspaceId: string, ids: string[] | undefined): string[] {
+    return [...new Set(ids ?? [])].filter((id) => { const n = this.store.getNode(id); return n?.kind === "terminal" && n.workspaceId === workspaceId; });
+  }
+  createBand(workspaceId: string, input: CreateBand): Result<Band> {
+    if (!this.store.getWorkspace(workspaceId)) return fail("NOT_FOUND", "espaço não encontrado");
+    const name = input.name.trim(); if (!name) return fail("INVALID", "a banda precisa de um nome");
+    if (this.store.listBands(workspaceId).some((b) => b.name.toLowerCase() === name.toLowerCase())) return fail("CONFLICT", `já existe uma banda "${name}" neste espaço`);
+    const b: Band = { bandId: newId(), workspaceId, name, color: input.color ?? "", nodeIds: this.validBandNodes(workspaceId, input.nodeIds), asking: [], createdAt: nowIso() };
+    this.store.insertBand(b);
+    this.publish(workspaceId);
+    return succeed(this.bandView(b));
+  }
+  patchBand(id: string, input: PatchBand): Result<Band> {
+    const b = this.store.getBand(id);
+    if (!b) return fail("NOT_FOUND", "banda não encontrada");
+    const name = input.name?.trim();
+    if (name && this.store.listBands(b.workspaceId).some((o) => o.bandId !== id && o.name.toLowerCase() === name.toLowerCase())) return fail("CONFLICT", `já existe uma banda "${name}" neste espaço`);
+    const remove = new Set(input.removeNodeIds ?? []);
+    const ids = [...new Set([...this.bandView(b).nodeIds, ...this.validBandNodes(b.workspaceId, input.addNodeIds)])].filter((n) => !remove.has(n));
+    this.store.updateBand(id, { name: name || undefined, color: input.color, nodeIds: ids });
+    this.publish(b.workspaceId);
+    return succeed(this.bandView(this.store.getBand(id)!));
+  }
+  deleteBand(id: string): Result<void> {
+    const b = this.store.getBand(id);
+    if (!b) return fail("NOT_FOUND", "banda não encontrada");
+    this.store.deleteBand(id); this.asking.delete(id);
+    this.publish(b.workspaceId);
+    return succeed(undefined);
+  }
+  /** Banda por id (ou prefixo) ou nome, dentro de um espaço. */
+  findBand(workspaceId: string, ref: string): Result<Band> {
+    const r = ref.trim().toLowerCase();
+    const hits = this.store.listBands(workspaceId).filter((b) => b.bandId === r || b.bandId.startsWith(r) || b.name.toLowerCase() === r);
+    if (hits.length === 1) return succeed(this.bandView(hits[0]!));
+    return hits.length ? fail("CONFLICT", `"${ref}" é ambíguo entre bandas`) : fail("NOT_FOUND", `nenhuma banda corresponde a "${ref}"`);
+  }
+  /**
+   * Pergunta (ou, com `noWait`, transmite) o mesmo texto a todos os membros em paralelo e coleta a "última tela" de cada um.
+   * Humano (sem `fromNodeId`): digita o texto nos terminais. Agente: mensagem rastreável (`ask`); só fala com quem está
+   * conectado a ele — ou, se ele próprio é da banda, com os colegas dela.
+   */
+  async askBand(bandId: string, input: AskBand): Promise<Result<BandAskResult>> {
+    const band0 = this.store.getBand(bandId);
+    if (!band0) return fail("NOT_FOUND", "banda não encontrada");
+    const band = this.bandView(band0);
+    const from = input.fromNodeId ? this.store.getNode(input.fromNodeId) : undefined;
+    if (input.fromNodeId && (!from || from.workspaceId !== band.workspaceId)) return fail("NOT_FOUND", "nó de origem não encontrado neste espaço");
+    const members = band.nodeIds.map((id) => this.store.getNode(id)!).filter((n) => n && n.nodeId !== from?.nodeId);
+    if (!members.length) return fail("INVALID", "a banda não tem outros membros");
+    const conns = from ? this.store.listConnections(band.workspaceId) : [];
+    const inBand = !!from && band.nodeIds.includes(from.nodeId);
+    const set = this.asking.get(bandId) ?? new Set<string>(); this.asking.set(bandId, set);
+    const one = async (to: Node): Promise<BandAnswer> => {
+      const kind = this.kindOfNode(to);
+      const base = { nodeId: to.nodeId, title: to.title, agentType: kind.agentType };
+      const fail1 = (error: string, delivered = false): BandAnswer => ({ ...base, delivered, response: "", timedOut: false, error });
+      const sid = to.sessionId;
+      if (from) {
+        if (!inBand) { const ok = canMessage(conns, from.nodeId, to.nodeId); if (!ok.ok) return fail1(ok.error.message); }
+        set.add(to.nodeId);
+        try {
+          const r = await this.ask(from.nodeId, { to: to.nodeId, text: input.text, ...(input.timeoutMs ? { timeoutMs: input.timeoutMs } : {}), ...(input.noWait ? { noWait: true } : {}) }, { bypassConnection: true });
+          return r.ok ? { ...base, delivered: r.value.delivered, response: r.value.response, timedOut: r.value.timedOut } : fail1(r.error.message);
+        } finally { set.delete(to.nodeId); }
+      }
+      if (!sid || this.sessions.get(sid)?.state !== "running") return fail1("o terminal não está rodando");
+      const type = () => { this.sessions.deliver(sid, `${input.text.replace(/\r?\n/g, " ")}\r`); };
+      if (input.noWait) { type(); return { ...base, delivered: true, response: "", timedOut: false }; }
+      set.add(to.nodeId);
+      try {
+        const cap = await this.sessions.awaitReply(sid, { idleMs: kind.isAgent ? 1500 : 600, timeoutMs: Math.min(input.timeoutMs ?? (kind.isAgent ? 180_000 : 20_000), 600_000), trigger: type });
+        return { ...base, delivered: true, response: this.cleanReply(stripAnsi(this.sessions.screen(sid) ?? "")), timedOut: cap.timedOut };
+      } finally { set.delete(to.nodeId); }
+    };
+    if (!input.noWait) this.publish(band.workspaceId);
+    const answers: BandAnswer[] = [];
+    const tick = input.noWait ? undefined : setInterval(() => { try { this.publish(band.workspaceId); } catch { /* espaço removido */ } }, 1500);
+    try {
+      answers.push(...await Promise.all(members.map(async (m) => { const a = await one(m); if (!input.noWait && this.store.getWorkspace(band.workspaceId)) this.publish(band.workspaceId); return a; })));
+    } finally { if (tick) clearInterval(tick); }
+    return succeed({ bandId, name: band.name, answers });
+  }
+  /** Transmitir (broadcast): entrega e não espera resposta. */
+  broadcastBand(bandId: string, input: Omit<AskBand, "noWait" | "timeoutMs">): Promise<Result<BandAskResult>> { return this.askBand(bandId, { ...input, noWait: true }); }
+
+  // ---------- #29 Modo Maestro ----------
+  /** O terminal precisa ser condutor. (Hoje o token do runtime é global — a credencial por agente é o #87; aqui a regra vale para o CLI/API.) */
+  private requireMaestro(nodeId: string): Result<Node> {
+    const n = this.store.getNode(nodeId);
+    if (!n || n.kind !== "terminal") return fail("NOT_FOUND", "terminal não encontrado");
+    if (!n.maestro) return fail("FORBIDDEN", "este terminal não é um condutor: ligue o Modo Maestro nele");
+    return succeed(n);
+  }
+  /** Alvo de dispensar/reatribuir: terminal do mesmo espaço, ligado ao condutor (ele recruta e ligou), nunca o próprio condutor. */
+  private maestroTarget(maestro: Node, ref: string): Result<Node> {
+    const to = resolveNodeRef(this.store.listNodes(maestro.workspaceId).filter((n) => n.kind === "terminal"), ref);
+    if (!to.ok) return to;
+    if (to.value.nodeId === maestro.nodeId) return fail("INVALID", "o condutor não age sobre si mesmo");
+    const ok = canMessage(this.store.listConnections(maestro.workspaceId), maestro.nodeId, to.value.nodeId);
+    if (!ok.ok) return fail("FORBIDDEN", "o condutor só age sobre terminais ligados a ele");
+    return succeed(to.value);
+  }
+  private freeSpotNear(anchor: Node, nodes: Node[], w: number, h: number): Node["geometry"] {
+    const x = anchor.geometry.x + anchor.geometry.w + 60;
+    for (let k = 0; k < 40; k++) {
+      const y = anchor.geometry.y + k * (h + 30);
+      if (!nodes.some((n) => x < n.geometry.x + n.geometry.w && x + w > n.geometry.x && y < n.geometry.y + n.geometry.h && y + h > n.geometry.y)) return { x, y, w, h };
+    }
+    return { x, y: anchor.geometry.y + 40 * (h + 30), w, h };
+  }
+  /** Recruta um terminal (por preset ou comando), liga ao condutor, opcionalmente com papel e numa banda. */
+  recruit(maestroId: string, input: MaestroRecruit): Result<{ node: Node; bandId?: string }> {
+    const m = this.requireMaestro(maestroId); if (!m.ok) return m;
+    const maestro = m.value;
+    const w = this.store.getWorkspace(maestro.workspaceId)!;
+    let command = input.command; let args = input.args ?? []; let preset: PresetInput | undefined;
+    if (input.preset) {
+      const p = input.preset.toLowerCase();
+      preset = this.presetDefs().find((x) => x.enabled && (x.id === p || x.label.toLowerCase() === p));
+      if (!preset) return fail("NOT_FOUND", `preset não encontrado (ou desligado): ${input.preset}`);
+      if (preset.target !== "terminal") return fail("INVALID", "esse preset não abre terminal");
+      command = preset.command; args = input.args ?? preset.args;
+    }
+    if (!command) return fail("INVALID", "informe um preset ou um comando para recrutar");
+    let roleId: string | undefined;
+    if (input.roleName) { const r = this.store.listRoles().find((x) => x.name.toLowerCase() === input.roleName!.toLowerCase()); if (!r) return fail("NOT_FOUND", `papel não encontrado: ${input.roleName}`); roleId = r.roleId; }
+    const geometry = this.freeSpotNear(maestro, this.store.listNodes(w.workspaceId), 560, 340);
+    const made = this.createNode(w.workspaceId, { expectedRevision: w.revision, kind: "terminal", title: input.name ?? preset?.label ?? "Agente", geometry, command, args, ...(input.cwd ? { cwd: input.cwd } : {}), ...(roleId ? { roleId } : {}), ...(preset?.color ? { color: preset.color } : {}), ...(preset?.icon ? { icon: preset.icon } : {}), ...(preset && preset.theme !== "system" ? { termTheme: preset.theme } : {}), ...(input.persistent ? { persistent: true } : {}) });
+    if (!made.ok) return made;
+    const node = made.value.node;
+    const link = this.createConnection(w.workspaceId, { expectedRevision: this.store.getWorkspace(w.workspaceId)!.revision, sourceNodeId: maestro.nodeId, targetNodeId: node.nodeId });
+    if (!link.ok) return link;
+    let bandId: string | undefined;
+    if (input.band) {
+      let b = this.findBand(w.workspaceId, input.band);
+      if (!b.ok && b.error.code === "NOT_FOUND") b = this.createBand(w.workspaceId, { name: input.band });
+      if (!b.ok) return b;
+      const pb = this.patchBand(b.value.bandId, { addNodeIds: [node.nodeId, ...(b.value.nodeIds.includes(maestro.nodeId) ? [] : [maestro.nodeId])] });
+      if (!pb.ok) return pb;
+      bandId = pb.value.bandId;
+    }
+    return succeed({ node: this.store.getNode(node.nodeId)!, ...(bandId ? { bandId } : {}) });
+  }
+  /** Dispensa (encerra e remove) um terminal ligado ao condutor. */
+  dismiss(maestroId: string, ref: string): Result<{ nodeId: string; title: string }> {
+    const m = this.requireMaestro(maestroId); if (!m.ok) return m;
+    const t = this.maestroTarget(m.value, ref); if (!t.ok) return t;
+    const w = this.store.getWorkspace(m.value.workspaceId)!;
+    const r = this.deleteNode(t.value.nodeId, w.revision); if (!r.ok) return r;
+    return succeed({ nodeId: t.value.nodeId, title: t.value.title });
+  }
+  /** Reatribui o papel de um terminal ligado ao condutor (reinicia só o processo dele); `null` remove. */
+  assignRole(maestroId: string, ref: string, roleName: string | null): Result<Node> {
+    const m = this.requireMaestro(maestroId); if (!m.ok) return m;
+    const t = this.maestroTarget(m.value, ref); if (!t.ok) return t;
+    let roleId: string | null = null;
+    if (roleName !== null) { const r = this.store.listRoles().find((x) => x.name.toLowerCase() === roleName.toLowerCase()); if (!r) return fail("NOT_FOUND", `papel não encontrado: ${roleName}`); roleId = r.roleId; }
+    return this.setNodeRole(t.value.nodeId, roleId);
   }
 }

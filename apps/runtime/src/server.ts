@@ -5,7 +5,7 @@ import type { WebSocket } from "ws";
 import {
   BUILD_VERSION, PROTOCOL_VERSION, SendMessage, Ask, CreateConnection, CreateDrawing, CreateNode, CreateWorkspace, DeleteNode, PatchNode, PatchWorkspace, ApplyLayout, WsClientMessage,
   type Capabilities, type WsServerMessage, type ApiError,
- CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, FsOp, PatchRuntimeSettings, PutPresets, CreateSkill, PatchSkill, BackupInput, RestoreInput, MoveDataInput, ResetInput, CreateNodeGroup, PatchNodeGroup, SaveScore, PatchScore, PlaceScore, type PresetInput, type Preset } from "@messai/contracts";
+ CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, FsOp, PatchRuntimeSettings, PutPresets, CreateSkill, PatchSkill, BackupInput, RestoreInput, MoveDataInput, ResetInput, CreateNodeGroup, PatchNodeGroup, SaveScore, PatchScore, PlaceScore, CreateBand, PatchBand, AskBand, MaestroRecruit, MaestroTarget, MaestroAssign, type PresetInput, type Preset } from "@messai/contracts";
 import type { Result } from "@messai/domain";
 import { newId, type Config } from "./config.js";
 import type { WorkspaceService } from "./service.js";
@@ -212,6 +212,17 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
   app.patch<{ Params: { id: string } }>("/v1/scores/:id", async (req, reply) => { const b = body<PatchScore>(PatchScore, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.patchScore(req.params.id, b)); });
   app.delete<{ Params: { id: string } }>("/v1/scores/:id", async (req, reply) => send(reply, svc.deleteScore(req.params.id), 204));
   app.post<{ Params: { id: string; scoreId: string } }>("/v1/workspaces/:id/scores/:scoreId/place", async (req, reply) => { const b = body<PlaceScore>(PlaceScore, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.placeScore(req.params.id, req.params.scoreId, b), 201); });
+  // #70 — bandas
+  app.get<{ Params: { id: string } }>("/v1/workspaces/:id/bands", async (req) => svc.listBands(req.params.id));
+  app.post<{ Params: { id: string } }>("/v1/workspaces/:id/bands", async (req, reply) => { const b = body<CreateBand>(CreateBand, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.createBand(req.params.id, b), 201); });
+  app.patch<{ Params: { id: string } }>("/v1/bands/:id", async (req, reply) => { const b = body<PatchBand>(PatchBand, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.patchBand(req.params.id, b)); });
+  app.delete<{ Params: { id: string } }>("/v1/bands/:id", async (req, reply) => send(reply, svc.deleteBand(req.params.id), 204));
+  app.post<{ Params: { id: string } }>("/v1/bands/:id/ask", async (req, reply) => { const b = body<AskBand>(AskBand, req.body); if ("code" in b) return invalid(reply, b); return send(reply, await svc.askBand(req.params.id, b)); });
+  app.post<{ Params: { id: string } }>("/v1/bands/:id/broadcast", async (req, reply) => { const b = body<AskBand>(AskBand, req.body); if ("code" in b) return invalid(reply, b); return send(reply, await svc.broadcastBand(req.params.id, { text: b.text, ...(b.fromNodeId ? { fromNodeId: b.fromNodeId } : {}) })); });
+  // #29 — Modo Maestro (o terminal da URL precisa ser condutor)
+  app.post<{ Params: { id: string } }>("/v1/nodes/:id/maestro/recruit", async (req, reply) => { const b = body<MaestroRecruit>(MaestroRecruit, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.recruit(req.params.id, b), 201); });
+  app.post<{ Params: { id: string } }>("/v1/nodes/:id/maestro/dismiss", async (req, reply) => { const b = body<MaestroTarget>(MaestroTarget, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.dismiss(req.params.id, b.ref)); });
+  app.post<{ Params: { id: string } }>("/v1/nodes/:id/maestro/assign", async (req, reply) => { const b = body<MaestroAssign>(MaestroAssign, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.assignRole(req.params.id, b.ref, b.roleName)); });
   // #78 — grupos de nós
   app.post<{ Params: { id: string } }>("/v1/workspaces/:id/groups", async (req, reply) => { const b = body<CreateNodeGroup>(CreateNodeGroup, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.createNodeGroup(req.params.id, b), 201); });
   app.patch<{ Params: { id: string } }>("/v1/groups/:id", async (req, reply) => { const b = body<PatchNodeGroup>(PatchNodeGroup, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.patchNodeGroup(req.params.id, b)); });

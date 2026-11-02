@@ -37,6 +37,8 @@ import { History, plural, type ConnSpec, type DrawingSpec, type NodeSpec, type O
 import { GroupLayer, type Guides } from "./GroupLayer.js";
 import { Palette, type PaletteAction } from "./Palette.js";
 import { ScoresDialog } from "./ScoresDialog.js";
+import { BandsDialog } from "./BandsDialog.js";
+import { bandsOfNode } from "./bands.js";
 import { BinderNode } from "./BinderNode.js";
 import { binderAddPage, binderRemovePage, emptyBinder, parseBinder, serializeBinder } from "@messai/domain";
 import type { PaletteItem } from "./palette.js";
@@ -132,6 +134,7 @@ function Canvas({ conn }: { conn: Connection }) {
   const [prefsOpen, setPrefsOpen] = useState(false); // #64 janela de Preferências
   const [paletteOpen, setPaletteOpen] = useState(false); // #69 paleta global
   const [scoresOpen, setScoresOpen] = useState(false); // #71 partituras
+  const [bandsOpen, setBandsOpen] = useState(false); // #70 bandas
   const keymap = useKeymap(); const keymapRef = useRef<Keymap>(keymap); keymapRef.current = keymap; // #58 atalhos editáveis
   // #67: estado da janela flutuante do companheiro (vive no processo principal; aqui só espelho + preferência).
   const [hud, setHud] = useState(false);
@@ -392,7 +395,7 @@ function Canvas({ conn }: { conn: Connection }) {
       // o nó, nem o xterm) — antes todo evento de snapshot recriava data/callbacks de todos os nós. Os callbacks só capturam `n`
       // (igual enquanto a chave não muda), refs estáveis e setters; revisão/seleção vêm de refs.
       const linkN = (snap.connections ?? []).filter((c) => c.sourceNodeId === n.nodeId || c.targetNodeId === n.nodeId).length;
-      const nodeKey = JSON.stringify([n, linkN, composerFor === n.nodeId, chatFor === n.nodeId, renameSig.id === n.nodeId ? renameSig.n : 0, snap.workspace.workspaceId,
+      const nodeKey = JSON.stringify([n, bandsOfNode(snap.bands, n.nodeId), linkN, composerFor === n.nodeId, chatFor === n.nodeId, renameSig.id === n.nodeId ? renameSig.n : 0, snap.workspace.workspaceId,
         n.kind === "terminal" ? [roles, skills, composerFor === n.nodeId || chatFor === n.nodeId ? [snap.nodes.filter((o) => o.nodeId !== n.nodeId && o.kind !== "text").map((o) => [o.nodeId, o.kind, o.title]), (snap.connections ?? []).filter((c) => c.sourceNodeId === n.nodeId || c.targetNodeId === n.nodeId).map((c) => [c.sourceNodeId, c.targetNodeId])] : 0] : 0]); // alvos de @menção só importam com o compositor/chat abertos
       if (old && nodeKeys.current.get(n.nodeId) === nodeKey) return old;
       nodeKeys.current.set(n.nodeId, nodeKey);
@@ -410,6 +413,7 @@ function Canvas({ conn }: { conn: Connection }) {
         data: n.kind === "terminal" ? { title: n.title, sessionId: n.sessionId!, api, stream, onDelete: del, onRename: rename,
             ...(n.icon ? { icon: n.icon } : {}), ...(n.color ? { color: n.color } : {}), ...(n.termTheme ? { termTheme: n.termTheme } : {}), // #56 aparência do nó
             ...(n.groupId ? { groupId: n.groupId } : {}), // #78
+            bands: bandsOfNode(snap.bands, n.nodeId), onOpenBands: () => setBandsOpen(true), ...(n.maestro ? { maestro: true } : {}), onMaestro: (on: boolean) => patchRec(n, { maestro: on }, on ? "ligar Modo Maestro" : "desligar Modo Maestro"), // #70 #29
             onAppearance: (p: { icon?: string | null; color?: string | null; termTheme?: TermTheme | null }) => patchRec(n, p, "aparência do terminal"), editSignal: renameSig.id === n.nodeId ? renameSig.n : 0, ...extras,
             composerOpen: composerFor === n.nodeId, onComposerClose: () => setComposerFor(null), workspaceId: snap.workspace.workspaceId,
             chatOpen: chatFor === n.nodeId, onChatClose: () => setChatFor(null),
@@ -467,6 +471,7 @@ function Canvas({ conn }: { conn: Connection }) {
     { id: "ws.new", label: "Novo espaço", detail: "Ctrl+Shift+N", keywords: "workspace projeto" },
     { id: "scores", label: "Partituras…", detail: "salvar/colocar arranjos", keywords: "template time arranjo salvar colocar" },
     { id: "prefs", label: "Preferências", detail: "Ctrl+,", keywords: "configurações tema atalhos" },
+    { id: "bands", label: "Bandas: perguntar/transmitir em lote…", keywords: "banda grupo agentes broadcast" },
     { id: "theme", label: "Alternar tema", keywords: "claro escuro sistema" },
     { id: "minimap", label: "Alternar minimapa", detail: "Ctrl+Shift+M" },
     { id: "hud", label: "Janela flutuante do companheiro", keywords: "hud resumo" },
@@ -486,6 +491,7 @@ function Canvas({ conn }: { conn: Connection }) {
       case "binder.stack": void stackSelectedNotes(); return;
       case "prefs": setPrefsOpen(true); return;
       case "scores": setScoresOpen(true); return;
+      case "bands": if (current) setBandsOpen(true); return;
       case "theme": setThemePref(nextTheme(getThemePref())); return;
       case "minimap": setMinimap((v) => !v); return;
       case "hud": void window.messai.hudToggle?.().then(setHud); return;
@@ -631,7 +637,7 @@ function Canvas({ conn }: { conn: Connection }) {
     const icon = i.icon ?? preset?.icon ?? ""; const color = i.color ?? preset?.color ?? ""; const termTheme = i.termTheme ?? preset?.theme ?? "system";
     const look = { ...(icon ? { icon } : {}), ...(color ? { color } : {}), ...(termTheme !== "system" ? { termTheme } : {}) };
     const target = i.target ?? preset?.target ?? "terminal";
-    void mutate(async (r) => { const input = { expectedRevision: r, kind: "terminal", geometry, title: i.title, ...look, ...(usePreset ? { command: preset.command, args: preset.args } : cmdParts ? { command: cmdParts[0]!, args: cmdParts.slice(1) } : {}), ...(i.cwd ? { cwd: i.cwd } : {}), ...(i.roleId ? { roleId: i.roleId } : {}), ...(i.persistent ? { persistent: true } : {}) }; const made = await api.createNode(current, input); const { expectedRevision: _er, ...sp } = input; rec({ label: "criar terminal", forward: [{ type: "createNode", ref: made.node.nodeId, spec: sp as NodeSpec }], inverse: [{ type: "deleteNode", id: made.node.nodeId }] }); ensureVisible(geometry); if (target === "chat") setTimeout(() => openChat(made.node.nodeId), 300); });
+    void mutate(async (r) => { const input = { expectedRevision: r, kind: "terminal", geometry, title: i.title, ...look, ...(usePreset ? { command: preset.command, args: preset.args } : cmdParts ? { command: cmdParts[0]!, args: cmdParts.slice(1) } : {}), ...(i.cwd ? { cwd: i.cwd } : {}), ...(i.roleId ? { roleId: i.roleId } : {}), ...(i.persistent ? { persistent: true } : {}), ...(usePreset && preset.maestro ? { maestro: true } : {}) }; const made = await api.createNode(current, input); const { expectedRevision: _er, ...sp } = input; rec({ label: "criar terminal", forward: [{ type: "createNode", ref: made.node.nodeId, spec: sp as NodeSpec }], inverse: [{ type: "deleteNode", id: made.node.nodeId }] }); ensureVisible(geometry); if (target === "chat") setTimeout(() => openChat(made.node.nodeId), 300); });
     setTool("select");
   };
   const createSimple = (kind: "note" | "text" | "tree" | "binder", geometry: Geometry) => {
@@ -870,6 +876,7 @@ function Canvas({ conn }: { conn: Connection }) {
         {floorDialog && <FloorDialog ground={floorDialog} onSubmit={(i) => void submitFloor(floorDialog, i)} onClose={() => setFloorDialog(null)} />}
         {overview && groundOf(overview) && <FloorOverview ground={groundOf(overview)!} floors={side.workspaces.filter((w) => w.parentId === overview)} current={current} terminals={side.terminals} api={api}
           onOpen={(id) => { setCurrent(id); setOverview(null); }} onNew={() => { setFloorDialog(groundOf(overview)!); }} onClose={() => setOverview(null)} onChanged={() => void refreshList()} onError={toast} />}
+        {bandsOpen && current && snap && <BandsDialog api={api} workspaceId={current} bands={snap.bands ?? []} terminals={snap.nodes.filter((n) => n.kind === "terminal").map((n) => ({ nodeId: n.nodeId, title: n.title }))} selected={flowRef.current.filter((n) => n.selected).map((n) => n.id)} onClose={() => setBandsOpen(false)} />}
         {scoresOpen && current && <ScoresDialog api={api} hasSelection={flowRef.current.filter((n) => n.selected).length} onClose={() => setScoresOpen(false)}
           onSave={async (name, description) => { const ids = flowRef.current.filter((n) => n.selected).map((n) => n.id); await runOp((rev) => api.saveScore(current, { expectedRevision: rev, name, ...(description ? { description } : {}), ...(ids.length ? { nodeIds: ids } : {}) })); }}
           onPlace={async (sc) => { const c = viewCenter(); const r = await runOp((rev) => api.placeScore(current, sc.scoreId, { expectedRevision: rev, at: { x: Math.round(c.x - 200), y: Math.round(c.y - 120) } })); rec({ label: `partitura "${sc.name}"`, forward: [], inverse: r.nodeIds.map((id): Op => ({ type: "deleteNode", id })) }); toast(`Partitura "${sc.name}" colocada: ${plural(r.nodeIds.length, "nó", "nós")}`, "ok"); return r.warnings; }} />}
