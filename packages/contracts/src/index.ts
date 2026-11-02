@@ -54,7 +54,7 @@ export const Geometry = Type.Object({
 });
 export type Geometry = Static<typeof Geometry>;
 
-export const NodeKind = Type.Union([Type.Literal("terminal"), Type.Literal("note"), Type.Literal("text"), Type.Literal("tree")]);
+export const NodeKind = Type.Union([Type.Literal("terminal"), Type.Literal("note"), Type.Literal("text"), Type.Literal("tree"), Type.Literal("binder")]); // binder = fichário (#74)
 export type NodeKind = Static<typeof NodeKind>;
 
 export const Node = Type.Object({

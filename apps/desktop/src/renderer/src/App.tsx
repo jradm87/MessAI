@@ -37,12 +37,14 @@ import { History, plural, type ConnSpec, type DrawingSpec, type NodeSpec, type O
 import { GroupLayer, type Guides } from "./GroupLayer.js";
 import { Palette, type PaletteAction } from "./Palette.js";
 import { ScoresDialog } from "./ScoresDialog.js";
+import { BinderNode } from "./BinderNode.js";
+import { binderAddPage, binderRemovePage, emptyBinder, parseBinder, serializeBinder } from "@messai/domain";
 import type { PaletteItem } from "./palette.js";
 import { useHint, useKeymap } from "./shortcuts.js";
 
-const nodeTypes: NodeTypes = { terminal: TerminalNode as never, note: NoteNode as never, text: TextNode as never, tree: TreeNode as never };
+const nodeTypes: NodeTypes = { terminal: TerminalNode as never, note: NoteNode as never, text: TextNode as never, tree: TreeNode as never, binder: BinderNode as never };
 const edgeTypes: EdgeTypes = { rope: RopeEdge as never, circuit: CircuitEdge as never };
-const SIZE = { terminal: { w: 640, h: 380 }, note: { w: 260, h: 160 }, text: { w: 220, h: 48 }, tree: { w: 300, h: 420 } } as const;
+const SIZE = { terminal: { w: 640, h: 380 }, note: { w: 260, h: 160 }, text: { w: 220, h: 48 }, tree: { w: 300, h: 420 }, binder: { w: 420, h: 280 } } as const;
 
 function freeSpot(nodes: { geometry: Geometry }[], size: { w: number; h: number }, at?: { x: number; y: number }): Geometry {
   if (at) return { x: at.x, y: at.y, ...size };
@@ -216,6 +218,70 @@ function Canvas({ conn }: { conn: Connection }) {
     try { const r = await runOp((rev) => api.createNodeGroup(current, { expectedRevision: rev, nodeIds: ids })); rec({ label: `agrupar ${plural(ids.length, "nó", "nós")}`, forward: [{ type: "createGroup", ref: r.group.groupId, spec: { nodeIds: ids, label: "", color: "" } }], inverse: [{ type: "deleteGroup", id: r.group.groupId }] }); toast(`Grupo criado com ${ids.length} nós — duplo clique no rótulo para nomear`); } catch { /* já avisou */ }
     return true;
   };
+  // ===== #74 fichários: tirar página, desmontar, puxar notas (tudo com undo, via operações existentes) =====
+  const binderOf = (id: string) => snapRef.current?.nodes.find((x) => x.nodeId === id && x.kind === "binder");
+  /** Tira uma página: vira uma nota ao lado do fichário. Uma etapa de undo. */
+  const spillPage = async (n: Node, pageId: string) => {
+    const cur = binderOf(n.nodeId) ?? n; const b = parseBinder(cur.content); const r = binderRemovePage(b, pageId); if (!r || !current) return;
+    const h = hist(); h.beginGroup("tirar página do fichário");
+    try {
+      const made = await runOp((rev) => api.createNode(current, { expectedRevision: rev, kind: "note", title: r.page.title, content: r.page.content, geometry: { x: cur.geometry.x + cur.geometry.w + 30, y: cur.geometry.y, w: 260, h: 160 }, ...(cur.color ? { color: cur.color } : {}) }));
+      await runOp((rev) => api.patchNode(n.nodeId, { expectedRevision: rev, content: serializeBinder(r.binder) }));
+      h.record({ label: "tirar página", forward: [{ type: "patchNode", id: n.nodeId, patch: { content: serializeBinder(r.binder) } }, { type: "createNode", ref: made.node.nodeId, spec: { kind: "note", title: r.page.title, content: r.page.content, geometry: { x: cur.geometry.x + cur.geometry.w + 30, y: cur.geometry.y, w: 260, h: 160 }, ...(cur.color ? { color: cur.color } : {}) } }], inverse: [{ type: "patchNode", id: n.nodeId, patch: { content: serializeBinder(b) } }, { type: "deleteNode", id: made.node.nodeId }] });
+    } catch { /* já avisou */ }
+    h.endGroup(); bump();
+  };
+  /** Desmonta: cada página vira uma nota (em cascata ao lado) e o fichário some. */
+  const unstackBinder = async (n: Node) => {
+    const cur = binderOf(n.nodeId) ?? n; const b = parseBinder(cur.content); if (!current) return;
+    const h = hist(); h.beginGroup("desmontar fichário");
+    try {
+      const specs = b.pages.map((p, i): NodeSpec => ({ kind: "note", title: p.title, content: p.content, geometry: { x: cur.geometry.x + i * 36, y: cur.geometry.y + i * 36, w: 260, h: 160 }, ...(b.color ? { color: b.color } : {}) }));
+      const ids: string[] = [];
+      for (const sp of specs) { const made = await runOp((rev) => api.createNode(current, { expectedRevision: rev, kind: "note", title: sp.title, content: sp.content ?? "", geometry: sp.geometry, ...(sp.color ? { color: sp.color } : {}) })); ids.push(made.node.nodeId); }
+      const spec = await specOf(cur);
+      await runOp((rev) => api.deleteNode(n.nodeId, rev));
+      h.record({ label: "desmontar", forward: [...specs.map((sp, i): Op => ({ type: "createNode", ref: ids[i]!, spec: sp })), { type: "deleteNode", id: n.nodeId }], inverse: [...ids.map((id): Op => ({ type: "deleteNode", id })), { type: "createNode", ref: n.nodeId, spec }] });
+    } catch { /* já avisou */ }
+    h.endGroup(); bump();
+  };
+  /** Puxa para o fichário as NOTAS selecionadas (as páginas ganham título e conteúdo; as notas somem). Vale também para mover entre fichários. */
+  const pullIntoBinder = async (binderId: string, extraIds: string[] = []) => {
+    const sn = snapRef.current; const cur = binderOf(binderId); if (!sn || !cur || !current) return;
+    const ids = [...new Set([...flowRef.current.filter((x) => x.selected).map((x) => x.id), ...extraIds])].filter((id) => id !== binderId);
+    const sources = ids.map((id) => sn.nodes.find((x) => x.nodeId === id)).filter((x): x is Node => !!x && (x.kind === "note" || x.kind === "binder"));
+    if (!sources.length) { toast("Selecione notas (ou outros fichários) para puxar"); return; }
+    let next = parseBinder(cur.content); const before = serializeBinder(next);
+    for (const s of sources) { if (s.kind === "note") next = binderAddPage(next, { title: s.title, content: s.content ?? "" }); else for (const pg of parseBinder(s.content).pages) next = binderAddPage(next, { title: pg.title, content: pg.content }); }
+    const h = hist(); h.beginGroup(`puxar ${plural(sources.length, "nota", "notas")} para o fichário`);
+    try {
+      await runOp((rev) => api.patchNode(binderId, { expectedRevision: rev, content: serializeBinder(next) }));
+      const inv: Op[] = [{ type: "patchNode", id: binderId, patch: { content: before } }]; const fwd: Op[] = [{ type: "patchNode", id: binderId, patch: { content: serializeBinder(next) } }];
+      for (const s of sources) { const sp = await specOf(s); await runOp((rev) => api.deleteNode(s.nodeId, rev)); inv.push({ type: "createNode", ref: s.nodeId, spec: sp }); fwd.push({ type: "deleteNode", id: s.nodeId }); }
+      h.record({ label: "puxar para fichário", forward: fwd, inverse: inv });
+    } catch { /* já avisou */ }
+    h.endGroup(); bump();
+  };
+  /** Empilha as notas selecionadas (≥2) num fichário novo na posição da primeira; as notas somem. Uma etapa de undo. */
+  const stackSelectedNotes = async () => {
+    const sn = snapRef.current; if (!sn || !current) return;
+    const sel = new Set(flowRef.current.filter((x) => x.selected).map((x) => x.id));
+    const notes = sn.nodes.filter((x) => x.kind === "note" && sel.has(x.nodeId));
+    if (notes.length < 2) { toast("Selecione 2+ notas para empilhar"); return; }
+    const first = notes[0]!; let b = { ...emptyBinder(), pages: [] as { id: string; title: string; content: string }[], active: "" };
+    b = { ...b, pages: [{ id: "p1", title: first.title, content: first.content ?? "" }], active: "p1" };
+    for (const nt of notes.slice(1)) b = binderAddPage(b, { title: nt.title, content: nt.content ?? "" });
+    b = { ...b, active: "p1" };
+    const geometry = { x: first.geometry.x, y: first.geometry.y, ...SIZE.binder };
+    const h = hist(); h.beginGroup(`empilhar ${plural(notes.length, "nota", "notas")}`);
+    try {
+      const made = await runOp((rev) => api.createNode(current, { expectedRevision: rev, kind: "binder", geometry, content: serializeBinder(b) }));
+      const inv: Op[] = [{ type: "deleteNode", id: made.node.nodeId }]; const fwd: Op[] = [{ type: "createNode", ref: made.node.nodeId, spec: { kind: "binder", title: made.node.title, geometry, content: serializeBinder(b) } }];
+      for (const nt of notes) { const sp = await specOf(nt); await runOp((rev) => api.deleteNode(nt.nodeId, rev)); inv.push({ type: "createNode", ref: nt.nodeId, spec: sp }); fwd.push({ type: "deleteNode", id: nt.nodeId }); }
+      h.record({ label: "empilhar notas", forward: fwd, inverse: inv });
+    } catch { /* já avisou */ }
+    h.endGroup(); bump();
+  };
   const ungroup = async (groupId: string) => {
     const g = groupsOf().find((x) => x.groupId === groupId); if (!g) return;
     const members = membersOf(groupId);
@@ -357,6 +423,8 @@ function Canvas({ conn }: { conn: Connection }) {
               onLock: (locked: boolean) => patchRec(n, { locked }, locked ? "bloquear nota" : "desbloquear nota"),
               onColor: (color: string | null) => patchRec(n, { color }, "cor da nota"),
               onMove: () => void window.messai.pickDirectory?.().then((d) => { if (d) void mutate((r) => api.patchNode(n.nodeId, { expectedRevision: r, filePath: `${d}/${n.title.replace(/[\\/:*?"<>|]+/g, " ").trim() || "nota"}.md` })); }) }
+          : n.kind === "binder" ? { title: n.title, content: n.content ?? "", editSignal: renameSig.id === n.nodeId ? renameSig.n : 0, ...(n.groupId ? { groupId: n.groupId } : {}), onChange: change, onRename: rename, onDelete: del,
+              onSpill: (pageId: string) => void spillPage(n, pageId), onUnstack: () => void unstackBinder(n), onPull: () => void pullIntoBinder(n.nodeId) }
           : n.kind === "tree" ? { title: n.title, content: n.content ?? "", editSignal: renameSig.id === n.nodeId ? renameSig.n : 0, workspaceId: snap.workspace.workspaceId, api, ...(n.groupId ? { groupId: n.groupId } : {}), onChange: change, onDelete: del, onRename: rename, ...extras,
               onOpenNote: (rel: string) => void mutate((r) => api.createNode(snap.workspace.workspaceId, { expectedRevision: r, kind: "note", geometry: { x: n.geometry.x + n.geometry.w + 40, y: n.geometry.y, w: 360, h: 260 }, filePath: `${snap.workspace.cwd}/${rel}` })),
               onPreview: (rel: string) => setPreview(rel), toast }
@@ -394,6 +462,8 @@ function Canvas({ conn }: { conn: Connection }) {
   const paletteActions: PaletteAction[] = [
     { id: "terminal.new", label: "Novo terminal", detail: "Ctrl+T", keywords: "criar shell agente" },
     { id: "note.new", label: "Nova nota", detail: "Ctrl+Shift+D", keywords: "criar markdown" },
+    { id: "binder.new", label: "Novo fichário", detail: "várias notas com abas num só nó", keywords: "caderno páginas abas pilha" },
+    { id: "binder.stack", label: "Empilhar notas selecionadas em um fichário", keywords: "juntar notas fichário" },
     { id: "ws.new", label: "Novo espaço", detail: "Ctrl+Shift+N", keywords: "workspace projeto" },
     { id: "scores", label: "Partituras…", detail: "salvar/colocar arranjos", keywords: "template time arranjo salvar colocar" },
     { id: "prefs", label: "Preferências", detail: "Ctrl+,", keywords: "configurações tema atalhos" },
@@ -412,6 +482,8 @@ function Canvas({ conn }: { conn: Connection }) {
       case "terminal.new": if (current) { const c = viewCenter(); setDialog({ rect: { x: c.x - 320, y: c.y - 190, ...SIZE.terminal } }); } return;
       case "note.new": if (current) { const c = viewCenter(); createSimple("note", { x: c.x - 130, y: c.y - 80, ...SIZE.note }); } return;
       case "ws.new": setWsDialog({}); return;
+      case "binder.new": if (current) { const c = viewCenter(); createSimple("binder", { x: c.x - 210, y: c.y - 140, ...SIZE.binder }); } return;
+      case "binder.stack": void stackSelectedNotes(); return;
       case "prefs": setPrefsOpen(true); return;
       case "scores": setScoresOpen(true); return;
       case "theme": setThemePref(nextTheme(getThemePref())); return;
@@ -531,6 +603,11 @@ function Canvas({ conn }: { conn: Connection }) {
         } else missing = true;
       }
       snappedRef.current.clear();
+      // #74: soltar uma nota inteira (centro) sobre um fichário a puxa para dentro dele
+      if (after.length === 1 && snap) {
+        const dropped = snap.nodes.find((x) => x.nodeId === after[0]!.nodeId);
+        if (dropped?.kind === "note") { const cx = after[0]!.geometry.x + after[0]!.geometry.w / 2, cy = after[0]!.geometry.y + after[0]!.geometry.h / 2; const tgt = snap.nodes.find((x) => x.kind === "binder" && x.nodeId !== dropped.nodeId && cx >= x.geometry.x && cx <= x.geometry.x + x.geometry.w && cy >= x.geometry.y && cy <= x.geometry.y + x.geometry.h); if (tgt) { snappedRef.current.clear(); void pullIntoBinder(tgt.nodeId, [dropped.nodeId]); return; } }
+      }
       if (after.length) rec({ label: `mover ${plural(after.length, "nó", "nós")}`, forward: [{ type: "layout", moves: after }], inverse: [{ type: "layout", moves: before }] }); // #77: arrasto múltiplo = uma etapa
       if (missing) setSnap((s) => (s ? { ...s } : s));
     })();
@@ -557,9 +634,9 @@ function Canvas({ conn }: { conn: Connection }) {
     void mutate(async (r) => { const input = { expectedRevision: r, kind: "terminal", geometry, title: i.title, ...look, ...(usePreset ? { command: preset.command, args: preset.args } : cmdParts ? { command: cmdParts[0]!, args: cmdParts.slice(1) } : {}), ...(i.cwd ? { cwd: i.cwd } : {}), ...(i.roleId ? { roleId: i.roleId } : {}), ...(i.persistent ? { persistent: true } : {}) }; const made = await api.createNode(current, input); const { expectedRevision: _er, ...sp } = input; rec({ label: "criar terminal", forward: [{ type: "createNode", ref: made.node.nodeId, spec: sp as NodeSpec }], inverse: [{ type: "deleteNode", id: made.node.nodeId }] }); ensureVisible(geometry); if (target === "chat") setTimeout(() => openChat(made.node.nodeId), 300); });
     setTool("select");
   };
-  const createSimple = (kind: "note" | "text" | "tree", geometry: Geometry) => {
+  const createSimple = (kind: "note" | "text" | "tree" | "binder", geometry: Geometry) => {
     if (!current) return;
-    void mutate(async (r) => { const made = await api.createNode(current, { expectedRevision: r, kind, geometry, content: "" }); rec({ label: kind === "note" ? "criar nota" : kind === "text" ? "criar texto" : "criar árvore", forward: [{ type: "createNode", ref: made.node.nodeId, spec: { kind, title: made.node.title, geometry, content: "" } }], inverse: [{ type: "deleteNode", id: made.node.nodeId }] }); ensureVisible(geometry); });
+    void mutate(async (r) => { const made = await api.createNode(current, { expectedRevision: r, kind, geometry, ...(kind === "binder" ? {} : { content: "" }) }); rec({ label: kind === "note" ? "criar nota" : kind === "text" ? "criar texto" : kind === "binder" ? "criar fichário" : "criar árvore", forward: [{ type: "createNode", ref: made.node.nodeId, spec: { kind, title: made.node.title, geometry, content: made.node.content ?? "" } }], inverse: [{ type: "deleteNode", id: made.node.nodeId }] }); ensureVisible(geometry); });
     setTool("select");
   };
   const onCreateRect = (kind: "terminal" | "note" | "text" | "tree", rect: CreateRect) => {
@@ -571,6 +648,7 @@ function Canvas({ conn }: { conn: Connection }) {
     const nodes = snap?.nodes ?? [];
     if (choice.kind === "note") return createSimple("note", freeSpot(nodes, SIZE.note, at));
     if (choice.kind === "tree") return createSimple("tree", freeSpot(nodes, SIZE.tree, at));
+    if (choice.kind === "binder") return createSimple("binder", freeSpot(nodes, SIZE.binder, at));
     const g = freeSpot(nodes, SIZE.terminal, at);
     const persistent = features.includes("terminal.tmux");
     if (choice.preset) createTerminal(g, { title: choice.preset.label, presetId: choice.preset.id, persistent });

@@ -684,10 +684,11 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
 
     const node: Node = {
       nodeId: newId(), workspaceId, kind: input.kind,
-      title: input.title ?? (input.kind === "terminal" ? "Terminal" : input.kind === "text" ? "Texto" : input.kind === "tree" ? "Arquivos" : "Nota"),
+      title: input.title ?? (input.kind === "terminal" ? "Terminal" : input.kind === "text" ? "Texto" : input.kind === "tree" ? "Arquivos" : input.kind === "binder" ? "Fichário" : "Nota"),
       geometry: normalizeGeometry(input.geometry), createdAt: nowIso(),
       ...(input.kind === "note" || input.kind === "text" ? { content: input.content ?? "" } : {}),
       ...(input.kind === "tree" ? { content: input.content ?? JSON.stringify({ root: "", mode: "list" }) } : {}),
+      ...(input.kind === "binder" ? { content: input.content ?? JSON.stringify({ pages: [{ id: "p1", title: "Página 1", content: "" }], active: "p1", color: "" }) } : {}),
       ...(input.kind === "terminal" && input.roleId ? { roleId: input.roleId } : {}),
       // #56 aparência do terminal (vinda do preset)
       ...(input.kind === "terminal" && input.color ? { color: input.color } : {}),

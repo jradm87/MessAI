@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { Preset } from "@messai/contracts";
 import { WsIcon } from "./wsicons.js";
 
-export type AddChoice = { kind: "note" } | { kind: "tree" } | { kind: "terminal"; preset?: Preset; command?: string };
+export type AddChoice = { kind: "note" } | { kind: "tree" } | { kind: "binder" } | { kind: "terminal"; preset?: Preset; command?: string };
 
 /** Menu "Adicionar" usado pela toolbar e pelo clique direito no canvas. */
 export function AddMenu({ presets, onPick, onClose, x, y }: { presets: Preset[]; onPick: (c: AddChoice) => void; onClose: () => void; x: number; y: number }) {
@@ -18,6 +18,7 @@ export function AddMenu({ presets, onPick, onClose, x, y }: { presets: Preset[];
         <div className="mi" onMouseEnter={() => setSub(true)}>▸ Terminal <span className="sp" />›</div>
         <div className="mi" onClick={() => onPick({ kind: "note" })}>▤ Nota</div>
         <div className="mi" onClick={() => onPick({ kind: "tree" })}>▦ Árvore de arquivos</div>
+        <div className="mi" onClick={() => onPick({ kind: "binder" })} data-testid="add-binder">▥ Fichário</div>
         {sub && (
           <div className="menu sub">
             {custom === null ? (
