@@ -2,6 +2,7 @@ import { AGENT_ENV, type TreeEntry, type FileContent, type FsOp, type SearchHit,
 import type { RuntimeSettings, PatchRuntimeSettings, PresetInput, Skill, CreateSkill, PatchSkill, FindHit, FindKind, NodeGroup, CreateNodeGroup, PatchNodeGroup, AttentionItem, Score, ScoreNode, SaveScore, PatchScore, PlaceScore, PlaceScoreResult } from "@messai/contracts";
 import type { ChatAttachment, ExportAttachment, InstructionsStatus, InstructionFileInfo, PutInstructions, SyncInstructions } from "@messai/contracts";
 import type { Band, CreateBand, PatchBand, AskBand, BandAnswer, BandAskResult, MaestroRecruit } from "@messai/contracts";
+import type { FloorHookSection, FloorHooksConfig, PutFloorHooks, FloorHookStatus, FloorHooksState, RunFloorHookInput, StopFloorHookInput } from "@messai/contracts";
 import { readProcTree } from "./procs.js";
 import type { SessionProcs, KillProcInput } from "@messai/contracts";
 import { listProviders } from "./providers.js";
@@ -18,7 +19,7 @@ import { newId, nowIso, type Config } from "./config.js";
 import { dirname, join, delimiter, basename, extname, relative, isAbsolute, resolve } from "node:path";
 import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, realpathSync, readSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { execFile, execFileSync, spawnSync } from "node:child_process";
+import { execFile, execFileSync, spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 // Dev: CLI em apps/cli/bin. Empacotado: resources/cli (MESS_RESOURCES vem do main).
@@ -29,7 +30,7 @@ import { watch, type FSWatcher } from "chokidar";
 const MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", svg: "image/svg+xml", pdf: "application/pdf", md: "text/markdown", markdown: "text/markdown", txt: "text/plain", json: "application/json", csv: "text/csv", html: "text/html", log: "text/plain", ts: "text/plain", js: "text/plain", py: "text/plain", sh: "text/plain", yml: "text/plain", yaml: "text/plain" };
 export const mimeOf = (name: string): string => MIME[extname(name).slice(1).toLowerCase()] ?? "application/octet-stream";
 
-export type ServiceEvents = { workspace: [snapshot: WorkspaceSnapshot]; message: [message: Message]; sidebar: [sidebar: Sidebar]; chat: [message: ChatMessage]; taskSummary: [summary: TaskSummary] };
+export type ServiceEvents = { workspace: [snapshot: WorkspaceSnapshot]; message: [message: Message]; sidebar: [sidebar: Sidebar]; chat: [message: ChatMessage]; taskSummary: [summary: TaskSummary]; floorHook: [workspaceId: string, status: FloorHookStatus] };
 
 export type AgentUsageLimit = { label: string; pct: number; resets: string };
 export type AgentUsageItem = { id: string; label: string; available: boolean; note?: string; plan?: string; limits?: AgentUsageLimit[]; metrics: { label: string; value: string }[]; models: { name: string; input: number; output: number }[] };
@@ -688,8 +689,182 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
         if (r.ok) rev = r.value.revision;
       }
     }
+    const baseHooks = this.readHooksConfig(groundId);
+    const floorHooks: FloorHooksConfig = {
+      setup: input.hooks?.setup ?? baseHooks.setup,
+      run: input.hooks?.run ?? baseHooks.run,
+      teardown: input.hooks?.teardown ?? baseHooks.teardown,
+    };
+    if (floorHooks.setup || floorHooks.run || floorHooks.teardown) {
+      this.store.setMeta(this.hooksMetaKey(w.workspaceId), JSON.stringify(floorHooks));
+    }
+    if (floorHooks.setup.trim()) {
+      void this.startHookSection(w, "setup", floorHooks.setup);
+    }
     this.publishSidebar();
     return succeed(this.store.getWorkspace(w.workspaceId)!);
+  }
+
+  // ---- #75 hooks de andar (setup / run / teardown + logs ao vivo + MESS_FLOOR_*) ----
+  private hookRuns = new Map<string, Map<FloorHookSection, { status: FloorHookStatus; proc?: ChildProcess; promise?: Promise<FloorHookStatus> }>>();
+  private hooksMetaKey(workspaceId: string): string { return `hooks.${workspaceId}`; }
+  private readHooksConfig(workspaceId: string): FloorHooksConfig {
+    const raw = this.store.getMeta(this.hooksMetaKey(workspaceId));
+    if (raw) {
+      try {
+        const j = JSON.parse(raw) as Partial<FloorHooksConfig>;
+        return { setup: typeof j.setup === "string" ? j.setup : "", run: typeof j.run === "string" ? j.run : "", teardown: typeof j.teardown === "string" ? j.teardown : "" };
+      } catch { /* fallback */ }
+    }
+    const w = this.store.getWorkspace(workspaceId);
+    if (w?.parentId) return this.readHooksConfig(w.parentId);
+    if (w) {
+      for (const rel of [".messai/hooks.json", ".maestri/hooks.json"]) {
+        const p = join(w.cwd, rel);
+        if (!existsSync(p)) continue;
+        try {
+          const j = JSON.parse(readFileSync(p, "utf8")) as Partial<FloorHooksConfig>;
+          return { setup: typeof j.setup === "string" ? j.setup : "", run: typeof j.run === "string" ? j.run : "", teardown: typeof j.teardown === "string" ? j.teardown : "" };
+        } catch { /* ignorar */ }
+      }
+    }
+    return { setup: "", run: "", teardown: "" };
+  }
+  private hookStatuses(workspaceId: string): FloorHooksState["status"] {
+    const m = this.hookRuns.get(workspaceId);
+    const get = (s: FloorHookSection): FloorHookStatus => {
+      const cur = m?.get(s)?.status;
+      return cur ? { ...cur } : { section: s, state: "idle", log: "" };
+    };
+    return { setup: get("setup"), run: get("run"), teardown: get("teardown") };
+  }
+  private hookEnv(w: Workspace, section: FloorHookSection): Record<string, string> {
+    const baseEnv: Record<string, string> = {};
+    for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !/^(CLAUDECODE|CLAUDE_CODE_|CODEX_)/.test(k)) baseEnv[k] = v;
+    baseEnv["PATH"] = `${CLI_DIR}${delimiter}${baseEnv["PATH"] ?? ""}`;
+    const ground = w.parentId ? this.store.getWorkspace(w.parentId) : undefined;
+    return {
+      ...baseEnv,
+      [AGENT_ENV.floorId]: w.workspaceId,
+      [AGENT_ENV.floorName]: w.name,
+      [AGENT_ENV.floorBranch]: w.branch ?? "",
+      [AGENT_ENV.branchName]: w.branch ?? "",
+      [AGENT_ENV.floorPath]: w.cwd,
+      [AGENT_ENV.rootPath]: ground ? ground.cwd : w.cwd,
+      [AGENT_ENV.projectName]: ground ? ground.name : w.name,
+      [AGENT_ENV.workspaceId]: w.workspaceId,
+      [AGENT_ENV.workspaceName]: w.name,
+      [AGENT_ENV.workspaceDir]: w.cwd,
+      [AGENT_ENV.socket]: this.cfg.socketPath,
+      [AGENT_ENV.token]: this.cfg.token,
+      [AGENT_ENV.hookSection]: section,
+      SHELL: this.cfg.defaultShell,
+      ...(process.env["MESS_RESOURCES"] ? { MESS_ELECTRON: process.execPath } : {}),
+    };
+  }
+  getFloorHooks(workspaceId: string): Result<FloorHooksState> {
+    if (!this.store.getWorkspace(workspaceId)) return fail("NOT_FOUND", "espaço não encontrado");
+    return succeed({ workspaceId, hooks: this.readHooksConfig(workspaceId), status: this.hookStatuses(workspaceId) });
+  }
+  putFloorHooks(workspaceId: string, input: PutFloorHooks): Result<FloorHooksState> {
+    if (!this.store.getWorkspace(workspaceId)) return fail("NOT_FOUND", "espaço não encontrado");
+    const cur = this.readHooksConfig(workspaceId);
+    const next: FloorHooksConfig = {
+      setup: input.setup !== undefined ? input.setup : cur.setup,
+      run: input.run !== undefined ? input.run : cur.run,
+      teardown: input.teardown !== undefined ? input.teardown : cur.teardown,
+    };
+    this.store.setMeta(this.hooksMetaKey(workspaceId), JSON.stringify(next));
+    return this.getFloorHooks(workspaceId);
+  }
+  private startHookSection(w: Workspace, section: FloorHookSection, cmd: string): Promise<FloorHookStatus> {
+    this.stopHookSection(w.workspaceId, section);
+    let m = this.hookRuns.get(w.workspaceId);
+    if (!m) { m = new Map(); this.hookRuns.set(w.workspaceId, m); }
+    const status: FloorHookStatus = { section, state: "running", startedAt: nowIso(), log: "" };
+    const entry: { status: FloorHookStatus; proc?: ChildProcess; promise?: Promise<FloorHookStatus> } = { status };
+    m.set(section, entry);
+    const promise = new Promise<FloorHookStatus>((resolveP) => {
+      let proc: ChildProcess;
+      try {
+        proc = spawn(this.cfg.defaultShell || "/bin/sh", ["-c", cmd], { cwd: w.cwd, env: this.hookEnv(w, section), detached: true, stdio: ["ignore", "pipe", "pipe"] });
+      } catch (e) {
+        status.state = "failed"; status.exitCode = 1; status.finishedAt = nowIso();
+        status.log = String((e as Error).message ?? e);
+        this.emit("floorHook", w.workspaceId, { ...status });
+        return resolveP({ ...status });
+      }
+      entry.proc = proc;
+      if (proc.pid) status.pid = proc.pid;
+      this.emit("floorHook", w.workspaceId, { ...status });
+      const onChunk = (c: Buffer | string) => {
+        status.log += String(c);
+        if (status.log.length > 131072) status.log = status.log.slice(-131072);
+        this.emit("floorHook", w.workspaceId, { ...status });
+      };
+      proc.stdout?.on("data", onChunk);
+      proc.stderr?.on("data", onChunk);
+      let settled = false;
+      const done = (code: number | null) => {
+        if (settled) return; settled = true;
+        delete entry.proc;
+        delete status.pid;
+        if (status.state === "running") status.state = code === 0 ? "succeeded" : "failed";
+        if (typeof code === "number") status.exitCode = code;
+        status.finishedAt = nowIso();
+        this.emit("floorHook", w.workspaceId, { ...status });
+        resolveP({ ...status });
+      };
+      proc.on("error", (err) => { onChunk(`\n${String(err.message ?? err)}\n`); done(1); });
+      proc.on("close", (code) => done(code));
+    });
+    entry.promise = promise;
+    return promise;
+  }
+  private stopHookSection(workspaceId: string, section: FloorHookSection): void {
+    const entry = this.hookRuns.get(workspaceId)?.get(section);
+    if (!entry || entry.status.state !== "running") return;
+    entry.status.state = "stopped";
+    entry.status.finishedAt = nowIso();
+    const pid = entry.proc?.pid;
+    if (pid) {
+      try { process.kill(-pid, "SIGTERM"); } catch { /* grupo já saiu */ }
+      try { entry.proc?.kill("SIGTERM"); } catch { /* processo já saiu */ }
+    }
+    delete entry.proc;
+    delete entry.status.pid;
+    this.emit("floorHook", workspaceId, { ...entry.status });
+  }
+  async runFloorHooks(workspaceId: string, input: RunFloorHookInput): Promise<Result<FloorHooksState>> {
+    const w = this.store.getWorkspace(workspaceId);
+    if (!w) return fail("NOT_FOUND", "espaço não encontrado");
+    const cfg = this.readHooksConfig(workspaceId);
+    const wanted = input.section ?? "all";
+    const sections: FloorHookSection[] = wanted === "all"
+      ? (["setup", "run", "teardown"] as FloorHookSection[]).filter((s) => cfg[s].trim().length > 0)
+      : [wanted];
+    if (!sections.length) return fail("INVALID", "nenhum comando configurado nos hooks deste andar");
+    for (const s of sections) if (!cfg[s].trim()) return fail("INVALID", `a seção "${s}" não tem comando configurado`);
+    const first = this.startHookSection(w, sections[0]!, cfg[sections[0]!]);
+    const chain = (async () => {
+      const r0 = await first;
+      if (r0.state !== "succeeded") return;
+      for (const s of sections.slice(1)) {
+        const curW = this.store.getWorkspace(workspaceId);
+        if (!curW) break;
+        const r = await this.startHookSection(curW, s, cfg[s]);
+        if (r.state !== "succeeded") break;
+      }
+    })();
+    if (input.wait) await chain;
+    return this.getFloorHooks(workspaceId);
+  }
+  stopFloorHooks(workspaceId: string, input: StopFloorHookInput): Result<FloorHooksState> {
+    if (!this.store.getWorkspace(workspaceId)) return fail("NOT_FOUND", "espaço não encontrado");
+    const wanted = input.section ?? "all";
+    const sections: FloorHookSection[] = wanted === "all" ? ["setup", "run", "teardown"] : [wanted];
+    for (const s of sections) this.stopHookSection(workspaceId, s);
+    return this.getFloorHooks(workspaceId);
   }
   /** Pousar: merge local da branch do andar no térreo. Conflitos abortam o merge e voltam listados. */
   landFloor(floorId: string, input: LandFloor): Result<LandResult> {
@@ -749,6 +924,15 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     if (!w) return fail("NOT_FOUND", "espaço não encontrado");
     // andares primeiro: um térreo não some com andares órfãos
     for (const f of this.store.listFloors(id)) { const r = this.deleteWorkspace(f.workspaceId, opts); if (!r.ok) return r; }
+    for (const s of ["setup", "run", "teardown"] as FloorHookSection[]) this.stopHookSection(id, s);
+    if (w.parentId) {
+      const hk = this.readHooksConfig(id);
+      if (hk.teardown.trim() && existsSync(w.cwd)) {
+        spawnSync(this.cfg.defaultShell || "/bin/sh", ["-c", hk.teardown], { cwd: w.cwd, env: this.hookEnv(w, "teardown"), stdio: "ignore", timeout: GIT_SYNC_TIMEOUT_MS });
+      }
+    }
+    this.store.deleteMeta(this.hooksMetaKey(id));
+    this.hookRuns.delete(id);
     if (w.parentId && w.floorType === "worktree") {
       const ground = this.store.getWorkspace(w.parentId);
       if (ground) {
@@ -882,7 +1066,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const inject = {
       ...(role ? { [AGENT_ENV.roleName]: role.name, [AGENT_ENV.roleInstructions]: roleText(role) } : {}),
       ...(skills.length ? { [AGENT_ENV.skills]: skills.map((k) => k.name).join(", "), [AGENT_ENV.skillsText]: skillsText(skills) } : {}),
-      ...(ground ? { [AGENT_ENV.floorName]: w.name, [AGENT_ENV.branchName]: w.branch ?? "", [AGENT_ENV.floorPath]: w.cwd, [AGENT_ENV.rootPath]: ground.cwd, [AGENT_ENV.projectName]: ground.name } : { [AGENT_ENV.rootPath]: w.cwd, [AGENT_ENV.projectName]: w.name }),
+      ...(ground ? { [AGENT_ENV.floorId]: w.workspaceId, [AGENT_ENV.floorName]: w.name, [AGENT_ENV.floorBranch]: w.branch ?? "", [AGENT_ENV.branchName]: w.branch ?? "", [AGENT_ENV.floorPath]: w.cwd, [AGENT_ENV.rootPath]: ground.cwd, [AGENT_ENV.projectName]: ground.name } : { [AGENT_ENV.rootPath]: w.cwd, [AGENT_ENV.projectName]: w.name }),
       [AGENT_ENV.socket]: this.cfg.socketPath, [AGENT_ENV.token]: this.cfg.token,
       [AGENT_ENV.workspaceId]: w.workspaceId, [AGENT_ENV.workspaceName]: w.name, [AGENT_ENV.workspaceDir]: w.cwd,
       [AGENT_ENV.nodeId]: node.nodeId, [AGENT_ENV.sessionId]: s.sessionId,

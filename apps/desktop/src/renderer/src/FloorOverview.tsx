@@ -1,20 +1,27 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus, GitBranch, PlaneLanding, Trash2, Home } from "lucide-react";
-import type { FloorStatus, LandResult, Workspace } from "@messai/contracts";
-import type { Api } from "./api.js";
+import { Plus, GitBranch, PlaneLanding, Trash2, Home, Terminal, Play, Square } from "lucide-react";
+import type { FloorHookSection, FloorHooksState, FloorStatus, LandResult, Workspace } from "@messai/contracts";
+import type { Api, Stream } from "./api.js";
 
 export const STATUS_LABEL: Record<FloorStatus, string> = { working: "Trabalhando", blocked: "Bloqueado", review: "Pronto para revisão", done: "Concluído" };
 export const STATUS_COLOR: Record<FloorStatus, string> = { working: "#5aa9ff", blocked: "#ff6b6b", review: "#f6c344", done: "#4cd964" };
 const NODE_COLOR: Record<string, string> = { terminal: "#5aa9ff", note: "#f6c344", tree: "#4cd964", text: "#8a8a90" };
+const HOOK_SECTIONS: { key: FloorHookSection; label: string; desc: string }[] = [
+  { key: "setup", label: "Setup (ao criar)", desc: "Roda automaticamente quando o andar é criado." },
+  { key: "run", label: "Run (sob demanda)", desc: "Serviços ou tarefas iniciados manualmente." },
+  { key: "teardown", label: "Teardown (ao remover)", desc: "Roda antes de remover o andar/worktree." },
+];
+const HOOK_STATE_LABEL: Record<string, string> = { idle: "inativo", running: "rodando", succeeded: "concluído", failed: "falhou", stopped: "parado" };
 
 type Mini = { nodes: { x: number; y: number; w: number; h: number; kind: string; id: string }[]; conns: [string, string][] };
 
 /** Visão geral dos andares (Ctrl+Shift+\): cada andar é um plano 3D com miniatura dos nós; térreo embaixo, andares acima. */
-export function FloorOverview({ ground, floors, current, terminals, api, onOpen, onNew, onClose, onChanged, onError }: {
-  ground: Workspace; floors: Workspace[]; current: string | null; terminals: Record<string, number>; api: Api;
+export function FloorOverview({ ground, floors, current, terminals, api, stream, onOpen, onNew, onClose, onChanged, onError }: {
+  ground: Workspace; floors: Workspace[]; current: string | null; terminals: Record<string, number>; api: Api; stream?: Stream;
   onOpen: (id: string) => void; onNew: () => void; onClose: () => void; onChanged: () => void; onError: (m: string) => void;
 }) {
   const [land, setLand] = useState<{ floor: Workspace; mode: "merge" | "squash"; keep: boolean; delBranch: boolean; result?: LandResult; busy?: boolean } | null>(null);
+  const [hooksModal, setHooksModal] = useState<{ w: Workspace; state: FloorHooksState; setup: string; run: string; teardown: string; activeLog: FloorHookSection; busy?: boolean } | null>(null);
   const [minis, setMinis] = useState<Record<string, Mini>>({});
   const levels = useMemo(() => [ground, ...floors], [ground, floors]);
   const key = levels.map((w) => w.workspaceId).join(",");
@@ -26,6 +33,53 @@ export function FloorOverview({ ground, floors, current, terminals, api, onOpen,
       .then((entries) => { if (alive) setMinis(Object.fromEntries(entries)); });
     return () => { alive = false; };
   }, [key, api]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!hooksModal) return;
+    const wsId = hooksModal.w.workspaceId;
+    let alive = true;
+    const off = stream?.on((m) => {
+      if (m.type === "floorHook" && m.workspaceId === wsId) {
+        setHooksModal((cur) => cur && cur.w.workspaceId === wsId ? { ...cur, state: { ...cur.state, status: { ...cur.state.status, [m.status.section]: m.status } } } : cur);
+      }
+    });
+    const t = setInterval(() => {
+      void api.floorHooks(wsId).then((st) => {
+        if (alive) setHooksModal((cur) => cur && cur.w.workspaceId === wsId ? { ...cur, state: st } : cur);
+      }).catch(() => {});
+    }, 400);
+    return () => { alive = false; clearInterval(t); off?.(); };
+  }, [hooksModal?.w.workspaceId, api, stream]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const openHooks = async (w: Workspace) => {
+    try {
+      const st = await api.floorHooks(w.workspaceId);
+      setHooksModal({ w, state: st, setup: st.hooks.setup, run: st.hooks.run, teardown: st.hooks.teardown, activeLog: "setup" });
+    } catch (e) { onError(String(e)); }
+  };
+  const saveHooks = async () => {
+    if (!hooksModal) return;
+    try {
+      const st = await api.putFloorHooks(hooksModal.w.workspaceId, { setup: hooksModal.setup, run: hooksModal.run, teardown: hooksModal.teardown });
+      setHooksModal((cur) => cur ? { ...cur, state: st } : cur);
+    } catch (e) { onError(String(e)); }
+  };
+  const runHook = async (section: FloorHookSection | "all") => {
+    if (!hooksModal) return;
+    try {
+      await api.putFloorHooks(hooksModal.w.workspaceId, { setup: hooksModal.setup, run: hooksModal.run, teardown: hooksModal.teardown });
+      const st = await api.runFloorHooks(hooksModal.w.workspaceId, { section });
+      const pick: FloorHookSection = section === "all" ? (hooksModal.setup.trim() ? "setup" : hooksModal.run.trim() ? "run" : "teardown") : section;
+      setHooksModal((cur) => cur ? { ...cur, state: st, activeLog: pick } : cur);
+    } catch (e) { onError(String(e)); }
+  };
+  const stopHook = async (section: FloorHookSection | "all") => {
+    if (!hooksModal) return;
+    try {
+      const st = await api.stopFloorHooks(hooksModal.w.workspaceId, { section });
+      setHooksModal((cur) => cur ? { ...cur, state: st } : cur);
+    } catch (e) { onError(String(e)); }
+  };
 
   const setStatus = (f: Workspace, status: FloorStatus) => api.patchWorkspace(f.workspaceId, { expectedRevision: f.revision, status }).then(onChanged).catch((e) => onError(String(e)));
   const doLand = async () => {
@@ -63,6 +117,7 @@ export function FloorOverview({ ground, floors, current, terminals, api, onOpen,
         {!isGround && <span className="mut br"><GitBranch size={11} /> {w.branch}</span>}
         <span className="sp" />
         <span className="mut">{terminals[w.workspaceId] ?? 0} term.</span>
+        <button className="tb" title="Hooks de ciclo de vida (setup / run / teardown)" data-testid={isGround ? "ground-hooks-btn" : "floor-hooks-btn"} onClick={() => void openHooks(w)}><Terminal size={13} /> Hooks</button>
         {!isGround && <>
           <select className="f3d-status" value={w.status ?? "working"} onChange={(e) => void setStatus(w, e.target.value as FloorStatus)}>
             {(Object.keys(STATUS_LABEL) as FloorStatus[]).map((k) => <option key={k} value={k}>{STATUS_LABEL[k]}</option>)}
@@ -107,6 +162,51 @@ export function FloorOverview({ ground, floors, current, terminals, api, onOpen,
               <pre className="land-out">{land.result.output}</pre>
               <div className="actions"><button className="pri" onClick={() => setLand(null)}>Fechar</button></div>
             </div>)}
+          </div>
+        </div>
+      )}
+      {hooksModal && (
+        <div className="modal-backdrop" onMouseDown={() => setHooksModal(null)}>
+          <div className="modal land-modal" data-testid="floor-hooks-modal" style={{ width: 640, maxWidth: "92vw" }} onMouseDown={(e) => e.stopPropagation()}>
+            <h2>Hooks · {hooksModal.w.name}</h2>
+            <div className="form">
+              <div className="mut">Variáveis disponíveis nos comandos: <code>MESS_FLOOR_NAME</code>, <code>MESS_FLOOR_BRANCH</code>, <code>MESS_FLOOR_PATH</code>, <code>MESS_ROOT_PATH</code>, <code>MESS_PROJECT_NAME</code>.</div>
+              {HOOK_SECTIONS.map(({ key: sec, label, desc }) => {
+                const st = hooksModal.state.status[sec];
+                const val = hooksModal[sec];
+                return (
+                  <div key={sec} style={{ display: "flex", flexDirection: "column", gap: 4, padding: "6px 0", borderBottom: "1px solid var(--border, #2a2a30)" }}>
+                    <div className="row" style={{ alignItems: "center", justifyContent: "space-between" }}>
+                      <div><b>{label}</b> <span className="mut" style={{ fontSize: 11 }}>{desc}</span></div>
+                      <div className="row" style={{ gap: 6, alignItems: "center" }}>
+                        <span className="badge" data-testid={`hook-state-${sec}`}>{HOOK_STATE_LABEL[st.state] ?? st.state}{st.exitCode !== undefined ? ` (${st.exitCode})` : ""}</span>
+                        <button type="button" className="tb" data-testid={`hook-run-${sec}`} disabled={!val.trim()} onClick={() => void runHook(sec)} title={`Rodar ${sec}`}><Play size={12} /> Rodar</button>
+                        {st.state === "running" && <button type="button" className="tb danger" data-testid={`hook-stop-${sec}`} onClick={() => void stopHook(sec)} title={`Parar ${sec}`}><Square size={12} /> Parar</button>}
+                      </div>
+                    </div>
+                    <input value={val} onChange={(e) => setHooksModal({ ...hooksModal, [sec]: e.target.value })} placeholder={`Comando de ${sec}...`} data-testid={`hook-cmd-${sec}`} />
+                  </div>
+                );
+              })}
+              <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
+                <div className="tabs">
+                  {HOOK_SECTIONS.map(({ key: sec }) => (
+                    <button key={sec} type="button" className={hooksModal.activeLog === sec ? "on" : ""} data-testid={`hook-tab-${sec}`} onClick={() => setHooksModal({ ...hooksModal, activeLog: sec })}>
+                      Log: {sec} ({HOOK_STATE_LABEL[hooksModal.state.status[sec].state] ?? hooksModal.state.status[sec].state})
+                    </button>
+                  ))}
+                </div>
+                <div className="row" style={{ gap: 6 }}>
+                  <button type="button" className="tb" data-testid="hook-run-all" onClick={() => void runHook("all")}><Play size={12} /> Rodar tudo</button>
+                  <button type="button" className="tb danger" data-testid="hook-stop-all" onClick={() => void stopHook("all")}><Square size={12} /> Parar tudo</button>
+                </div>
+              </div>
+              <pre className="land-out" data-testid="hook-logs" style={{ minHeight: 110, maxHeight: 220, overflow: "auto", margin: 0 }}>{hooksModal.state.status[hooksModal.activeLog].log || "(sem saída)"}</pre>
+              <div className="actions">
+                <button type="button" onClick={() => setHooksModal(null)}>Fechar</button>
+                <button type="button" className="pri" data-testid="hook-save" onClick={() => void saveHooks()}>Salvar hooks</button>
+              </div>
+            </div>
           </div>
         </div>
       )}

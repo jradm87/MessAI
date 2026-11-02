@@ -1,4 +1,4 @@
-import type { SessionProcs, KillProcInput, InstructionsStatus, PutInstructions, SyncInstructions, ChatAttachment, ExportAttachment, Band, CreateBand, PatchBand, AskBand, BandAskResult, ApiError, Score, SaveScore, PatchScore, PlaceScore, PlaceScoreResult, AttentionItem, FindHit, FindKind, CompanionConfig, NodeGroup, CreateNodeGroup, PatchNodeGroup, RuntimeSettings, PatchRuntimeSettings, PresetInput, Skill, CreateSkill, PatchSkill, TaskSummary, TreeEntry, FileContent, FsOp, SearchHit, CreateFloor, LandFloor, LandResult, PatchConnection, Role, CreateRole, PatchRole, ChatMessage, SendChat, Attachment, CreateAttachment, FileEntry, Connection as WsConnection, CreateDrawing, PatchDrawing, GroupDrawings, CreateFolder, CreateNode, CreateWorkspace, Drawing, Folder, Geometry, PatchFolder, PatchWorkspace, Preset, Node, PatchNode, Session, Sidebar, Workspace, WorkspaceSnapshot, WsClientMessage, WsServerMessage } from "@messai/contracts";
+import type { FloorHooksState, PutFloorHooks, RunFloorHookInput, StopFloorHookInput, SessionProcs, KillProcInput, InstructionsStatus, PutInstructions, SyncInstructions, ChatAttachment, ExportAttachment, Band, CreateBand, PatchBand, AskBand, BandAskResult, ApiError, Score, SaveScore, PatchScore, PlaceScore, PlaceScoreResult, AttentionItem, FindHit, FindKind, CompanionConfig, NodeGroup, CreateNodeGroup, PatchNodeGroup, RuntimeSettings, PatchRuntimeSettings, PresetInput, Skill, CreateSkill, PatchSkill, TaskSummary, TreeEntry, FileContent, FsOp, SearchHit, CreateFloor, LandFloor, LandResult, PatchConnection, Role, CreateRole, PatchRole, ChatMessage, SendChat, Attachment, CreateAttachment, FileEntry, Connection as WsConnection, CreateDrawing, PatchDrawing, GroupDrawings, CreateFolder, CreateNode, CreateWorkspace, Drawing, Folder, Geometry, PatchFolder, PatchWorkspace, Preset, Node, PatchNode, Session, Sidebar, Workspace, WorkspaceSnapshot, WsClientMessage, WsServerMessage } from "@messai/contracts";
 
 export type Connection = { baseUrl: string; wsUrl: string; token: string; homeDir?: string };
 export type RunningEntry = { title: string; agentType: string; isAgent: boolean; workspace: string };
@@ -97,6 +97,11 @@ export class Api {
   floors(groundId: string) { return this.req<Workspace[]>("GET", `/v1/workspaces/${groundId}/floors`); }
   createFloor(groundId: string, input: CreateFloor) { return this.req<Workspace>("POST", `/v1/workspaces/${groundId}/floors`, input); }
   landFloor(floorId: string, input: LandFloor) { return this.req<LandResult>("POST", `/v1/workspaces/${floorId}/land`, input); }
+  // #75 hooks de andar
+  floorHooks(wsId: string) { return this.req<FloorHooksState>("GET", `/v1/workspaces/${wsId}/hooks`); }
+  putFloorHooks(wsId: string, input: PutFloorHooks) { return this.req<FloorHooksState>("PUT", `/v1/workspaces/${wsId}/hooks`, input); }
+  runFloorHooks(wsId: string, input: RunFloorHookInput = {}) { return this.req<FloorHooksState>("POST", `/v1/workspaces/${wsId}/hooks/run`, input); }
+  stopFloorHooks(wsId: string, input: StopFloorHookInput = {}) { return this.req<FloorHooksState>("POST", `/v1/workspaces/${wsId}/hooks/stop`, input); }
   deleteWorkspaceOpts(id: string, deleteBranch: boolean) { return this.req<void>("DELETE", `/v1/workspaces/${id}${deleteBranch ? "?deleteBranch=1" : ""}`); }
   sidebar() { return this.req<Sidebar>("GET", "/v1/sidebar"); }
   createFolder(input: CreateFolder) { return this.req<Folder>("POST", "/v1/folders", input); }

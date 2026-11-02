@@ -2,7 +2,7 @@ import { Type, type Static } from "@sinclair/typebox";
 
 export const PROTOCOL_VERSION = 1 as const;
 /** Incrementar a cada mudança de snapshot/rotas; o cliente avisa quando o runtime está atrás. */
-export const BUILD_VERSION = 19 as const;
+export const BUILD_VERSION = 20 as const;
 
 // ---------- Identidades ----------
 export const Id = Type.String({ minLength: 8, maxLength: 64 });
@@ -115,6 +115,48 @@ export const Workspace = Type.Object({
 export type Workspace = Static<typeof Workspace>;
 export const FloorStatus = Type.Union([Type.Literal("working"), Type.Literal("blocked"), Type.Literal("review"), Type.Literal("done")]);
 export type FloorStatus = Static<typeof FloorStatus>;
+// #75 — Hooks de andar: comandos executados no ciclo de vida (setup ao criar, run sob demanda, teardown antes de remover/pousar).
+export const FloorHookSection = Type.Union([Type.Literal("setup"), Type.Literal("run"), Type.Literal("teardown")]);
+export type FloorHookSection = Static<typeof FloorHookSection>;
+export const FloorHooksConfig = Type.Object({
+  setup: Type.String({ maxLength: 20000 }),
+  run: Type.String({ maxLength: 20000 }),
+  teardown: Type.String({ maxLength: 20000 }),
+});
+export type FloorHooksConfig = Static<typeof FloorHooksConfig>;
+export const PutFloorHooks = Type.Partial(FloorHooksConfig);
+export type PutFloorHooks = Static<typeof PutFloorHooks>;
+export const FloorHookRunState = Type.Union([Type.Literal("idle"), Type.Literal("running"), Type.Literal("succeeded"), Type.Literal("failed"), Type.Literal("stopped")]);
+export type FloorHookRunState = Static<typeof FloorHookRunState>;
+export const FloorHookStatus = Type.Object({
+  section: FloorHookSection,
+  state: FloorHookRunState,
+  pid: Type.Optional(Type.Integer()),
+  exitCode: Type.Optional(Type.Integer()),
+  startedAt: Type.Optional(Type.String()),
+  finishedAt: Type.Optional(Type.String()),
+  log: Type.String(),
+});
+export type FloorHookStatus = Static<typeof FloorHookStatus>;
+export const FloorHooksState = Type.Object({
+  workspaceId: Id,
+  hooks: FloorHooksConfig,
+  status: Type.Object({
+    setup: FloorHookStatus,
+    run: FloorHookStatus,
+    teardown: FloorHookStatus,
+  }),
+});
+export type FloorHooksState = Static<typeof FloorHooksState>;
+export const RunFloorHookInput = Type.Object({
+  section: Type.Optional(Type.Union([FloorHookSection, Type.Literal("all")])),
+  wait: Type.Optional(Type.Boolean()),
+});
+export type RunFloorHookInput = Static<typeof RunFloorHookInput>;
+export const StopFloorHookInput = Type.Object({
+  section: Type.Optional(Type.Union([FloorHookSection, Type.Literal("all")])),
+});
+export type StopFloorHookInput = Static<typeof StopFloorHookInput>;
 /** Criar andar a partir do térreo: branch nova ou existente, worktree git (padrão) ou sem isolamento (mesmo diretório). */
 export const CreateFloor = Type.Object({
   name: Type.String({ minLength: 1 }),
@@ -124,6 +166,7 @@ export const CreateFloor = Type.Object({
   floorType: Type.Optional(Type.Union([Type.Literal("worktree"), Type.Literal("none")])),
   path: Type.Optional(Type.String({ minLength: 1 })),
   cloneLayout: Type.Optional(Type.Boolean()),
+  hooks: Type.Optional(PutFloorHooks),
 });
 export type CreateFloor = Static<typeof CreateFloor>;
 export const LandFloor = Type.Object({ mode: Type.Optional(Type.Union([Type.Literal("merge"), Type.Literal("squash")])), keepFloor: Type.Optional(Type.Boolean()), deleteBranch: Type.Optional(Type.Boolean()) });
@@ -527,6 +570,7 @@ export const WsServerMessage = Type.Union([
   Type.Object({ type: Type.Literal("message"), message: Message }),
   Type.Object({ type: Type.Literal("taskFinished"), event: TaskFinished }),
   Type.Object({ type: Type.Literal("taskSummary"), summary: TaskSummary }),
+  Type.Object({ type: Type.Literal("floorHook"), workspaceId: Id, status: FloorHookStatus }),
   Type.Object({ type: Type.Literal("error"), error: ApiError, sessionId: Type.Optional(Id) }),
 ]);
 export type WsServerMessage = Static<typeof WsServerMessage>;
@@ -586,11 +630,14 @@ export const AGENT_ENV = {
   workspaceName: "MESS_WORKSPACE_NAME",
   workspaceDir: "MESS_WORKSPACE_DIR",
   nodeId: "MESS_NODE_ID",
+  floorId: "MESS_FLOOR_ID",
   floorName: "MESS_FLOOR_NAME",
+  floorBranch: "MESS_FLOOR_BRANCH",
   branchName: "MESS_BRANCH_NAME",
   floorPath: "MESS_FLOOR_PATH",
   rootPath: "MESS_ROOT_PATH",
   projectName: "MESS_PROJECT_NAME",
+  hookSection: "MESS_HOOK_SECTION",
   roleName: "MESS_ROLE",
   roleInstructions: "MESS_ROLE_INSTRUCTIONS",
   sessionId: "MESS_SESSION_ID",

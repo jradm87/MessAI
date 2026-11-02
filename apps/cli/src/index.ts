@@ -2,7 +2,7 @@
 // CLI mínima para agentes e humanos dentro de um terminal REA. Fala com o runtime pelo socket Unix.
 import { request } from "node:http";
 import { resolve as resolvePath } from "node:path";
-import { AGENT_ENV, type Band, type BandAskResult, type AskResult, type ChatMessage, type Message, type Node, type Workspace, type WorkspaceSnapshot } from "@messai/contracts";
+import { AGENT_ENV, type Band, type BandAskResult, type AskResult, type ChatMessage, type FloorHooksState, type Message, type Node, type Workspace, type WorkspaceSnapshot } from "@messai/contracts";
 
 const env = (k: keyof typeof AGENT_ENV) => process.env[AGENT_ENV[k]];
 const socketPath = env("socket"), token = env("token"), workspaceId = env("workspaceId"), nodeId = env("nodeId");
@@ -59,7 +59,8 @@ try {
   mess floor create <nome> [--branch b] [--base ref] [--no-git]
   mess floor status <working|blocked|review|done> [texto]   status do andar atual
   mess floor land [--squash] [--keep] [--delete-branch]      pousa o andar atual no térreo
-  mess floor delete <id|nome> [--delete-branch]`);
+  mess floor delete <id|nome> [--delete-branch]
+  mess floor hooks [set <setup|run|teardown> <cmd> | run [seção] | stop [seção] | logs [seção]]`);
   } else if (cmd === "floor") {
     const s = await snapshot(); const me = s.workspace;
     const groundId = me.parentId ?? me.workspaceId;
@@ -93,7 +94,37 @@ try {
       if (!f) throw new Error("andar não encontrado");
       await call("DELETE", `/v1/workspaces/${f.workspaceId}${del ? "?deleteBranch=1" : ""}`);
       console.log("andar removido");
-    } else throw new Error("uso: mess floor list|create|status|land|delete");
+    } else if (sub === "hooks") {
+      const op = args.shift();
+      if (!op || op === "list") {
+        const h = await call<FloorHooksState>("GET", `/v1/workspaces/${me.workspaceId}/hooks`);
+        for (const k of ["setup", "run", "teardown"] as const) {
+          const st = h.status[k];
+          console.log(`${k.padEnd(10)} [${st.state}${st.exitCode !== undefined ? ` exit=${st.exitCode}` : ""}]  ${h.hooks[k] || "(vazio)"}`);
+        }
+      } else if (op === "set") {
+        const sec = args.shift();
+        if (sec !== "setup" && sec !== "run" && sec !== "teardown") throw new Error("uso: mess floor hooks set <setup|run|teardown> <comando>");
+        const h = await call<FloorHooksState>("PUT", `/v1/workspaces/${me.workspaceId}/hooks`, { [sec]: args.join(" ") });
+        console.log(`${sec}: ${h.hooks[sec] || "(vazio)"}`);
+      } else if (op === "run") {
+        const noWait = has("--no-wait");
+        const sec = args[0] ?? "all";
+        const h = await call<FloorHooksState>("POST", `/v1/workspaces/${me.workspaceId}/hooks/run`, { section: sec, wait: !noWait });
+        for (const k of (sec === "all" ? ["setup", "run", "teardown"] : [sec]) as ("setup" | "run" | "teardown")[]) {
+          const st = h.status[k];
+          if (st.state !== "idle") console.log(`=== ${k} (${st.state}) ===\n${st.log.trim()}`);
+        }
+      } else if (op === "stop") {
+        const sec = args[0] ?? "all";
+        await call<FloorHooksState>("POST", `/v1/workspaces/${me.workspaceId}/hooks/stop`, { section: sec });
+        console.log("parado");
+      } else if (op === "logs") {
+        const sec = (args[0] ?? "run") as "setup" | "run" | "teardown";
+        const h = await call<FloorHooksState>("GET", `/v1/workspaces/${me.workspaceId}/hooks`);
+        console.log(h.status[sec]?.log || "(sem saída)");
+      } else throw new Error("uso: mess floor hooks [set|run|stop|logs]");
+    } else throw new Error("uso: mess floor list|create|status|land|delete|hooks");
   } else if (cmd === "say") {
     if (!nodeId) throw new Error("sem MESS_NODE_ID");
     const args = [sub, ...rest].filter((a): a is string => a !== undefined);

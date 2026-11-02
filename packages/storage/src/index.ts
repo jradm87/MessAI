@@ -220,6 +220,9 @@ export class Store {
   setMeta(key: string, value: string): void {
     this.db.prepare("INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(key, value);
   }
+  deleteMeta(key: string): void {
+    this.db.prepare("DELETE FROM meta WHERE key=?").run(key);
+  }
 
   // workspaces
   listWorkspaces(): Workspace[] { return (this.db.prepare("SELECT * FROM workspaces ORDER BY sort_order, created_at").all() as WsRow[]).map(wsFrom); }
