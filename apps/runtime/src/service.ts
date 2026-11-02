@@ -2,7 +2,7 @@ import { AGENT_ENV, type TreeEntry, type FileContent, type FsOp, type SearchHit,
 import type { RuntimeSettings, PatchRuntimeSettings, PresetInput, Skill, CreateSkill, PatchSkill, FindHit, FindKind, NodeGroup, CreateNodeGroup, PatchNodeGroup, AttentionItem, Score, ScoreNode, SaveScore, PatchScore, PlaceScore, PlaceScoreResult } from "@messai/contracts";
 import type { ChatAttachment, ExportAttachment, InstructionsStatus, InstructionFileInfo, PutInstructions, SyncInstructions } from "@messai/contracts";
 import type { Band, CreateBand, PatchBand, AskBand, BandAnswer, BandAskResult, MaestroRecruit } from "@messai/contracts";
-import type { FloorHookSection, FloorHooksConfig, PutFloorHooks, FloorHookStatus, FloorHooksState, RunFloorHookInput, StopFloorHookInput } from "@messai/contracts";
+import type { FloorHookSection, FloorHooksConfig, PutFloorHooks, FloorHookStatus, FloorHooksState, RunFloorHookInput, StopFloorHookInput, FloorCopyInfo, PutFloorExcludes } from "@messai/contracts";
 import { readProcTree } from "./procs.js";
 import type { SessionProcs, KillProcInput } from "@messai/contracts";
 import { listProviders } from "./providers.js";
@@ -10,14 +10,14 @@ import { probeAccounts } from "./accounts.js";
 import { backupName, copyBackupFiles, dataStats, isBackupName, listBackups, validateBackup, validateMoveTarget, writeManifest, type BackupEntry } from "./data.js";
 import { BUILD_VERSION } from "@messai/contracts";
 import { defaultPresets, parsePresets, validatePresets, PRESETS_META_KEY } from "./presets.js";
-import { applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, canMessage, checkRevision, formatDelivery, normalizeGeometry, planLocalTerminal, resolveNodeRef, validateNewNode, agentKind, agentResume, stripAnsi, fail, succeed, type Result, applySkills, skillsText, placeGeometries, connectionsWithin } from "@messai/domain";
+import { applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, DEFAULT_FLOOR_EXCLUDES, normalizeFloorExcludes, shouldExcludeFloorDir, safeRelPath, looksBinary, canMessage, checkRevision, formatDelivery, normalizeGeometry, planLocalTerminal, resolveNodeRef, validateNewNode, agentKind, agentResume, stripAnsi, fail, succeed, type Result, applySkills, skillsText, placeGeometries, connectionsWithin } from "@messai/domain";
 import { randomUUID } from "node:crypto";
 import { Companion } from "./companion.js";
 import type { Store } from "@messai/storage";
 import { EventEmitter } from "node:events";
 import { newId, nowIso, type Config } from "./config.js";
 import { dirname, join, delimiter, basename, extname, relative, isAbsolute, resolve } from "node:path";
-import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, realpathSync, readSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, constants as fsConstants, copyFileSync, existsSync, lstatSync, mkdirSync, openSync, readlinkSync, realpathSync, readSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { execFile, execFileSync, spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
@@ -651,8 +651,51 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     if (!this.store.getWorkspace(groundId)) return fail("NOT_FOUND", "espaço não encontrado");
     return succeed(this.store.listFloors(groundId));
   }
-  /** Cria um andar: workspace-filho com branch própria; worktree git por padrão. */
-  createFloor(groundId: string, input: CreateFloor): Result<Workspace> {
+  // ---- #81 cópia isolada (CoW/independente), detecção de reflink, exclusão de pastas e cancelamento ----
+  private activeFloorCopy = new Map<string, { cancelled: boolean; targetDir: string }>();
+  private probeCow(dir: string): boolean {
+    if (process.env["MESS_FORCE_COW"] === "1") return true;
+    if (process.env["MESS_FORCE_COW"] === "0") return false;
+    try {
+      mkdirSync(dir, { recursive: true });
+      const a = join(dir, `.cow-a-${process.pid}`); const b = join(dir, `.cow-b-${process.pid}`);
+      writeFileSync(a, "cow");
+      let ok = false;
+      try { copyFileSync(a, b, fsConstants.COPYFILE_FICLONE_FORCE); ok = true; } catch { ok = false; }
+      try { unlinkSync(a); } catch { /* */ }
+      try { unlinkSync(b); } catch { /* */ }
+      return ok;
+    } catch { return false; }
+  }
+  getFloorCopyInfo(workspaceId: string): Result<FloorCopyInfo> {
+    const w = this.store.getWorkspace(workspaceId);
+    if (!w) return fail("NOT_FOUND", "espaço não encontrado");
+    const ground = w.parentId ? (this.store.getWorkspace(w.parentId) ?? w) : w;
+    const cowSupported = this.probeCow(join(this.cfg.dataDir, "floors", ground.workspaceId));
+    const saved = this.store.getMeta(`excludes.${ground.workspaceId}`);
+    let excludeDirs: string[] = [...DEFAULT_FLOOR_EXCLUDES];
+    if (saved) { try { excludeDirs = normalizeFloorExcludes(JSON.parse(saved) as string[]); } catch { /* */ } }
+    let presentDirs: string[] = [];
+    try { presentDirs = readdirSync(ground.cwd, { withFileTypes: true }).filter((e) => e.isDirectory() && e.name !== ".git").map((e) => e.name).sort(); } catch { /* */ }
+    return succeed({ cowSupported, defaultExcludes: [...DEFAULT_FLOOR_EXCLUDES], excludeDirs, presentDirs });
+  }
+  putFloorExcludes(workspaceId: string, input: PutFloorExcludes): Result<FloorCopyInfo> {
+    const w = this.store.getWorkspace(workspaceId);
+    if (!w) return fail("NOT_FOUND", "espaço não encontrado");
+    const groundId = w.parentId ?? w.workspaceId;
+    const clean = normalizeFloorExcludes(input.excludeDirs);
+    this.store.setMeta(`excludes.${groundId}`, JSON.stringify(clean));
+    return this.getFloorCopyInfo(groundId);
+  }
+  cancelFloorCopy(groundId: string): Result<{ cancelled: boolean }> {
+    if (!this.store.getWorkspace(groundId)) return fail("NOT_FOUND", "espaço não encontrado");
+    const cur = this.activeFloorCopy.get(groundId);
+    if (!cur) return succeed({ cancelled: false });
+    cur.cancelled = true;
+    return succeed({ cancelled: true });
+  }
+  /** Cria um andar: workspace-filho com branch própria; worktree git (padrão), cópia isolada (CoW/independente) ou sem isolamento. */
+  async createFloor(groundId: string, input: CreateFloor): Promise<Result<Workspace>> {
     const ground = this.store.getWorkspace(groundId);
     if (!ground) return fail("NOT_FOUND", "espaço não encontrado");
     if (ground.parentId) return fail("INVALID", "andares nascem do térreo, não de outro andar");
@@ -660,6 +703,8 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const slug = slugify(input.name);
     const branch = input.branch?.trim() || slug;
     let cwd = ground.cwd;
+    let copyMode: "cow" | "independent" | undefined;
+    let excludeDirs: string[] | undefined;
     if (type === "worktree") {
       if (!this.isGitRepo(ground.cwd)) return fail("UNSUPPORTED", "o diretório do espaço não é um repositório git");
       cwd = input.path ?? join(this.cfg.dataDir, "floors", groundId, slug);
@@ -673,10 +718,64 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
         const r = this.git(ground.cwd, cmd.slice(2)); // já vem com -C
         if (!r.ok) return fail("INTERNAL", `git falhou: ${r.out}`);
       }
+    } else if (type === "copy") {
+      cwd = input.path ?? join(this.cfg.dataDir, "floors", groundId, slug);
+      if (existsSync(cwd)) return fail("CONFLICT", `já existe um diretório em ${cwd}`);
+      const info = this.getFloorCopyInfo(groundId);
+      if (!info.ok) return info;
+      const wantMode = input.copyMode ?? "auto";
+      if (wantMode === "cow" && !info.value.cowSupported) return fail("UNSUPPORTED", "o sistema de arquivos não suporta clone copy-on-write (reflink)");
+      copyMode = wantMode === "cow" || (wantMode === "auto" && info.value.cowSupported) ? "cow" : "independent";
+      excludeDirs = normalizeFloorExcludes(input.excludeDirs ?? info.value.excludeDirs);
+      const excludeSet = new Set(excludeDirs);
+      const copyState = { cancelled: false, targetDir: cwd };
+      this.activeFloorCopy.set(groundId, copyState);
+      const useFiclone = copyMode === "cow" && process.env["MESS_FORCE_COW"] !== "1";
+      const copyTree = async (srcDir: string, dstDir: string, relBase: string): Promise<void> => {
+        if (copyState.cancelled) throw new Error("__CANCELLED__");
+        mkdirSync(dstDir, { recursive: true });
+        for (const e of readdirSync(srcDir, { withFileTypes: true })) {
+          if (copyState.cancelled) throw new Error("__CANCELLED__");
+          const rel = relBase ? `${relBase}/${e.name}` : e.name;
+          const srcPath = join(srcDir, e.name);
+          const dstPath = join(dstDir, e.name);
+          if (e.isDirectory()) {
+            if (shouldExcludeFloorDir(rel, e.name, excludeSet)) continue;
+            await copyTree(srcPath, dstPath, rel);
+          } else if (e.isSymbolicLink()) {
+            try { symlinkSync(readlinkSync(srcPath), dstPath); } catch { /* */ }
+          } else if (e.isFile()) {
+            if (input.copyDelayMs && input.copyDelayMs > 0) {
+              await new Promise((r) => setTimeout(r, input.copyDelayMs));
+              if (copyState.cancelled) throw new Error("__CANCELLED__");
+            }
+            copyFileSync(srcPath, dstPath, useFiclone ? fsConstants.COPYFILE_FICLONE : 0);
+            try { chmodSync(dstPath, lstatSync(srcPath).mode); } catch { /* */ }
+          }
+        }
+      };
+      try {
+        await copyTree(ground.cwd, cwd, "");
+        if (copyState.cancelled) throw new Error("__CANCELLED__");
+      } catch (e) {
+        try { rmSync(cwd, { recursive: true, force: true }); } catch { /* */ }
+        this.activeFloorCopy.delete(groundId);
+        if ((e as Error).message === "__CANCELLED__") return fail("CONFLICT", "criação do andar cancelada");
+        return fail("INTERNAL", `cópia falhou: ${String((e as Error).message ?? e)}`);
+      }
+      this.activeFloorCopy.delete(groundId);
+      if (this.isGitRepo(cwd)) {
+        const exists = this.git(cwd, ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`]).ok;
+        const newBranch = input.newBranch ?? !exists;
+        if (newBranch) this.git(cwd, ["checkout", "-B", branch, ...(input.base ? [input.base] : [])]);
+        else this.git(cwd, ["checkout", branch]);
+      }
     }
     const w: Workspace = {
       workspaceId: newId(), machineId: this.cfg.machineId, name: input.name, cwd, icon: "layers", color: ground.color,
       sortOrder: this.store.nextWorkspaceOrder(), revision: 0, createdAt: nowIso(), parentId: groundId, branch, floorType: type, status: "working",
+      ...(copyMode ? { copyMode } : {}),
+      ...(excludeDirs ? { excludeDirs } : {}),
       ...(ground.folderId ? { folderId: ground.folderId } : {}),
     };
     this.store.insertWorkspace(w);
@@ -933,9 +1032,9 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     }
     this.store.deleteMeta(this.hooksMetaKey(id));
     this.hookRuns.delete(id);
-    if (w.parentId && w.floorType === "worktree") {
+    if (w.parentId && (w.floorType === "worktree" || w.floorType === "copy")) {
       const ground = this.store.getWorkspace(w.parentId);
-      if (ground) {
+      if (ground && w.floorType === "worktree") {
         spawnSync("git", ["-C", ground.cwd, "worktree", "remove", "--force", w.cwd], { stdio: "ignore", timeout: GIT_SYNC_TIMEOUT_MS });
         spawnSync("git", ["-C", ground.cwd, "worktree", "prune"], { stdio: "ignore", timeout: GIT_SYNC_TIMEOUT_MS });
         if (opts.deleteBranch && w.branch) spawnSync("git", ["-C", ground.cwd, "branch", "-D", w.branch], { stdio: "ignore", timeout: GIT_SYNC_TIMEOUT_MS });

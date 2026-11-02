@@ -72,6 +72,8 @@ const MIGRATIONS: (string | typeof LATE_SCHEMA)[] = [
   `ALTER TABLE nodes ADD COLUMN maestro INTEGER NOT NULL DEFAULT 0;`,
   `ALTER TABLE nodes ADD COLUMN mem_limit_mb INTEGER;`,
   `ALTER TABLE chats ADD COLUMN attachments TEXT;`, // #79 anexos do chat (JSON)
+  `ALTER TABLE workspaces ADD COLUMN copy_mode TEXT;
+   ALTER TABLE workspaces ADD COLUMN exclude_dirs TEXT;`, // #81 cópia isolada (CoW/independente) e pastas excluídas
 ];
 
 /**
@@ -117,7 +119,7 @@ const msgFrom = (r: MsgRow): Message => ({ messageId: r.message_id, workspaceId:
 type ConnRow = { connection_id: string; workspace_id: string; source_node_id: string; target_node_id: string; label: string | null; created_at: string; style: Connection["style"] | null };
 const connFrom = (r: ConnRow): Connection => ({ connectionId: r.connection_id, workspaceId: r.workspace_id, sourceNodeId: r.source_node_id, targetNodeId: r.target_node_id, createdAt: r.created_at, ...(r.label !== null ? { label: r.label } : {}), ...(r.style ? { style: r.style } : {}) });
 
-type WsRow = { workspace_id: string; machine_id: string; name: string; cwd: string; icon: string; color: string; folder_id: string | null; sort_order: number; revision: number; created_at: string; parent_id: string | null; branch: string | null; floor_type: Workspace["floorType"] | null; status: Workspace["status"] | null; status_text: string | null };
+type WsRow = { workspace_id: string; machine_id: string; name: string; cwd: string; icon: string; color: string; folder_id: string | null; sort_order: number; revision: number; created_at: string; parent_id: string | null; branch: string | null; floor_type: Workspace["floorType"] | null; copy_mode?: Workspace["copyMode"] | null; exclude_dirs?: string | null; status: Workspace["status"] | null; status_text: string | null };
 type ChatRow = { chat_id: string; workspace_id: string; node_id: string; thread: number; role: ChatMessage["role"]; text: string; created_at: string; attachments?: string | null };
 const chatAtt = (raw: string | null | undefined): ChatMessage["attachments"] => { if (!raw) return undefined; try { const j = JSON.parse(raw) as ChatMessage["attachments"]; return Array.isArray(j) && j.length ? j : undefined; } catch { return undefined; } };
 const chatFrom = (r: ChatRow): ChatMessage => ({ chatId: r.chat_id, workspaceId: r.workspace_id, nodeId: r.node_id, thread: r.thread, role: r.role, text: r.text, createdAt: r.created_at, ...(chatAtt(r.attachments) ? { attachments: chatAtt(r.attachments)! } : {}) });
@@ -137,7 +139,7 @@ type RoleRow = { role_id: string; name: string; badge: string; instructions: str
 const roleFrom = (r: RoleRow): Role => ({ roleId: r.role_id, name: r.name, badge: r.badge, instructions: r.instructions, createdAt: r.created_at, updatedAt: r.updated_at });
 type SessRow = { session_id: string; workspace_id: string; node_id: string; command: string; args: string; cwd: string; state: Session["state"]; pid: number | null; exit_code: number | null; cols: number; rows: number; created_at: string; persistent: number; resume_id: string | null };
 
-const wsFrom = (r: WsRow): Workspace => ({ workspaceId: r.workspace_id, machineId: r.machine_id, name: r.name, cwd: r.cwd, icon: r.icon, color: r.color, sortOrder: r.sort_order, revision: r.revision, createdAt: r.created_at, ...(r.folder_id ? { folderId: r.folder_id } : {}), ...(r.parent_id ? { parentId: r.parent_id } : {}), ...(r.branch ? { branch: r.branch } : {}), ...(r.floor_type ? { floorType: r.floor_type } : {}), ...(r.status ? { status: r.status } : {}), ...(r.status_text ? { statusText: r.status_text } : {}) });
+const wsFrom = (r: WsRow): Workspace => ({ workspaceId: r.workspace_id, machineId: r.machine_id, name: r.name, cwd: r.cwd, icon: r.icon, color: r.color, sortOrder: r.sort_order, revision: r.revision, createdAt: r.created_at, ...(r.folder_id ? { folderId: r.folder_id } : {}), ...(r.parent_id ? { parentId: r.parent_id } : {}), ...(r.branch ? { branch: r.branch } : {}), ...(r.floor_type ? { floorType: r.floor_type } : {}), ...(r.copy_mode ? { copyMode: r.copy_mode } : {}), ...(parseIds(r.exclude_dirs ?? null) ? { excludeDirs: parseIds(r.exclude_dirs ?? null)! } : {}), ...(r.status ? { status: r.status } : {}), ...(r.status_text ? { statusText: r.status_text } : {}) });
 const nodeFrom = (r: NodeRow): Node => ({
   nodeId: r.node_id, workspaceId: r.workspace_id, kind: r.kind, title: r.title,
   geometry: { x: r.x, y: r.y, w: r.w, h: r.h }, createdAt: r.created_at,
@@ -275,8 +277,8 @@ export class Store {
     return r ? wsFrom(r) : undefined;
   }
   insertWorkspace(w: Workspace): void {
-    this.db.prepare("INSERT INTO workspaces(workspace_id,machine_id,name,cwd,revision,created_at,icon,color,folder_id,sort_order,parent_id,branch,floor_type,status,status_text) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
-      .run(w.workspaceId, w.machineId, w.name, w.cwd, w.revision, w.createdAt, w.icon, w.color, w.folderId ?? null, w.sortOrder, w.parentId ?? null, w.branch ?? null, w.floorType ?? null, w.status ?? null, w.statusText ?? null);
+    this.db.prepare("INSERT INTO workspaces(workspace_id,machine_id,name,cwd,revision,created_at,icon,color,folder_id,sort_order,parent_id,branch,floor_type,copy_mode,exclude_dirs,status,status_text) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+      .run(w.workspaceId, w.machineId, w.name, w.cwd, w.revision, w.createdAt, w.icon, w.color, w.folderId ?? null, w.sortOrder, w.parentId ?? null, w.branch ?? null, w.floorType ?? null, w.copyMode ?? null, w.excludeDirs?.length ? JSON.stringify(w.excludeDirs) : null, w.status ?? null, w.statusText ?? null);
   }
   updateWorkspace(id: string, patch: { name?: string | undefined; cwd?: string | undefined; icon?: string | undefined; color?: string | undefined; folderId?: string | null | undefined; sortOrder?: number | undefined; status?: Workspace["status"] | undefined; statusText?: string | undefined }, revision: number): void {
     const sets = ["revision=?"]; const vals: unknown[] = [revision];

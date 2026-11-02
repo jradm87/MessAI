@@ -295,6 +295,19 @@ export function parseMergeConflicts(output: string): string[] {
   for (const m of output.matchAll(/CONFLICT \([^)]*\): (?:Merge conflict in|.*?) ?([^\n]+?)(?: deleted in.*)?$/gm)) { const f = m[1]?.trim(); if (f) out.add(f.replace(/^Merge conflict in /, "")); }
   return [...out];
 }
+/** #81 Pastas pesadas/geradas excluídas por padrão ao clonar um andar como cópia isolada. */
+export const DEFAULT_FLOOR_EXCLUDES = ["node_modules", "target", "dist", "build", ".next", ".venv", "__pycache__", ".cache", ".turbo", "coverage"] as const;
+export function normalizeFloorExcludes(list: readonly string[]): string[] {
+  const out: string[] = [];
+  for (const raw of list) {
+    const clean = raw.trim().replace(/^[/\\]+|[/\\]+$/g, "");
+    if (clean && clean !== ".git" && !clean.includes("..") && !out.includes(clean)) out.push(clean);
+  }
+  return out;
+}
+export function shouldExcludeFloorDir(relPath: string, name: string, excludes: ReadonlySet<string>): boolean {
+  return excludes.has(name) || excludes.has(relPath);
+}
 
 
 // ---------- árvore de arquivos ----------

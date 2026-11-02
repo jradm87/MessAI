@@ -2,7 +2,7 @@
 // CLI mínima para agentes e humanos dentro de um terminal REA. Fala com o runtime pelo socket Unix.
 import { request } from "node:http";
 import { resolve as resolvePath } from "node:path";
-import { AGENT_ENV, type Band, type BandAskResult, type AskResult, type ChatMessage, type FloorHooksState, type Message, type Node, type Workspace, type WorkspaceSnapshot } from "@messai/contracts";
+import { AGENT_ENV, type Band, type BandAskResult, type AskResult, type ChatMessage, type FloorCopyInfo, type FloorHooksState, type Message, type Node, type Workspace, type WorkspaceSnapshot } from "@messai/contracts";
 
 const env = (k: keyof typeof AGENT_ENV) => process.env[AGENT_ENV[k]];
 const socketPath = env("socket"), token = env("token"), workspaceId = env("workspaceId"), nodeId = env("nodeId");
@@ -73,10 +73,19 @@ try {
       if (!floors.length) console.log("nenhum andar");
       for (const f of floors) console.log(`${short(f.workspaceId)}  ${f.name.padEnd(24)} ${(f.branch ?? "-").padEnd(24)} ${f.status ?? ""}${f.statusText ? ` — ${f.statusText}` : ""}${f.workspaceId === me.workspaceId ? "  (você)" : ""}`);
     } else if (sub === "create") {
-      const branch = flag("--branch"); const base = flag("--base"); const noGit = has("--no-git");
-      const name = args.join(" ").trim(); if (!name) throw new Error("uso: mess floor create <nome> [--branch b] [--base ref] [--no-git]");
-      const f = await call<Workspace>("POST", `/v1/workspaces/${groundId}/floors`, { name, ...(branch ? { branch } : {}), ...(base ? { base } : {}), ...(noGit ? { floorType: "none" } : {}) });
-      console.log(`andar criado [${short(f.workspaceId)}] branch=${f.branch} em ${f.cwd}`);
+      const branch = flag("--branch"); const base = flag("--base"); const noGit = has("--no-git"); const copy = has("--copy");
+      const excl = flag("--exclude");
+      const name = args.join(" ").trim(); if (!name) throw new Error("uso: mess floor create <nome> [--branch b] [--base ref] [--no-git|--copy [--exclude dir1,dir2]]");
+      const f = await call<Workspace>("POST", `/v1/workspaces/${groundId}/floors`, {
+        name, ...(branch ? { branch } : {}), ...(base ? { base } : {}),
+        ...(noGit ? { floorType: "none" } : copy ? { floorType: "copy", ...(excl ? { excludeDirs: excl.split(",").map((x) => x.trim()).filter(Boolean) } : {}) } : {}),
+      });
+      console.log(`andar criado [${short(f.workspaceId)}] tipo=${f.floorType}${f.copyMode ? `(${f.copyMode})` : ""} branch=${f.branch} em ${f.cwd}`);
+    } else if (sub === "excludes") {
+      const info = await call<FloorCopyInfo>("GET", `/v1/workspaces/${groundId}/floor-copy-info`);
+      console.log(`CoW suportado: ${info.cowSupported ? "sim" : "não"}`);
+      console.log(`Pastas excluídas: ${info.excludeDirs.join(", ") || "(nenhuma)"}`);
+      console.log(`Pastas presentes no espaço: ${info.presentDirs.join(", ") || "(nenhuma)"}`);
     } else if (sub === "status") {
       if (!me.parentId) throw new Error("este espaço é o térreo; status é por andar");
       const [status, ...text] = args; if (!status || !["working", "blocked", "review", "done"].includes(status)) throw new Error("uso: mess floor status <working|blocked|review|done> [texto]");

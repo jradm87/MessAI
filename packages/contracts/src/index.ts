@@ -2,7 +2,7 @@ import { Type, type Static } from "@sinclair/typebox";
 
 export const PROTOCOL_VERSION = 1 as const;
 /** Incrementar a cada mudança de snapshot/rotas; o cliente avisa quando o runtime está atrás. */
-export const BUILD_VERSION = 20 as const;
+export const BUILD_VERSION = 21 as const;
 
 // ---------- Identidades ----------
 export const Id = Type.String({ minLength: 8, maxLength: 64 });
@@ -108,7 +108,9 @@ export const Workspace = Type.Object({
   // andar (floor): canvas-filho do térreo com branch/worktree próprios
   parentId: Type.Optional(Id),
   branch: Type.Optional(Type.String()),
-  floorType: Type.Optional(Type.Union([Type.Literal("worktree"), Type.Literal("none")])),
+  floorType: Type.Optional(Type.Union([Type.Literal("worktree"), Type.Literal("copy"), Type.Literal("none")])),
+  copyMode: Type.Optional(Type.Union([Type.Literal("cow"), Type.Literal("independent")])),
+  excludeDirs: Type.Optional(Type.Array(Type.String())),
   status: Type.Optional(Type.Union([Type.Literal("working"), Type.Literal("blocked"), Type.Literal("review"), Type.Literal("done")])),
   statusText: Type.Optional(Type.String()),
 });
@@ -157,13 +159,30 @@ export const StopFloorHookInput = Type.Object({
   section: Type.Optional(Type.Union([FloorHookSection, Type.Literal("all")])),
 });
 export type StopFloorHookInput = Static<typeof StopFloorHookInput>;
-/** Criar andar a partir do térreo: branch nova ou existente, worktree git (padrão) ou sem isolamento (mesmo diretório). */
+// #81 — Andares: cópia isolada (CoW/independente) e pastas excluídas.
+export const FloorCopyMode = Type.Union([Type.Literal("auto"), Type.Literal("cow"), Type.Literal("independent")]);
+export type FloorCopyMode = Static<typeof FloorCopyMode>;
+export const FloorCopyInfo = Type.Object({
+  cowSupported: Type.Boolean(),
+  defaultExcludes: Type.Array(Type.String()),
+  excludeDirs: Type.Array(Type.String()),
+  presentDirs: Type.Array(Type.String()),
+});
+export type FloorCopyInfo = Static<typeof FloorCopyInfo>;
+export const PutFloorExcludes = Type.Object({
+  excludeDirs: Type.Array(Type.String({ minLength: 1, maxLength: 120 }), { maxItems: 100 }),
+});
+export type PutFloorExcludes = Static<typeof PutFloorExcludes>;
+/** Criar andar a partir do térreo: branch nova ou existente, worktree git (padrão), cópia isolada (CoW/independente) ou sem isolamento. */
 export const CreateFloor = Type.Object({
   name: Type.String({ minLength: 1 }),
   branch: Type.Optional(Type.String({ minLength: 1 })),
   newBranch: Type.Optional(Type.Boolean()),
   base: Type.Optional(Type.String()),
-  floorType: Type.Optional(Type.Union([Type.Literal("worktree"), Type.Literal("none")])),
+  floorType: Type.Optional(Type.Union([Type.Literal("worktree"), Type.Literal("copy"), Type.Literal("none")])),
+  copyMode: Type.Optional(FloorCopyMode),
+  excludeDirs: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 120 }), { maxItems: 100 })),
+  copyDelayMs: Type.Optional(Type.Integer({ minimum: 0, maximum: 5000 })),
   path: Type.Optional(Type.String({ minLength: 1 })),
   cloneLayout: Type.Optional(Type.Boolean()),
   hooks: Type.Optional(PutFloorHooks),

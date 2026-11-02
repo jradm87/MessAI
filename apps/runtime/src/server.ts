@@ -5,7 +5,7 @@ import type { WebSocket } from "ws";
 import {
   BUILD_VERSION, PROTOCOL_VERSION, SendMessage, Ask, CreateConnection, CreateDrawing, CreateNode, CreateWorkspace, DeleteNode, PatchNode, PatchWorkspace, ApplyLayout, WsClientMessage,
   type Capabilities, type WsServerMessage, type ApiError,
- CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, PutFloorHooks, RunFloorHookInput, StopFloorHookInput, FsOp, PatchRuntimeSettings, PutPresets, CreateSkill, PatchSkill, BackupInput, RestoreInput, MoveDataInput, ResetInput, CreateNodeGroup, PatchNodeGroup, SaveScore, PatchScore, PlaceScore, CreateBand, PatchBand, AskBand, MaestroRecruit, MaestroTarget, MaestroAssign, ExportAttachment, PutInstructions, SyncInstructions, KillProcInput, type PresetInput, type Preset } from "@messai/contracts";
+ CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, PutFloorHooks, RunFloorHookInput, StopFloorHookInput, PutFloorExcludes, FsOp, PatchRuntimeSettings, PutPresets, CreateSkill, PatchSkill, BackupInput, RestoreInput, MoveDataInput, ResetInput, CreateNodeGroup, PatchNodeGroup, SaveScore, PatchScore, PlaceScore, CreateBand, PatchBand, AskBand, MaestroRecruit, MaestroTarget, MaestroAssign, ExportAttachment, PutInstructions, SyncInstructions, KillProcInput, type PresetInput, type Preset } from "@messai/contracts";
 import type { Result } from "@messai/domain";
 import { newId, type Config } from "./config.js";
 import type { WorkspaceService } from "./service.js";
@@ -102,7 +102,13 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
   app.get<{ Params: { id: string } }>("/v1/workspaces/:id/floors", async (req, reply) => send(reply, svc.listFloors(req.params.id)));
   app.post<{ Params: { id: string } }>("/v1/workspaces/:id/floors", async (req, reply) => {
     const b = body<CreateFloor>(CreateFloor, req.body); if ("code" in b) return invalid(reply, b);
-    return send(reply, svc.createFloor(req.params.id, b), 201);
+    return send(reply, await svc.createFloor(req.params.id, b), 201);
+  });
+  app.post<{ Params: { id: string } }>("/v1/workspaces/:id/floors/cancel", async (req, reply) => send(reply, svc.cancelFloorCopy(req.params.id)));
+  app.get<{ Params: { id: string } }>("/v1/workspaces/:id/floor-copy-info", async (req, reply) => send(reply, svc.getFloorCopyInfo(req.params.id)));
+  app.put<{ Params: { id: string } }>("/v1/workspaces/:id/floor-copy-info", async (req, reply) => {
+    const b = body<PutFloorExcludes>(PutFloorExcludes, req.body); if ("code" in b) return invalid(reply, b);
+    return send(reply, svc.putFloorExcludes(req.params.id, b));
   });
   app.post<{ Params: { id: string } }>("/v1/workspaces/:id/land", async (req, reply) => {
     const b = body<LandFloor>(LandFloor, req.body ?? {}); if ("code" in b) return invalid(reply, b);
