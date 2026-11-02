@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
 import { ArrowLeft, ArrowRight, ArrowUp, Folder, FolderOpen, FileText, File as FileIcon, FileCode2, Image as ImageIcon, LayoutList, LayoutGrid, RefreshCw, FolderPlus, FilePlus, Search, Home } from "lucide-react";
 import type { TreeEntry, SearchHit } from "@messai/contracts";
@@ -19,7 +19,7 @@ const iconFor = (e: TreeEntry, open: boolean) => e.dir ? (open ? <FolderOpen siz
 const GIT_TITLE: Record<string, string> = { M: "modificado", A: "adicionado", D: "apagado", R: "renomeado", "??": "não rastreado", "•": "contém alterações" };
 
 /** Nó Árvore de Arquivos: voltar/avançar/subir, nome da pasta, Lista/Grade, pastas recolhíveis com carga sob demanda, busca (`>` por conteúdo), criar/renomear/excluir, arrastar caminho. */
-export function TreeNode({ id, data, selected }: NodeProps & { data: TreeData }) {
+function TreeNodeImpl({ id, data, selected }: NodeProps & { data: TreeData }) {
   const { api, workspaceId } = data;
   const [state, setState] = useState<TreeState>(() => parse(data.content));
   useEffect(() => setState(parse(data.content)), [data.content]);
@@ -109,3 +109,6 @@ export function TreeNode({ id, data, selected }: NodeProps & { data: TreeData })
     </div>
   );
 }
+
+/** #42: memo — o wrapper do React Flow re-renderiza o nó em eventos que não mexem nas props dele (viewport, nós vizinhos). */
+export const TreeNode = memo(TreeNodeImpl);

@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, memo } from "react";
 import { NodeResizer, type NodeProps } from "@xyflow/react";
 
 export type TextData = { content: string; onChange: (c: string) => void; onDelete: () => void; onRaise: () => void; editSignal?: number };
 
 /** Bloco de texto solto no canvas, sem cabeçalho. Duplo clique edita. */
-export function TextNode({ data, selected }: NodeProps & { data: TextData }) {
+function TextNodeImpl({ data, selected }: NodeProps & { data: TextData }) {
   const [text, setText] = useState(data.content);
   const [edit, setEdit] = useState(data.content === "");
   useEffect(() => { if ((data.editSignal ?? 0) > 0) setEdit(true); }, [data.editSignal]);
@@ -18,3 +18,6 @@ export function TextNode({ data, selected }: NodeProps & { data: TextData }) {
     </div>
   );
 }
+
+/** #42: memo — o wrapper do React Flow re-renderiza o nó em eventos que não mexem nas props dele (viewport, nós vizinhos). */
+export const TextNode = memo(TextNodeImpl);

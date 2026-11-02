@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties, memo } from "react";
 import { useAtomValue } from "jotai";
 import { Search, Eraser, Lock, Eye, Folder, SquareTerminal } from "lucide-react";
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
@@ -9,6 +9,7 @@ import { SearchAddon } from "@xterm/addon-search";
 import "@xterm/xterm/css/xterm.css";
 import type { Session, TermTheme } from "@messai/contracts";
 import { usePref } from "./prefs.js";
+import { countRender } from "./perf.js";
 import { effectiveScrollback, fontStack, parseCustomPalette, resolveTermTheme } from "./term-theme.js";
 import { WS_COLORS, WS_ICONS, WsIcon } from "./wsicons.js";
 import { AgentIcon, agentKind } from "./agentIcons.js";
@@ -26,7 +27,8 @@ export type Appearance = { icon?: string | null; color?: string | null; termThem
 export type TerminalData = { title: string; sessionId: string; api: Api; stream: Stream; onDelete: () => void; onRename: (t: string) => void; onResume: () => void; editSignal?: number; icon?: string; color?: string; termTheme?: string; onAppearance: (p: Appearance) => void } & NodeExtras & ComposerExtras;
 const THEMES: { id: TermTheme; label: string }[] = [{ id: "system", label: "Sistema" }, { id: "dark", label: "Escuro" }, { id: "light", label: "Claro" }, { id: "custom", label: "Custom" }];
 
-export function TerminalNode({ id, data, selected }: NodeProps & { data: TerminalData }) {
+function TerminalNodeImpl({ id, data, selected }: NodeProps & { data: TerminalData }) {
+  countRender(id);
   const host = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal>(null);
   const searchRef = useRef<SearchAddon>(null);
@@ -215,3 +217,6 @@ export function TerminalNode({ id, data, selected }: NodeProps & { data: Termina
     </div>
   );
 }
+
+/** #42: memo — o wrapper do React Flow re-renderiza o nó em eventos que não mexem nas props dele (viewport, nós vizinhos). */
+export const TerminalNode = memo(TerminalNodeImpl);

@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, memo } from "react";
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
 import { Eye, Pencil, Lock, Unlock, Palette, FolderInput, FileText } from "lucide-react";
 import { EditableTitle } from "./EditableTitle.js";
 import type { NodeExtras } from "./TerminalNode.js";
 import { renderMarkdown, useMermaid } from "./md.js";
+import { countRender } from "./perf.js";
 import { WS_COLORS } from "./wsicons.js";
 
 export type NoteData = {
@@ -13,7 +14,8 @@ export type NoteData = {
 } & NodeExtras;
 
 /** Nota Markdown: modos Formatada/Raw, Mermaid, bloqueio para agentes, cor, arquivo .md real (Mover para…). */
-export function NoteNode({ data, selected }: NodeProps & { data: NoteData }) {
+function NoteNodeImpl({ id, data, selected }: NodeProps & { data: NoteData }) {
+  countRender(id);
   const [text, setText] = useState(data.content);
   const [raw, setRaw] = useState(data.content === "");
   const [colors, setColors] = useState(false);
@@ -52,3 +54,6 @@ export function NoteNode({ data, selected }: NodeProps & { data: NoteData }) {
     </div>
   );
 }
+
+/** #42: memo — o wrapper do React Flow re-renderiza o nó em eventos que não mexem nas props dele (viewport, nós vizinhos). */
+export const NoteNode = memo(NoteNodeImpl);

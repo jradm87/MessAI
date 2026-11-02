@@ -194,6 +194,7 @@ function Canvas({ conn }: { conn: Connection }) {
   }, [current, stream, api]);
 
   // ===== #77 desfazer/refazer: uma pilha por espaço; operações descritas como dados (undo.ts) e executadas aqui contra a API =====
+  const nodeKeys = useRef(new Map<string, string>()); // #42 chave de dados por nó para o render incremental
   const histories = useRef(new Map<string, History>());
   const snapRef = useRef<WorkspaceSnapshot | null>(snap); snapRef.current = snap; // os handlers de teclado capturam closures antigas: leem o snapshot pela ref
   // #78 encaixe magnético: liga/desliga pelo botão ímã (ou tecla M, pref `snapMagnetic`); segurar Alt durante o arrasto também
@@ -315,8 +316,17 @@ function Canvas({ conn }: { conn: Connection }) {
     revision.current = snap.workspace.revision;
     if (dragging.current) return; // não reconstruir durante arrasto/resize; o snapshot do patch do drop reconstrói logo em seguida
     const prev = new Map(flowRef.current.map((n) => [n.id, n]));
+    for (const id of [...nodeKeys.current.keys()]) if (!snap.nodes.some((n) => n.nodeId === id)) nodeKeys.current.delete(id);
     setFlow(snap.nodes.map((n) => {
       const old = prev.get(n.nodeId); const keepLocal = dragging.current && old;
+      // #42 render incremental: se nada que este nó consome mudou, reaproveita o MESMO objeto (React Flow/React não re-renderizam
+      // o nó, nem o xterm) — antes todo evento de snapshot recriava data/callbacks de todos os nós. Os callbacks só capturam `n`
+      // (igual enquanto a chave não muda), refs estáveis e setters; revisão/seleção vêm de refs.
+      const linkN = (snap.connections ?? []).filter((c) => c.sourceNodeId === n.nodeId || c.targetNodeId === n.nodeId).length;
+      const nodeKey = JSON.stringify([n, linkN, composerFor === n.nodeId, chatFor === n.nodeId, renameSig.id === n.nodeId ? renameSig.n : 0, snap.workspace.workspaceId,
+        n.kind === "terminal" ? [roles, skills, composerFor === n.nodeId || chatFor === n.nodeId ? [snap.nodes.filter((o) => o.nodeId !== n.nodeId && o.kind !== "text").map((o) => [o.nodeId, o.kind, o.title]), (snap.connections ?? []).filter((c) => c.sourceNodeId === n.nodeId || c.targetNodeId === n.nodeId).map((c) => [c.sourceNodeId, c.targetNodeId])] : 0] : 0]); // alvos de @menção só importam com o compositor/chat abertos
+      if (old && nodeKeys.current.get(n.nodeId) === nodeKey) return old;
+      nodeKeys.current.set(n.nodeId, nodeKey);
       const del = () => void deleteNodes([n.nodeId]);
       const rename = (title: string) => patchRec(n, { title }, "renomear", `title:${n.nodeId}`);
       const change = (content: string) => patchRec(n, { content }, "editar conteúdo", `content:${n.nodeId}`);
