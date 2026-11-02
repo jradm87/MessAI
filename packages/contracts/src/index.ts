@@ -515,3 +515,25 @@ export const CreateSkill = Type.Object({ name: Type.String({ minLength: 1, maxLe
 export type CreateSkill = Static<typeof CreateSkill>;
 export const PatchSkill = Type.Object({ name: Type.Optional(Type.String({ minLength: 1, maxLength: 60 })), description: Type.Optional(Type.String({ maxLength: 200 })), instructions: Type.Optional(Type.String({ maxLength: 20000 })) });
 export type PatchSkill = Static<typeof PatchSkill>;
+
+// ---------- #71 Partituras: arranjos do canvas salvos para recolocar em qualquer espaço/andar ----------
+export const ScoreNode = Type.Object({
+  key: Type.String(), // id local do arquivo da partitura (liga as conexões)
+  kind: NodeKind, title: Type.String(), geometry: Geometry, // geometria RELATIVA ao canto superior esquerdo do arranjo
+  content: Type.Optional(Type.String()), color: Type.Optional(Type.String()), icon: Type.Optional(Type.String()), termTheme: Type.Optional(Type.String()),
+  roleName: Type.Optional(Type.String()), skillNames: Type.Optional(Type.Array(Type.String())), // por NOME: o id é do banco de quem salvou
+  command: Type.Optional(Type.String()), args: Type.Optional(Type.Array(Type.String())), cwd: Type.Optional(Type.String()), persistent: Type.Optional(Type.Boolean()),
+});
+export type ScoreNode = Static<typeof ScoreNode>;
+export const ScoreConnection = Type.Object({ from: Type.String(), to: Type.String(), style: Type.Optional(Type.String()) });
+export type ScoreConnection = Static<typeof ScoreConnection>;
+export const Score = Type.Object({ scoreId: Id, name: Type.String(), description: Type.String(), nodes: Type.Array(ScoreNode), connections: Type.Array(ScoreConnection), createdAt: Type.String() });
+export type Score = Static<typeof Score>;
+export const SaveScore = Type.Object({ expectedRevision: Type.Integer(), nodeIds: Type.Optional(Type.Array(Id, { maxItems: 200 })), name: Type.String({ minLength: 1, maxLength: 60 }), description: Type.Optional(Type.String({ maxLength: 200 })) }); // sem nodeIds = o espaço todo
+export type SaveScore = Static<typeof SaveScore>;
+export const PatchScore = Type.Object({ name: Type.Optional(Type.String({ minLength: 1, maxLength: 60 })), description: Type.Optional(Type.String({ maxLength: 200 })) });
+export type PatchScore = Static<typeof PatchScore>;
+export const PlaceScore = Type.Object({ expectedRevision: Type.Integer(), at: Type.Object({ x: Type.Number(), y: Type.Number() }) });
+export type PlaceScore = Static<typeof PlaceScore>;
+export type PlaceScoreResult = { nodeIds: string[]; connectionIds: string[]; warnings: string[]; revision: number };
+

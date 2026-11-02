@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import type { ChatMessage, Connection, Drawing, Folder, Message, Node, Role, Session, Workspace, Skill, NodeGroup } from "@messai/contracts";
+import type { ChatMessage, Connection, Drawing, Folder, Message, Node, Role, Session, Workspace, Skill, NodeGroup, Score } from "@messai/contracts";
 
 const MIGRATIONS: string[] = [
   `CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -79,6 +79,8 @@ const MIGRATIONS: string[] = [
      group_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
      label TEXT NOT NULL DEFAULT '', color TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL);
    ALTER TABLE nodes ADD COLUMN group_id TEXT REFERENCES node_groups(group_id) ON DELETE SET NULL;`, // #78 grupos de nós
+  `CREATE TABLE IF NOT EXISTS scores (
+     score_id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', data TEXT NOT NULL, created_at TEXT NOT NULL);`, // #71 partituras
   `CREATE TABLE IF NOT EXISTS skills (
      skill_id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', instructions TEXT NOT NULL DEFAULT '',
      created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
@@ -100,6 +102,8 @@ type NodeRow = { node_id: string; workspace_id: string; kind: Node["kind"]; titl
 type SkillRow = { skill_id: string; name: string; description: string; instructions: string; created_at: string; updated_at: string };
 const skillFrom = (r: SkillRow): Skill => ({ skillId: r.skill_id, name: r.name, description: r.description, instructions: r.instructions, createdAt: r.created_at, updatedAt: r.updated_at });
 const parseIds = (raw: string | null): string[] | undefined => { if (!raw) return undefined; try { const j = JSON.parse(raw) as unknown; return Array.isArray(j) && j.length ? j.filter((x): x is string => typeof x === "string") : undefined; } catch { return undefined; } };
+type ScoreRow = { score_id: string; name: string; description: string; data: string; created_at: string };
+const scoreFrom = (r: ScoreRow): Score => { let d: { nodes?: Score["nodes"]; connections?: Score["connections"] } = {}; try { d = JSON.parse(r.data) as typeof d; } catch { /* partitura corrompida: vazia */ } return { scoreId: r.score_id, name: r.name, description: r.description, nodes: d.nodes ?? [], connections: d.connections ?? [], createdAt: r.created_at }; };
 type GroupRow = { group_id: string; workspace_id: string; label: string; color: string; created_at: string };
 const groupFrom = (r: GroupRow): NodeGroup => ({ groupId: r.group_id, workspaceId: r.workspace_id, label: r.label, color: r.color, createdAt: r.created_at });
 type RoleRow = { role_id: string; name: string; badge: string; instructions: string; created_at: string; updated_at: string };
@@ -255,6 +259,13 @@ export class Store {
       n.sessionId ?? null, n.content ?? null, n.createdAt, n.roleId ?? null, n.locked ? 1 : 0, n.color ?? null, n.filePath ?? null, titleAuto ? 1 : 0, n.icon ?? null, n.termTheme ?? null, n.skillIds?.length ? JSON.stringify(n.skillIds) : null, n.groupId ?? null);
   }
   setNodeRole(id: string, roleId: string | null): void { this.db.prepare("UPDATE nodes SET role_id=? WHERE node_id=?").run(roleId, id); }
+  // #71 partituras (data = JSON {nodes, connections})
+  listScores(): Score[] { return (this.db.prepare("SELECT * FROM scores ORDER BY name").all() as ScoreRow[]).map(scoreFrom); }
+  getScore(id: string): Score | undefined { const r = this.db.prepare("SELECT * FROM scores WHERE score_id=?").get(id) as ScoreRow | undefined; return r ? scoreFrom(r) : undefined; }
+  findScoreByName(name: string): Score | undefined { const r = this.db.prepare("SELECT * FROM scores WHERE lower(name)=lower(?)").get(name) as ScoreRow | undefined; return r ? scoreFrom(r) : undefined; }
+  insertScore(sc: Score): void { this.db.prepare("INSERT INTO scores VALUES(?,?,?,?,?)").run(sc.scoreId, sc.name, sc.description, JSON.stringify({ nodes: sc.nodes, connections: sc.connections }), sc.createdAt); }
+  updateScore(id: string, p: { name?: string | undefined; description?: string | undefined }): void { this.db.prepare("UPDATE scores SET name=COALESCE(?,name), description=COALESCE(?,description) WHERE score_id=?").run(p.name ?? null, p.description ?? null, id); }
+  deleteScore(id: string): void { this.db.prepare("DELETE FROM scores WHERE score_id=?").run(id); }
   // #78 grupos de nós
   listGroups(workspaceId: string): NodeGroup[] { return (this.db.prepare("SELECT * FROM node_groups WHERE workspace_id=? ORDER BY created_at").all(workspaceId) as GroupRow[]).map(groupFrom); }
   getGroup(id: string): NodeGroup | undefined { const r = this.db.prepare("SELECT * FROM node_groups WHERE group_id=?").get(id) as GroupRow | undefined; return r ? groupFrom(r) : undefined; }

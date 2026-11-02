@@ -337,3 +337,16 @@ export function snapGeometry(moving: Geometry, others: Geometry[], opt: { thresh
   return { x: moving.x + (sx?.delta ?? 0), y: moving.y + (sy?.delta ?? 0), guides: { vertical: sx ? [sx.line] : [], horizontal: sy ? [sy.line] : [] } };
 }
 
+// ---------- #71 partituras ----------
+/** Move um arranjo para que o canto superior esquerdo fique em `at`, preservando posições relativas. */
+export function placeGeometries(items: { key: string; geometry: Geometry }[], at: { x: number; y: number }): Map<string, Geometry> {
+  const out = new Map<string, Geometry>(); if (!items.length) return out;
+  const minX = Math.min(...items.map((i) => i.geometry.x)), minY = Math.min(...items.map((i) => i.geometry.y));
+  for (const i of items) out.set(i.key, normalizeGeometry({ ...i.geometry, x: Math.round(at.x + i.geometry.x - minX), y: Math.round(at.y + i.geometry.y - minY) }));
+  return out;
+}
+/** Conexões que ficam inteiras dentro do conjunto (as pontas precisam estar na partitura). */
+export function connectionsWithin<T extends { sourceNodeId: string; targetNodeId: string }>(conns: T[], ids: Set<string>): T[] {
+  return conns.filter((c) => ids.has(c.sourceNodeId) && ids.has(c.targetNodeId));
+}
+

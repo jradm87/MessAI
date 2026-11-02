@@ -5,7 +5,7 @@ import type { WebSocket } from "ws";
 import {
   BUILD_VERSION, PROTOCOL_VERSION, SendMessage, Ask, CreateConnection, CreateDrawing, CreateNode, CreateWorkspace, DeleteNode, PatchNode, PatchWorkspace, ApplyLayout, WsClientMessage,
   type Capabilities, type WsServerMessage, type ApiError,
- CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, FsOp, PatchRuntimeSettings, PutPresets, CreateSkill, PatchSkill, BackupInput, RestoreInput, MoveDataInput, ResetInput, CreateNodeGroup, PatchNodeGroup, type PresetInput, type Preset } from "@messai/contracts";
+ CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, FsOp, PatchRuntimeSettings, PutPresets, CreateSkill, PatchSkill, BackupInput, RestoreInput, MoveDataInput, ResetInput, CreateNodeGroup, PatchNodeGroup, SaveScore, PatchScore, PlaceScore, type PresetInput, type Preset } from "@messai/contracts";
 import type { Result } from "@messai/domain";
 import { newId, type Config } from "./config.js";
 import type { WorkspaceService } from "./service.js";
@@ -206,6 +206,12 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
     const b = body<PatchDrawing>(PatchDrawing, req.body); if ("code" in b) return invalid(reply, b);
     return send(reply, svc.patchDrawing(req.params.id, b));
   });
+  // #71 — partituras
+  app.get("/v1/scores", async () => svc.listScores());
+  app.post<{ Params: { id: string } }>("/v1/workspaces/:id/scores", async (req, reply) => { const b = body<SaveScore>(SaveScore, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.saveScore(req.params.id, b), 201); });
+  app.patch<{ Params: { id: string } }>("/v1/scores/:id", async (req, reply) => { const b = body<PatchScore>(PatchScore, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.patchScore(req.params.id, b)); });
+  app.delete<{ Params: { id: string } }>("/v1/scores/:id", async (req, reply) => send(reply, svc.deleteScore(req.params.id), 204));
+  app.post<{ Params: { id: string; scoreId: string } }>("/v1/workspaces/:id/scores/:scoreId/place", async (req, reply) => { const b = body<PlaceScore>(PlaceScore, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.placeScore(req.params.id, req.params.scoreId, b), 201); });
   // #78 — grupos de nós
   app.post<{ Params: { id: string } }>("/v1/workspaces/:id/groups", async (req, reply) => { const b = body<CreateNodeGroup>(CreateNodeGroup, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.createNodeGroup(req.params.id, b), 201); });
   app.patch<{ Params: { id: string } }>("/v1/groups/:id", async (req, reply) => { const b = body<PatchNodeGroup>(PatchNodeGroup, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.patchNodeGroup(req.params.id, b)); });

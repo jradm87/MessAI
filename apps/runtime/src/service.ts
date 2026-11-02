@@ -1,11 +1,11 @@
 import { AGENT_ENV, type TreeEntry, type FileContent, type FsOp, type SearchHit, type CreateFloor, type LandFloor, type LandResult, type Role, type CreateRole, type PatchRole, type ChatMessage, type SendChat, type Attachment, type CreateAttachment, type FileEntry, type Connection, type CreateConnection, type PatchConnection, type CreateDrawing, type PatchDrawing, type GroupDrawings, type CreateFolder, type CreateNode, type Drawing, type Folder, type Message, type PatchFolder, type SendMessage, type Sidebar, type CreateWorkspace, type Node, type PatchNode, type PatchWorkspace, type Session, type Workspace, type WorkspaceSnapshot, type TaskFinished, type TaskSummary } from "@messai/contracts";
-import type { RuntimeSettings, PatchRuntimeSettings, PresetInput, Skill, CreateSkill, PatchSkill, FindHit, FindKind, NodeGroup, CreateNodeGroup, PatchNodeGroup, AttentionItem } from "@messai/contracts";
+import type { RuntimeSettings, PatchRuntimeSettings, PresetInput, Skill, CreateSkill, PatchSkill, FindHit, FindKind, NodeGroup, CreateNodeGroup, PatchNodeGroup, AttentionItem, Score, ScoreNode, SaveScore, PatchScore, PlaceScore, PlaceScoreResult } from "@messai/contracts";
 import { listProviders } from "./providers.js";
 import { probeAccounts } from "./accounts.js";
 import { backupName, copyBackupFiles, dataStats, isBackupName, listBackups, validateBackup, validateMoveTarget, writeManifest, type BackupEntry } from "./data.js";
 import { BUILD_VERSION } from "@messai/contracts";
 import { defaultPresets, parsePresets, validatePresets, PRESETS_META_KEY } from "./presets.js";
-import { applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, canMessage, checkRevision, formatDelivery, normalizeGeometry, planLocalTerminal, resolveNodeRef, validateNewNode, agentKind, agentResume, stripAnsi, fail, succeed, type Result, applySkills, skillsText } from "@messai/domain";
+import { applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, canMessage, checkRevision, formatDelivery, normalizeGeometry, planLocalTerminal, resolveNodeRef, validateNewNode, agentKind, agentResume, stripAnsi, fail, succeed, type Result, applySkills, skillsText, placeGeometries, connectionsWithin } from "@messai/domain";
 import { randomUUID } from "node:crypto";
 import { Companion } from "./companion.js";
 import type { Store } from "@messai/storage";
@@ -900,6 +900,72 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     this.store.transaction(() => { this.store.setDrawingGroup(ids, groupId); this.store.bumpRevision(workspaceId, rev.value); });
     this.publish(workspaceId);
     return succeed({ revision: rev.value });
+  }
+
+  // ---- #71 partituras ----
+  listScores(): Score[] { return this.store.listScores(); }
+  /** Salva a seleção (ou o espaço todo) como partitura: comando/args/cwd do terminal, papel e skills por NOME, aparência, conteúdo, posições relativas e conexões internas. */
+  saveScore(workspaceId: string, input: SaveScore): Result<Score> {
+    const w = this.store.getWorkspace(workspaceId);
+    if (!w) return fail("NOT_FOUND", "espaço não encontrado");
+    const rev = checkRevision(w, input.expectedRevision);
+    if (!rev.ok) return rev;
+    if (this.store.findScoreByName(input.name)) return fail("CONFLICT", "já existe uma partitura com esse nome");
+    const all = this.store.listNodes(workspaceId);
+    const pick = input.nodeIds?.length ? all.filter((n) => input.nodeIds!.includes(n.nodeId)) : all;
+    if (!pick.length) return fail("INVALID", "nada para salvar");
+    const ids = new Set(pick.map((n) => n.nodeId)); const keyOf = new Map(pick.map((n, i) => [n.nodeId, `n${i + 1}`]));
+    const minX = Math.min(...pick.map((n) => n.geometry.x)), minY = Math.min(...pick.map((n) => n.geometry.y));
+    const nodes: ScoreNode[] = pick.map((n) => {
+      const ses = n.kind === "terminal" && n.sessionId ? this.store.getSession(n.sessionId) : undefined;
+      const role = n.roleId ? this.store.getRole(n.roleId) : undefined;
+      const skillNames = (n.skillIds ?? []).map((id) => this.store.getSkill(id)?.name).filter((x): x is string => !!x);
+      return { key: keyOf.get(n.nodeId)!, kind: n.kind, title: n.title, geometry: { ...n.geometry, x: n.geometry.x - minX, y: n.geometry.y - minY },
+        ...(n.kind !== "terminal" && n.content !== undefined ? { content: n.content } : {}), ...(n.color ? { color: n.color } : {}), ...(n.icon ? { icon: n.icon } : {}), ...(n.termTheme ? { termTheme: n.termTheme } : {}),
+        ...(role ? { roleName: role.name } : {}), ...(skillNames.length ? { skillNames } : {}),
+        ...(ses ? { command: ses.command, args: ses.args, cwd: ses.cwd, ...(ses.persistent ? { persistent: true } : {}) } : {}) };
+    });
+    const connections = connectionsWithin(this.store.listConnections(workspaceId), ids).map((c) => ({ from: keyOf.get(c.sourceNodeId)!, to: keyOf.get(c.targetNodeId)!, ...(c.style && c.style !== "rope" ? { style: c.style } : {}) }));
+    const sc: Score = { scoreId: newId(), name: input.name.trim(), description: (input.description ?? "").trim(), nodes, connections, createdAt: nowIso() };
+    this.store.insertScore(sc);
+    return succeed(sc);
+  }
+  patchScore(id: string, input: PatchScore): Result<Score> {
+    if (!this.store.getScore(id)) return fail("NOT_FOUND", "partitura não encontrada");
+    const dup = input.name ? this.store.findScoreByName(input.name) : undefined;
+    if (dup && dup.scoreId !== id) return fail("CONFLICT", "já existe uma partitura com esse nome");
+    this.store.updateScore(id, { name: input.name?.trim(), description: input.description?.trim() });
+    return succeed(this.store.getScore(id)!);
+  }
+  deleteScore(id: string): Result<void> { if (!this.store.getScore(id)) return fail("NOT_FOUND", "partitura não encontrada"); this.store.deleteScore(id); return succeed(undefined); }
+  /** Coloca a partitura num espaço/andar a partir de `at`: recria nós (terminais sobem com comando/papel/skills/aparência), conexões e layout relativo. Papéis/skills inexistentes viram aviso. */
+  placeScore(workspaceId: string, scoreId: string, input: PlaceScore): Result<PlaceScoreResult> {
+    const sc = this.store.getScore(scoreId); if (!sc) return fail("NOT_FOUND", "partitura não encontrada");
+    const w0 = this.store.getWorkspace(workspaceId); if (!w0) return fail("NOT_FOUND", "espaço não encontrado");
+    const rev0 = checkRevision(w0, input.expectedRevision); if (!rev0.ok) return rev0;
+    const geos = placeGeometries(sc.nodes.map((n) => ({ key: n.key, geometry: n.geometry })), input.at);
+    const warnings: string[] = []; const made = new Map<string, string>(); const nodeIds: string[] = []; const connectionIds: string[] = [];
+    const cur = () => this.store.getWorkspace(workspaceId)!.revision;
+    for (const n of sc.nodes) {
+      const role = n.roleName ? this.store.findRoleByName(n.roleName) : undefined; if (n.roleName && !role) warnings.push(`papel "${n.roleName}" não existe neste computador (${n.title})`);
+      const skills = (n.skillNames ?? []).map((nm) => ({ nm, s: this.store.findSkillByName(nm) })); for (const k of skills) if (!k.s) warnings.push(`habilidade "${k.nm}" não existe neste computador (${n.title})`);
+      const skillIds = skills.map((k) => k.s?.skillId).filter((x): x is string => !!x);
+      const cwd = n.cwd && existsSync(n.cwd) ? n.cwd : undefined; if (n.cwd && !cwd) warnings.push(`diretório "${n.cwd}" não existe; usando o do espaço (${n.title})`);
+      const r = this.createNode(workspaceId, { expectedRevision: cur(), kind: n.kind, title: n.title, geometry: geos.get(n.key)!,
+        ...(n.content !== undefined ? { content: n.content } : {}), ...(n.color ? { color: n.color } : {}), ...(n.icon ? { icon: n.icon } : {}), ...(n.termTheme ? { termTheme: n.termTheme as never } : {}),
+        ...(role ? { roleId: role.roleId } : {}), ...(skillIds.length ? { skillIds } : {}),
+        ...(n.kind === "terminal" && n.command ? { command: n.command, args: n.args ?? [] } : {}), ...(cwd ? { cwd } : {}), ...(n.persistent ? { persistent: true } : {}) });
+      if (!r.ok) { warnings.push(`não criou "${n.title}": ${r.error.message}`); continue; }
+      made.set(n.key, r.value.node.nodeId); nodeIds.push(r.value.node.nodeId);
+    }
+    for (const c of sc.connections) {
+      const a = made.get(c.from), b = made.get(c.to); if (!a || !b) continue;
+      const r = this.createConnection(workspaceId, { expectedRevision: cur(), sourceNodeId: a, targetNodeId: b });
+      if (!r.ok) { warnings.push(`conexão não criada: ${r.error.message}`); continue; }
+      connectionIds.push(r.value.connectionId);
+      if (c.style && c.style !== "rope") this.patchConnection(r.value.connectionId, { expectedRevision: cur(), style: c.style as never });
+    }
+    return succeed({ nodeIds, connectionIds, warnings, revision: cur() });
   }
 
   // ---- #78 grupos de nós (contêiner com rótulo/cor; membros movem juntos; grupo vazio some) ----
