@@ -26,16 +26,14 @@ beforeAll(async () => {
 
 afterAll(async () => { await quitApp(); runtime?.kill(); for (let i = 0; i < 15 && runtime && runtime.exitCode === null; i++) await new Promise((r) => setTimeout(r, 100)); if (runtime && runtime.exitCode === null) { try { runtime.kill("SIGKILL"); } catch { /* */ } } rmSync(dataDir, { recursive: true, force: true }); }, 30_000);
 
-async function visibleSpot(page: Page): Promise<{ x: number; y: number }> {
-  return page.evaluate(() => {
-    const main = document.querySelector("main.canvas")!.getBoundingClientRect();
-    const vp = (document.querySelector(".react-flow__viewport") as HTMLElement).style.transform;
-    const m = /translate\(([-0-9.]+)px,\s*([-0-9.]+)px\)\s*scale\(([-0-9.]+)\)/.exec(vp)!;
-    const tx = +m[1], ty = +m[2], s = +m[3];
-    const sx = main.width / 2, sy = main.height / 2;
-    return { x: (sx - tx) / s - 180, y: (sy - ty) / s - 110 };
-  });
+/** Lugar LIVRE para nós de teste: à direita de tudo que já existe no espaço (o centro da vista costuma estar sob terminais de testes anteriores). */
+async function visibleSpot(_page: Page): Promise<{ x: number; y: number }> {
+  const w = await e2eWs();
+  const snap = (await api(`/v1/workspaces/${w.workspaceId}`)) as { nodes: { geometry: { x: number; w: number } }[] };
+  return { x: Math.max(0, ...snap.nodes.map((n) => n.geometry.x + n.geometry.w)) + 120, y: 0 };
 }
+/** Enquadra tudo (Ctrl+\\) para os nós de teste ficarem visíveis e clicáveis. */
+async function fitAll(page: Page) { await page.click("main.canvas .react-flow__pane", { position: { x: 30, y: 700 } }).catch(() => {}); await page.keyboard.press("Control+\\"); await page.waitForTimeout(500); }
 
 
 
@@ -295,6 +293,8 @@ describe("ferramentas do canvas", () => {
   }, 30_000);
 
   it("papéis: aba Papel do Novo terminal atribui; pílula no nó troca e tira o papel", async () => {
+    // testes anteriores deixam compositor/chat abertos (cobrem o menu de papel): fecha antes
+    if (await page.locator('[data-testid="composer"]').count()) { await page.click("main.canvas .react-flow__pane", { position: { x: 30, y: 700 } }); await page.keyboard.press("Control+Shift+P"); await page.waitForSelector('[data-testid="composer"]', { state: "detached", timeout: 5000 }); }
     const token = readFileSync(join(dataDir, "runtime.token"), "utf8").trim();
     const post = (path: string, body: unknown) => fetch(`http://127.0.0.1:${PORT}${path}`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json());
     await post("/v1/roles", { name: "Revisor", badge: "RV", instructions: "Revise." });
@@ -330,7 +330,7 @@ describe("ferramentas do canvas", () => {
     const snap0 = (await api(`/v1/workspaces/${e2e.workspaceId}`)) as { workspace: { revision: number } };
     const r = await fetch(`http://127.0.0.1:${PORT}/v1/workspaces/${e2e.workspaceId}/nodes`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ expectedRevision: snap0.workspace.revision, kind: "note", geometry: { x: spot.x, y: spot.y, w: 360, h: 300 }, content: "# Título md\n\nTexto **forte**\n\n```mermaid\ngraph TD; A-->B;\n```" }) }).then((x) => x.json()) as { node: { nodeId: string } };
     const node = page.locator(`.react-flow__node[data-id="${r.node.nodeId}"]`);
-    await node.waitFor();
+    await node.waitFor(); await fitAll(page);
     await node.locator(".bar .title", { hasText: "Título md" }).waitFor();
     await node.locator('[data-testid="note-md"] strong:has-text("forte")').waitFor();
     await node.locator(".mermaid-box svg").waitFor({ state: "attached", timeout: 15_000 });
@@ -353,7 +353,7 @@ describe("ferramentas do canvas", () => {
     const nb = await post(`/v1/workspaces/${e2e.workspaceId}/nodes`, { expectedRevision: await rev(), kind: "note", title: "Cabo B", geometry: { x: spot.x + 220, y: spot.y, w: 200, h: 110 } }) as { node: { nodeId: string } };
     await post(`/v1/workspaces/${e2e.workspaceId}/connections`, { expectedRevision: await rev(), sourceNodeId: na.node.nodeId, targetNodeId: nb.node.nodeId });
     await page.locator(`.react-flow__node[data-id="${na.node.nodeId}"]`).waitFor({ state: "attached" });
-    await page.locator(`.react-flow__node[data-id="${nb.node.nodeId}"]`).waitFor({ state: "attached" });
+    await page.locator(`.react-flow__node[data-id="${nb.node.nodeId}"]`).waitFor({ state: "attached" }); await fitAll(page);
     await page.click("main.canvas .react-flow__pane", { position: { x: 30, y: 700 } });
     const before = ((await api(`/v1/workspaces/${e2e.workspaceId}`)) as { connections: unknown[] }).connections.length;
     expect(before).toBeGreaterThan(0);
@@ -428,14 +428,14 @@ describe("ferramentas do canvas", () => {
     await page.waitForSelector('[data-testid="overview"]');
     expect(await page.locator('[data-testid="ov-floor"]').count()).toBe(1);
     await page.screenshot({ path: process.env["MESS_SHOT_DIR"] ? `${process.env["MESS_SHOT_DIR"]}/overview.png` : "/dev/null" }).catch(() => {});
-    await page.click('[data-testid="ov-ground"]');
+    await page.click('[data-testid="ov-ground-pill"]');
     await page.waitForSelector('[data-testid="overview"]', { state: "detached" });
-    await page.waitForSelector(".side li.ws.on:has-text('Repo')");
+    await page.waitForSelector('[data-testid="ws-pill"]:has-text("Repo")');
   }, 40_000);
 
   it("árvore de arquivos: tecla F cria o nó com os arquivos do espaço; grade; busca por nome e conteúdo", async () => {
     await page.click(".side li.ws:has-text('Repo')"); // repositório do teste dos andares (a.txt)
-    await page.waitForSelector(".side li.ws.on:has-text('Repo')");
+    await page.waitForSelector('[data-testid="ws-pill"]:has-text("Repo")');
     await page.click("main.canvas .react-flow__pane", { position: { x: 30, y: 700 } });
     await page.keyboard.press("f");
     await page.waitForSelector("main.canvas .capture.tree");
