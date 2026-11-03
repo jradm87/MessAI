@@ -33,8 +33,9 @@ describe.skipIf(!hasTmux)("workspace à prova de reboot", () => {
     expect(before.sessions.some((s) => s.title === "Rota")).toBe(true);
 
     // Simula reboot: mata TODO o tmux do socket isolado + derruba o runtime.
-    try { execFileSync("tmux", ["-L", SOCK, "kill-server"], { stdio: "ignore" }); } catch { /* já morto */ }
+    // Ordem de um reboot real: runtime primeiro, depois o tmux (senão o runtime vivo grava `exited` e não re-sobe — corrida só na CI).
     await down(rt);
+    try { execFileSync("tmux", ["-L", SOCK, "kill-server"], { stdio: "ignore" }); } catch { /* já morto */ }
 
     // Reinicia o runtime no mesmo data dir → recoverPersistent deve RE-ABRIR a sessão.
     rt = await boot();

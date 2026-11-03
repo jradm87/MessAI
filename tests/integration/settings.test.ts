@@ -43,8 +43,11 @@ describe("configurações do runtime (#55)", () => {
     await down(rt); rt = await boot(); await new Promise((r) => setTimeout(r, 600));
     expect(((await api("GET", "/v1/running")).json as { sessions: { title: string }[] }).sessions.some((s) => s.title === "Persistente")).toBe(true);
     // "Reboot": tmux morto + runtime reiniciado → com restoreSessions=false, não RE-SOBE.
+    // Ordem de um reboot real: o runtime morre junto/antes do tmux (se o tmux caísse primeiro, o runtime vivo veria o terminal sair e
+    // gravaria `exited` antes do kill — corrida que aparecia só na CI, mais lenta).
+    await down(rt);
     try { execFileSync("tmux", ["-L", SOCK, "kill-server"], { stdio: "ignore" }); } catch { /* já morto */ }
-    await down(rt); rt = await boot(); await new Promise((r) => setTimeout(r, 600));
+    rt = await boot(); await new Promise((r) => setTimeout(r, 600));
     expect(((await api("GET", "/v1/running")).json as { sessions: { title: string }[] }).sessions.some((s) => s.title === "Persistente")).toBe(false);
     const s = (await api("GET", `/v1/sessions/${node.session.sessionId}`)).json as { state: string };
     expect(s.state).toBe("lost");
