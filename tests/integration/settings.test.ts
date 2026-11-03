@@ -26,12 +26,12 @@ afterAll(() => { try { rt?.kill("SIGKILL"); } catch { /* */ } try { execFileSync
 
 describe("configurações do runtime (#55)", () => {
   it("padrão restoreSessions=true; PATCH valida o corpo; o valor sobrevive a um reinício do runtime", async () => {
-    expect((await api("GET", "/v1/settings")).json).toEqual({ restoreSessions: true });
+    expect((await api("GET", "/v1/settings")).json).toMatchObject({ restoreSessions: true }); // outras fases acrescentaram chaves (#80/#84): checa só a do #55
     expect((await api("PATCH", "/v1/settings", { restoreSessions: "sim" })).status).toBe(400); // tipo errado
-    expect((await api("PATCH", "/v1/settings", { restoreSessions: false })).json).toEqual({ restoreSessions: false });
-    expect((await api("GET", "/v1/settings")).json).toEqual({ restoreSessions: false });
+    expect((await api("PATCH", "/v1/settings", { restoreSessions: false })).json).toMatchObject({ restoreSessions: false });
+    expect((await api("GET", "/v1/settings")).json).toMatchObject({ restoreSessions: false });
     await down(rt); rt = await boot();
-    expect((await api("GET", "/v1/settings")).json).toEqual({ restoreSessions: false }); // persistido no banco
+    expect((await api("GET", "/v1/settings")).json).toMatchObject({ restoreSessions: false }); // persistido no banco
   }, 30_000);
 
   it.skipIf(!hasTmux)("com restoreSessions=false, sessão persistente NÃO re-abre após reboot (vira lost); tmux vivo ainda reanexa", async () => {
