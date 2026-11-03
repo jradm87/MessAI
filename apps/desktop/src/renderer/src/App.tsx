@@ -33,6 +33,7 @@ import { NewTerminalDialog, type NewTerminalInput } from "./NewTerminalDialog.js
 import { ShutdownOverlay } from "./ShutdownOverlay.js";
 import { Preferences } from "./Preferences.js";
 import { getPrefs, setPref, usePref } from "./prefs.js";
+import { useI18n } from "./i18n.js";
 import { ACTION_BY_ID, comboFromEvent, effectiveCombo, sameCombo, type Keymap } from "./keymap.js";
 import { History, plural, type ConnSpec, type DrawingSpec, type NodeSpec, type Op } from "./undo.js";
 import { GroupLayer, type Guides } from "./GroupLayer.js";
@@ -93,6 +94,7 @@ function ZoomBar({ minimap, setMinimap, onUsage, onRoutines, agents, wsName, inF
 
 function Canvas({ conn }: { conn: Connection }) {
   useAtomValue(themeAtom); // a grade do canvas e o fundo seguem o tema; re-render ao trocar
+  const { t } = useI18n();
   const api = useMemo(() => new Api(conn), [conn]);
   const stream = useMemo(() => new Stream(conn), [conn]);
   const rf = useReactFlow();
@@ -928,7 +930,7 @@ function Canvas({ conn }: { conn: Connection }) {
         <div className="toasts">{toasts.map((t) => (
           <div key={t.id} className={`toast ${t.kind}`} onClick={() => setToasts((ts) => ts.filter((x) => x.id !== t.id))}>{t.text}</div>
         ))}</div>
-        <button className="pri add-btn" data-testid="add" disabled={!current} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); const p = e.currentTarget.closest("main")!.getBoundingClientRect(); setMenu({ x: r.left - p.left, y: r.bottom - p.top + 4 }); }}>+ Adicionar</button>
+        <button className="pri add-btn" data-testid="add" disabled={!current} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); const p = e.currentTarget.closest("main")!.getBoundingClientRect(); setMenu({ x: r.left - p.left, y: r.bottom - p.top + 4 }); }}>{t("app.add")}</button>
         {stale && <div className="banner">O runtime em execução é de uma versão anterior ao app. Reinicie o runtime para usar os recursos novos (isso encerra os shells dele; eles ficam como "lost" e podem ser reiniciados).</div>}
         {!current && <div className="empty">Crie um espaço com o botão + da barra lateral ou Ctrl+Shift+N.</div>}
         {wsDialog && <WorkspaceDialog api={api} {...(wsDialog.edit ? { edit: wsDialog.edit } : {})} {...(wsDialog.folderId ? { defaultFolderId: wsDialog.folderId } : {})} defaultCwd={homeDir} folders={side.folders} onSubmit={(i) => void submitWs(i)} onClose={() => setWsDialog(null)} />}

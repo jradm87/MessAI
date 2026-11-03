@@ -2,6 +2,7 @@ import { useEffect, useState, type ComponentType } from "react";
 import { Bot, Database, Download, Eye, EyeOff, Info, Keyboard, Lock, Monitor, Moon, Plus, Radio, Scale, Sliders, Sun, Terminal, Trash2, Unlock, X } from "lucide-react";
 import { getThemePref, onTheme, setThemePref, THEME_LABEL, type ThemePref } from "./theme.js";
 import { setPref, usePref } from "./prefs.js";
+import { LANGUAGES, useI18n, type LanguagePref } from "./i18n.js";
 import type { Api, UiPrefsState } from "./api.js";
 import type { EnvVarEntry, Workspace } from "@messai/contracts";
 import { isLikelySecretKey, parseDotEnv } from "@messai/domain";
@@ -235,6 +236,7 @@ function EnvironmentsEditor({ api, workspaceId }: { api: Api; workspaceId?: stri
 
 /** #55 — Geral: sistema, energia, ambientes (#72) e saída do app. */
 function GeneralTab({ api, workspaceId }: { api: Api; workspaceId?: string | undefined }) {
+  const { langPref, setLanguage, t } = useI18n();
   const webCursor = usePref("webCursor"); const powerMode = usePref("powerMode"); const confirmExit = usePref("confirmExit"); const closeToTray = usePref("closeToTray");
   const notifyEnabled = usePref("notifyEnabled"); const notifySound = usePref("notifySound");
   const notifyAgent = usePref("notifyAgent"); const notifyFloor = usePref("notifyFloor"); const notifyCli = usePref("notifyCli");
@@ -257,14 +259,16 @@ function GeneralTab({ api, workspaceId }: { api: Api; workspaceId?: string | und
   const setReloadOnSelect = (v: boolean) => { setReloadOnSelectState(v); api.patchSettings({ reloadOnSelect: v }).then((s) => setReloadOnSelectState(s.reloadOnSelect ?? true)).catch(() => {}); };
   const setAutoUnload = (v: number) => { const n = Math.max(0, Math.round(v)); setAutoUnloadMin(n); api.patchSettings({ autoUnloadMinutes: n }).then((s) => setAutoUnloadMin(s.autoUnloadMinutes ?? 0)).catch(() => {}); };
   return (<>
-    <Section title="Sistema">
-      <Field label="Idioma" hint="A tradução da interface chega com a issue #51; até lá o app é em pt-BR.">
-        <select disabled value="system" data-testid="pref-language" onChange={() => {}}><option value="system">Padrão do sistema</option></select>
+    <Section title={t("prefs.system")}>
+      <Field label={t("prefs.language")} hint={t("prefs.language.hint")}>
+        <select value={langPref} data-testid="pref-language" onChange={(e) => setLanguage(e.target.value as LanguagePref)}>
+          {LANGUAGES.map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
+        </select>
       </Field>
-      <Field label="Tema" hint="Sistema segue o modo claro/escuro do SO."><ThemePicker /></Field>
+      <Field label={t("prefs.theme")} hint="Sistema segue o modo claro/escuro do SO."><ThemePicker /></Field>
       <Field label="Cursor estilo web ao passar o mouse" hint="Mão em botões e menus; desligado usa a seta nativa."><Toggle on={webCursor} onChange={(v) => setPref("webCursor", v)} testId="pref-cursor" /></Field>
     </Section>
-    <Section title="Energia">
+    <Section title={t("prefs.power")}>
       <Field label="Evitar suspensão" hint="Impede o sistema de dormir para os agentes seguirem rodando; a tela pode apagar normalmente.">
         <div className="seg" role="radiogroup" data-testid="pref-power">
           {POWER.map((o) => <button key={o.id} role="radio" aria-checked={powerMode === o.id} className={powerMode === o.id ? "on" : ""} data-testid={`power-${o.id}`} onClick={() => setPref("powerMode", o.id)}>{o.label}</button>)}
@@ -313,6 +317,7 @@ export type PreferencesProps = {
   workspaceId?: string; workspaceCwd?: string; onRolesChanged?: () => void; onOpenTerminal?: OpenTerminal; onOpenUsage?: () => void;
 };
 export function Preferences({ api, onClose, onPresetsChanged, workspaceId, workspaceCwd, onRolesChanged, onOpenTerminal, onOpenUsage }: PreferencesProps) {
+  const { t } = useI18n();
   const saved = usePref("prefsTab");
   const tab: PrefTabId = isTab(saved) ? saved : "general";
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null); // #61/#63
@@ -332,13 +337,13 @@ export function Preferences({ api, onClose, onPresetsChanged, workspaceId, works
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
       <div className="modal prefs-modal" data-testid="prefs" onMouseDown={(e) => e.stopPropagation()}>
-        <div className="prefs-head"><h2 className="left">Preferências</h2><span className="sp" /><button className="tb" title="Fechar (Esc)" data-testid="prefs-close" onClick={onClose}><X size={15} /></button></div>
+        <div className="prefs-head"><h2 className="left" data-testid="prefs-heading">{t("prefs.title")}</h2><span className="sp" /><button className="tb" title="Fechar (Esc)" data-testid="prefs-close" onClick={onClose}><X size={15} /></button></div>
         <div className="prefs-body">
           <nav className="prefs-nav" aria-label="Abas das preferências">
-            {PREF_TABS.map((t) => <div key={t.id} className={`mi ${t.id === tab ? "on" : ""}`} role="tab" aria-selected={t.id === tab} data-testid={`prefs-tab-${t.id}`} onClick={() => pick(t.id)}><t.icon size={15} /><span>{t.label}</span></div>)}
+            {PREF_TABS.map((tb) => <div key={tb.id} className={`mi ${tb.id === tab ? "on" : ""}`} role="tab" aria-selected={tb.id === tab} data-testid={`prefs-tab-${tb.id}`} onClick={() => pick(tb.id)}><tb.icon size={15} /><span>{t(`prefs.tab.${tb.id}`)}</span></div>)}
           </nav>
           <div className="prefs-pane" data-testid={`prefs-pane-${cur.id}`}>
-            <h4 className="prefs-title">{cur.label}</h4>
+            <h4 className="prefs-title">{t(`prefs.tab.${cur.id}`)}</h4>
             {body}
           </div>
         </div>

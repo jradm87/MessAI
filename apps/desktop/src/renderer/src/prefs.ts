@@ -8,6 +8,8 @@ import { useSyncExternalStore } from "react";
 export const PREFS_KEY = "mess.prefs";
 export const DEFAULTS = {
   prefsTab: "general", // última aba aberta na janela de Preferências
+  // #51 Internacionalização (system | pt-BR | en-US)
+  language: "system",
   // #55 Geral
   webCursor: true, // mão em botões/menus (web) vs seta nativa
   powerMode: "never", // evitar suspensão: never | agents | always

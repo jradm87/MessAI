@@ -4,6 +4,7 @@ import type { Folder, Sidebar as SidebarData, Workspace } from "@messai/contract
 import { WsIcon } from "./wsicons.js";
 import { useHint } from "./shortcuts.js";
 import { signalTitle, type WsSignal } from "./presence.js";
+import { useI18n } from "./i18n.js";
 /** #47 selo de atenção do espaço: bolinha âmbar com a contagem (concluiu + não lidas + encerrados). */
 function Signal({ s }: { s?: WsSignal }) { if (!s || !s.total) return null; const n = s.finished + s.unread + s.dead; return <span className={`att-badge ${s.dead && !s.finished && !s.unread ? "dead" : ""}`} data-testid="ws-signal" title={signalTitle(s)}>{n}</span>; }
 
@@ -32,6 +33,7 @@ type Ctx = { x: number; y: number; ws?: Workspace; folder?: Folder };
 
 /** Barra lateral: filtro, botão +, WORKSPACES com pastas/subpastas recolhíveis, grupos (divisores) e rodapé. */
 export function Sidebar({ data, current, collapsed, machine, act, signals = {} }: { signals?: Record<string, WsSignal>; data: SidebarData; current: string | null; collapsed: boolean; machine: string; act: SidebarActions }) {
+  const { t } = useI18n();
   const hNew = useHint("ws.new"); const hPrefs = useHint("prefs.toggle"); // #58
   const [filter, setFilter] = useState("");
   const [ctx, setCtx] = useState<Ctx | null>(null);
@@ -107,7 +109,7 @@ export function Sidebar({ data, current, collapsed, machine, act, signals = {} }
       {!collapsed && <div className="slogan">Many agents. One organized mess.</div>}
       {!collapsed && <div className="machine">máquina {machine}</div>}
       <div className="side-top">
-        {!collapsed && <input className="filter" placeholder="Filtrar" value={filter} onChange={(e) => setFilter(e.target.value)} data-testid="ws-filter" />}
+        {!collapsed && <input className="filter" placeholder={t("side.filter")} value={filter} onChange={(e) => setFilter(e.target.value)} data-testid="ws-filter" />}
         {!collapsed && act.importWorkspace && <button className="tb" title="Importar espaço (.messai)" data-testid="ws-import" onClick={() => act.importWorkspace!()}><Upload size={14} /></button>}
         <button className="tb" title={`Novo espaço${hNew}`} data-testid="ws-new" onClick={() => act.newWorkspace()}><Plus size={16} /></button>
       </div>
