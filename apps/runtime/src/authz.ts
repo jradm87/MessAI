@@ -26,6 +26,7 @@ const RULES: Rule[] = [
   ["PUT", "/v1/git-hosts", D],
   ["PUT", "/v1/presets", D], ["POST", "/v1/presets/reset", D],
   ["*", "/v1/nodes/:id/token", D],
+  ["GET", "/v1/approvals", D], ["POST", "/v1/approvals/:id/decide", D], // #93 só o humano lista e decide pedidos
   ["*", "/v1/ws", D], // WebSocket digita em QUALQUER terminal: só o cliente
   ["POST", "/v1/workspaces/import", D],
   ["POST", "/v1/workspaces/import/preview", { cap: "nodes:read" }],
@@ -44,6 +45,10 @@ const RULES: Rule[] = [
   ["POST", "/v1/workspaces/:id/attachments", r("files:write", "ws")],
   ["POST", "/v1/chat-attachments/:id/export", r("files:write")],
   ["DELETE", "/v1/chat-attachments/:id", r("files:write")],
+
+  // ---- #93 o agente PEDE uma capacidade (e acompanha o próprio pedido) ----
+  ["POST", "/v1/approvals", r("nodes:read")],
+  ["GET", "/v1/approvals/:id", r("nodes:read")],
 
   // ---- chat do próprio terminal ----
   ["POST", "/v1/nodes/:id/chat", r("chat:post", "self")],

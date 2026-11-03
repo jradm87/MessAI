@@ -3,9 +3,9 @@
  * dados (não closures), executadas por um `Executor` que fala com a API. Ids criados durante undo/redo mudam; o
  * executor devolve o id real e o `remap` traduz referências antigas nas operações seguintes. Puro e testável.
  */
-import type { Geometry, TermTheme } from "@messai/contracts";
+import type { Geometry, NodeIsolation, TermTheme } from "@messai/contracts";
 
-export type NodeSpec = { kind: "terminal" | "note" | "text" | "tree"; title: string; geometry: Geometry; content?: string; color?: string; icon?: string; termTheme?: TermTheme; roleId?: string; skillIds?: string[]; command?: string; args?: string[]; cwd?: string; persistent?: boolean; maestro?: boolean };
+export type NodeSpec = { kind: "terminal" | "note" | "text" | "tree"; title: string; geometry: Geometry; content?: string; color?: string; icon?: string; termTheme?: TermTheme; roleId?: string; skillIds?: string[]; command?: string; args?: string[]; cwd?: string; persistent?: boolean; maestro?: boolean; isolation?: NodeIsolation };
 export type ConnSpec = { sourceNodeId: string; targetNodeId: string; style?: string };
 export type DrawingSpec = { kind: string; points: [number, number][]; color: string; width: number; text?: string; groupId?: string };
 export type Op =

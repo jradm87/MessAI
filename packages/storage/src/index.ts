@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import type { ChatMessage, Connection, Drawing, Folder, Message, Node, Role, Session, Workspace, Skill, NodeGroup, Score, Band } from "@messai/contracts";
+import type { ChatMessage, Connection, Drawing, Folder, Message, Node, Role, Session, Workspace, Skill, NodeGroup, Score, Band, NodeIsolation, Approval } from "@messai/contracts";
 
 /** Migração por função (idempotente). */
 const LATE_SCHEMA = Symbol("late");
@@ -75,6 +75,11 @@ const MIGRATIONS: (string | typeof LATE_SCHEMA)[] = [
   `ALTER TABLE workspaces ADD COLUMN copy_mode TEXT;
    ALTER TABLE workspaces ADD COLUMN exclude_dirs TEXT;`, // #81 cópia isolada (CoW/independente) e pastas excluídas
   `ALTER TABLE workspaces ADD COLUMN unloaded INTEGER NOT NULL DEFAULT 0;`, // #84 espaço descarregado (poupar CPU/RAM)
+  // Fase 7/8 (sempre no FIM): #93 modo isolado por nó (JSON) e pedidos de aprovação humana de capacidades.
+  `ALTER TABLE nodes ADD COLUMN isolation TEXT;`,
+  `CREATE TABLE IF NOT EXISTS approvals (
+     approval_id TEXT PRIMARY KEY, node_id TEXT NOT NULL REFERENCES nodes(node_id) ON DELETE CASCADE, workspace_id TEXT NOT NULL,
+     capability TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending', created_at TEXT NOT NULL, decided_at TEXT);`,
 ];
 
 /**
@@ -126,7 +131,19 @@ const chatAtt = (raw: string | null | undefined): ChatMessage["attachments"] => 
 const chatFrom = (r: ChatRow): ChatMessage => ({ chatId: r.chat_id, workspaceId: r.workspace_id, nodeId: r.node_id, thread: r.thread, role: r.role, text: r.text, createdAt: r.created_at, ...(chatAtt(r.attachments) ? { attachments: chatAtt(r.attachments)! } : {}) });
 type FolderRow = { folder_id: string; name: string; kind: Folder["kind"]; parent_id: string | null; sort_order: number; collapsed: number; created_at: string };
 const folderFrom = (r: FolderRow): Folder => ({ folderId: r.folder_id, name: r.name, kind: r.kind, sortOrder: r.sort_order, collapsed: r.collapsed === 1, createdAt: r.created_at, ...(r.parent_id ? { parentId: r.parent_id } : {}) });
-type NodeRow = { node_id: string; workspace_id: string; kind: Node["kind"]; title: string; x: number; y: number; w: number; h: number; session_id: string | null; content: string | null; created_at: string; role_id: string | null; locked: number; color: string | null; icon: string | null; term_theme: string | null; skill_ids: string | null; group_id: string | null; file_path: string | null; title_auto: number; maestro?: number; mem_limit_mb?: number | null };
+/** #93 JSON salvo → NodeIsolation válido (lixo vira modo confiável, nunca um sandbox pela metade). */
+const parseIsolation = (raw: string | null | undefined): NodeIsolation | undefined => {
+  if (!raw) return undefined;
+  try {
+    const j = JSON.parse(raw) as Partial<NodeIsolation>;
+    if (j.network !== "none" && j.network !== "host") return undefined;
+    const strs = (a: unknown) => (Array.isArray(a) ? a.filter((x): x is string => typeof x === "string" && x.length > 0) : undefined);
+    return { network: j.network, ...(strs(j.ro)?.length ? { ro: strs(j.ro)! } : {}), ...(strs(j.rw)?.length ? { rw: strs(j.rw)! } : {}), ...(typeof j.memoryMaxMb === "number" ? { memoryMaxMb: j.memoryMaxMb } : {}), ...(typeof j.tasksMax === "number" ? { tasksMax: j.tasksMax } : {}) };
+  } catch { return undefined; }
+};
+type ApprovalRow = { approval_id: string; node_id: string; workspace_id: string; capability: string; reason: string; status: string; created_at: string; decided_at: string | null; nt: string };
+const approvalFrom = (r: ApprovalRow): Approval => ({ approvalId: r.approval_id, nodeId: r.node_id, workspaceId: r.workspace_id, nodeTitle: r.nt, capability: r.capability as Approval["capability"], reason: r.reason, status: r.status as Approval["status"], createdAt: r.created_at, ...(r.decided_at ? { decidedAt: r.decided_at } : {}) });
+type NodeRow = { node_id: string; workspace_id: string; kind: Node["kind"]; title: string; x: number; y: number; w: number; h: number; session_id: string | null; content: string | null; created_at: string; role_id: string | null; locked: number; color: string | null; icon: string | null; term_theme: string | null; skill_ids: string | null; group_id: string | null; file_path: string | null; title_auto: number; maestro?: number; mem_limit_mb?: number | null; isolation?: string | null };
 type SkillRow = { skill_id: string; name: string; description: string; instructions: string; created_at: string; updated_at: string };
 const skillFrom = (r: SkillRow): Skill => ({ skillId: r.skill_id, name: r.name, description: r.description, instructions: r.instructions, createdAt: r.created_at, updatedAt: r.updated_at });
 const parseIds = (raw: string | null): string[] | undefined => { if (!raw) return undefined; try { const j = JSON.parse(raw) as unknown; return Array.isArray(j) && j.length ? j.filter((x): x is string => typeof x === "string") : undefined; } catch { return undefined; } };
@@ -154,6 +171,7 @@ const nodeFrom = (r: NodeRow): Node => ({
   ...(r.group_id ? { groupId: r.group_id } : {}),
   ...(r.maestro ? { maestro: true } : {}),
   ...(r.mem_limit_mb ? { memLimitMb: r.mem_limit_mb } : {}),
+  ...(parseIsolation(r.isolation) ? { isolation: parseIsolation(r.isolation)! } : {}),
   ...(r.file_path ? { filePath: r.file_path } : {}),
   ...(r.content !== null ? { content: r.content } : {}),
 });
@@ -305,9 +323,9 @@ export class Store {
     return r ? nodeFrom(r) : undefined;
   }
   insertNode(n: Node, titleAuto = true): void {
-    this.db.prepare("INSERT INTO nodes(node_id,workspace_id,kind,title,x,y,w,h,session_id,content,created_at,role_id,locked,color,file_path,title_auto,icon,term_theme,skill_ids,group_id,maestro,mem_limit_mb) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(
+    this.db.prepare("INSERT INTO nodes(node_id,workspace_id,kind,title,x,y,w,h,session_id,content,created_at,role_id,locked,color,file_path,title_auto,icon,term_theme,skill_ids,group_id,maestro,mem_limit_mb,isolation) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(
       n.nodeId, n.workspaceId, n.kind, n.title, n.geometry.x, n.geometry.y, n.geometry.w, n.geometry.h,
-      n.sessionId ?? null, n.content ?? null, n.createdAt, n.roleId ?? null, n.locked ? 1 : 0, n.color ?? null, n.filePath ?? null, titleAuto ? 1 : 0, n.icon ?? null, n.termTheme ?? null, n.skillIds?.length ? JSON.stringify(n.skillIds) : null, n.groupId ?? null, n.maestro ? 1 : 0, n.memLimitMb ?? null);
+      n.sessionId ?? null, n.content ?? null, n.createdAt, n.roleId ?? null, n.locked ? 1 : 0, n.color ?? null, n.filePath ?? null, titleAuto ? 1 : 0, n.icon ?? null, n.termTheme ?? null, n.skillIds?.length ? JSON.stringify(n.skillIds) : null, n.groupId ?? null, n.maestro ? 1 : 0, n.memLimitMb ?? null, n.isolation ? JSON.stringify(n.isolation) : null);
   }
   setNodeRole(id: string, roleId: string | null): void { this.db.prepare("UPDATE nodes SET role_id=? WHERE node_id=?").run(roleId, id); }
   // #71 partituras (data = JSON {nodes, connections})
@@ -317,6 +335,12 @@ export class Store {
   insertScore(sc: Score): void { this.db.prepare("INSERT INTO scores VALUES(?,?,?,?,?)").run(sc.scoreId, sc.name, sc.description, JSON.stringify({ nodes: sc.nodes, connections: sc.connections }), sc.createdAt); }
   updateScore(id: string, p: { name?: string | undefined; description?: string | undefined }): void { this.db.prepare("UPDATE scores SET name=COALESCE(?,name), description=COALESCE(?,description) WHERE score_id=?").run(p.name ?? null, p.description ?? null, id); }
   deleteScore(id: string): void { this.db.prepare("DELETE FROM scores WHERE score_id=?").run(id); }
+  // #93 aprovações de capacidade (agente isolado pede; o humano decide)
+  insertApproval(a: { approvalId: string; nodeId: string; workspaceId: string; capability: string; reason: string; createdAt: string }): void { this.db.prepare("INSERT INTO approvals(approval_id,node_id,workspace_id,capability,reason,status,created_at) VALUES(?,?,?,?,?,'pending',?)").run(a.approvalId, a.nodeId, a.workspaceId, a.capability, a.reason, a.createdAt); }
+  getApproval(id: string): Approval | undefined { const r = this.db.prepare("SELECT a.*, n.title nt FROM approvals a JOIN nodes n ON n.node_id=a.node_id WHERE a.approval_id=?").get(id) as ApprovalRow | undefined; return r ? approvalFrom(r) : undefined; }
+  listApprovals(status?: string): Approval[] { return (this.db.prepare(`SELECT a.*, n.title nt FROM approvals a JOIN nodes n ON n.node_id=a.node_id ${status ? "WHERE a.status=?" : ""} ORDER BY a.created_at DESC LIMIT 200`).all(...(status ? [status] : [])) as ApprovalRow[]).map(approvalFrom); }
+  decideApproval(id: string, status: "approved" | "denied", at: string): void { this.db.prepare("UPDATE approvals SET status=?, decided_at=? WHERE approval_id=?").run(status, at, id); }
+  pendingApprovalFor(nodeId: string, capability: string): Approval | undefined { const r = this.db.prepare("SELECT a.*, n.title nt FROM approvals a JOIN nodes n ON n.node_id=a.node_id WHERE a.node_id=? AND a.capability=? AND a.status='pending'").get(nodeId, capability) as ApprovalRow | undefined; return r ? approvalFrom(r) : undefined; }
   // #70 bandas (node_ids = JSON; ids de nós apagados são filtrados na leitura pelo serviço)
   listBands(workspaceId: string): Band[] { return (this.db.prepare("SELECT * FROM bands WHERE workspace_id=? ORDER BY created_at").all(workspaceId) as BandRow[]).map(bandFrom); }
   getBand(id: string): Band | undefined { const r = this.db.prepare("SELECT * FROM bands WHERE band_id=?").get(id) as BandRow | undefined; return r ? bandFrom(r) : undefined; }
@@ -361,7 +385,7 @@ export class Store {
   }
   deleteRole(id: string): void { this.db.transaction(() => { this.db.prepare("UPDATE nodes SET role_id=NULL WHERE role_id=?").run(id); this.db.prepare("DELETE FROM roles WHERE role_id=?").run(id); })(); }
   nodesWithRole(id: string): Node[] { return (this.db.prepare("SELECT * FROM nodes WHERE role_id=?").all(id) as NodeRow[]).map(nodeFrom); }
-  updateNode(id: string, patch: { title?: string | undefined; geometry?: Node["geometry"] | undefined; content?: string | undefined; sessionId?: string | undefined; locked?: boolean | undefined; color?: string | null | undefined; filePath?: string | undefined; titleAuto?: boolean | undefined; icon?: string | null | undefined; termTheme?: string | null | undefined; groupId?: string | null | undefined; maestro?: boolean | undefined; memLimitMb?: number | null | undefined }): void {
+  updateNode(id: string, patch: { title?: string | undefined; geometry?: Node["geometry"] | undefined; content?: string | undefined; sessionId?: string | undefined; locked?: boolean | undefined; color?: string | null | undefined; filePath?: string | undefined; titleAuto?: boolean | undefined; icon?: string | null | undefined; termTheme?: string | null | undefined; groupId?: string | null | undefined; maestro?: boolean | undefined; memLimitMb?: number | null | undefined; isolation?: NodeIsolation | null | undefined }): void {
     const g = patch.geometry;
     const sets = ["title=COALESCE(?,title)", "x=COALESCE(?,x)", "y=COALESCE(?,y)", "w=COALESCE(?,w)", "h=COALESCE(?,h)", "content=COALESCE(?,content)", "session_id=COALESCE(?,session_id)"];
     const vals: unknown[] = [patch.title ?? null, g?.x ?? null, g?.y ?? null, g?.w ?? null, g?.h ?? null, patch.content ?? null, patch.sessionId ?? null];
@@ -374,6 +398,7 @@ export class Store {
     if (patch.groupId !== undefined) { sets.push("group_id=?"); vals.push(patch.groupId); }
     if (patch.maestro !== undefined) { sets.push("maestro=?"); vals.push(patch.maestro ? 1 : 0); }
     if (patch.memLimitMb !== undefined) { sets.push("mem_limit_mb=?"); vals.push(patch.memLimitMb); }
+    if (patch.isolation !== undefined) { sets.push("isolation=?"); vals.push(patch.isolation ? JSON.stringify(patch.isolation) : null); }
     this.db.prepare(`UPDATE nodes SET ${sets.join(",")} WHERE node_id=?`).run(...vals, id);
   }
   isTitleAuto(id: string): boolean { return ((this.db.prepare("SELECT title_auto t FROM nodes WHERE node_id=?").get(id) as { t: number } | undefined)?.t ?? 0) === 1; }

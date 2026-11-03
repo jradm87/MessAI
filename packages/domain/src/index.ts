@@ -583,4 +583,95 @@ export function parseDotEnv(raw: string): EnvVarEntry[] {
   return out;
 }
 
+// ---------- #93 [MESS-09] modo isolado: bubblewrap (namespaces + raiz vazia) ----------
+export type NodeIsolationProfile = { network: "none" | "host"; ro?: string[] | undefined; rw?: string[] | undefined; memoryMaxMb?: number | undefined; tasksMax?: number | undefined };
+export type IsolationContext = {
+  cwd: string; home: string;
+  /** Diretórios de sistema que existem na máquina e entram SOMENTE LEITURA (ex.: /usr /etc /opt). */
+  systemDirs: string[];
+  /** Links de nível raiz típicos de distros "usr-merged": [alvo, caminho] (ex.: ["usr/bin", "/bin"]). */
+  systemLinks: [target: string, path: string][];
+  /** Já resolvidos e existentes: somente leitura / gravável (inclui o necessário para achar o binário, o CLI `mess` e o socket). */
+  roPaths: string[]; rwPaths: string[];
+  /** Montados SOMENTE LEITURA por cima dos graváveis (ex.: .git/hooks e .git/config do projeto: onde um agente plantaria código que o usuário executaria fora do sandbox). */
+  protect?: string[] | undefined;
+  /** Arquivo real para /etc/resolv.conf quando a rede é do host (o link original aponta para /run, que não existe no sandbox). */
+  resolvConf?: string | undefined;
+  /** Onde montar o `resolvConf` dentro do sandbox: se /etc/resolv.conf é um link, o bwrap não monta SOBRE ele — monta no alvo do link (padrão: /etc/resolv.conf). */
+  resolvDest?: string | undefined;
+  /** Ambiente completo e JÁ LIMPO do processo; nada além disto existe lá dentro. */
+  env: Record<string, string>;
+  /** Há systemd de usuário com cgroups? Só então os limites duros são aplicados. */
+  cgroupScope?: boolean | undefined;
+  /** Variáveis que o processo EXTERNO precisa (systemd-run --user exige XDG_RUNTIME_DIR / DBUS_SESSION_BUS_ADDRESS); nunca entram no sandbox. */
+  outerEnv?: Record<string, string> | undefined;
+};
+const uniq = (a: string[]) => [...new Set(a)];
+/** Remove caminhos aninhados redundantes (bind do pai já cobre o filho, salvo se o filho for gravável dentro de pai somente leitura). */
+export function isolationMounts(ctx: IsolationContext): { ro: string[]; rw: string[] } {
+  const rw = uniq([ctx.cwd, ...ctx.rwPaths]);
+  const ro = uniq(ctx.roPaths).filter((p) => !rw.includes(p));
+  return { ro, rw };
+}
+/**
+ * Embrulha o plano do terminal em `bwrap`. O sandbox começa VAZIO (tmpfs) e só recebe: sistema somente leitura, `ro`, `rw` (cwd + extras),
+ * /proc, /dev, /tmp novo e um $HOME vazio. Sem rede por padrão do perfil escolhido; todas as capacidades Linux são descartadas.
+ * Retorna um plano que pode ser embrulhado de novo em tmux (a ordem é tmux(bwrap(cmd))).
+ */
+export function bwrapPlan(plan: TerminalPlan, iso: NodeIsolationProfile, ctx: IsolationContext): TerminalPlan {
+  const a: string[] = ["--die-with-parent", "--unshare-user", "--unshare-ipc", "--unshare-pid", "--unshare-uts", "--unshare-cgroup-try", "--cap-drop", "ALL"];
+  if (iso.network === "none") a.push("--unshare-net");
+  for (const [target, path] of ctx.systemLinks) a.push("--symlink", target, path);
+  for (const d of ctx.systemDirs) a.push("--ro-bind", d, d);
+  if (iso.network === "host" && ctx.resolvConf) a.push("--ro-bind", ctx.resolvConf, ctx.resolvDest ?? "/etc/resolv.conf");
+  a.push("--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--dir", ctx.home);
+  const { ro, rw } = isolationMounts(ctx);
+  for (const p of ro) a.push("--ro-bind", p, p);
+  for (const p of rw) a.push("--bind", p, p);
+  for (const p of ctx.protect ?? []) a.push("--ro-bind", p, p);
+  a.push("--clearenv");
+  for (const [k, v] of Object.entries({ ...ctx.env, HOME: ctx.home })) a.push("--setenv", k, v);
+  a.push("--chdir", ctx.cwd, "--", plan.command, ...plan.args);
+  const outerEnv: Record<string, string> = { PATH: ctx.env["PATH"] ?? "/usr/bin:/bin", HOME: ctx.home, TERM: plan.env["TERM"] ?? "xterm-256color", ...(ctx.outerEnv ?? {}) };
+  if (iso.memoryMaxMb || iso.tasksMax) {
+    if (!ctx.cgroupScope) return { ...plan, command: "bwrap", args: a, env: outerEnv };
+    const lim = [...(iso.memoryMaxMb ? ["-p", `MemoryMax=${iso.memoryMaxMb}M`, "-p", "MemorySwapMax=0"] : []), ...(iso.tasksMax ? ["-p", `TasksMax=${iso.tasksMax}`] : [])];
+    return { ...plan, command: "systemd-run", args: ["--user", "--scope", "--quiet", ...lim, "--", "bwrap", ...a], env: { ...outerEnv, ...(ctx.outerEnv ?? {}) } };
+  }
+  return { ...plan, command: "bwrap", args: a, env: outerEnv };
+}
+/** Perfil efetivo = o do nó + caminhos globais; normaliza `~` e remove duplicatas. */
+export function expandHome(p: string, home: string): string { return p === "~" ? home : p.startsWith("~/") ? home + p.slice(1) : p; }
+/** Ambiente mínimo de um terminal isolado: nada herdado do runtime além do estritamente seguro (sem chaves/tokens do shell do usuário). */
+export const ISOLATED_ENV_ALLOW = ["PATH", "LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "TZ", "TERM", "COLORTERM", "TERMINFO", "TERMINFO_DIRS"] as const;
+export function scrubEnv(base: Record<string, string>, inject: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const k of ISOLATED_ENV_ALLOW) if (base[k] !== undefined) out[k] = base[k]!;
+  return { ...out, ...inject, TERM: "xterm-256color" };
+}
+
+/**
+ * Valida/normaliza um perfil de isolamento vindo do usuário: caminhos absolutos (ou ~), sem `..`, e NUNCA a raiz, o $HOME inteiro
+ * nem um ancestral do $HOME (isso reexporia tudo o que o modo isolado existe para esconder).
+ */
+export function validateIsolation(iso: NodeIsolationProfile, home: string): Result<NodeIsolationProfile> {
+  const norm = (list: string[] | undefined, what: string): Result<string[]> => {
+    const out: string[] = [];
+    for (const raw of list ?? []) {
+      const p = expandHome(raw.trim(), home).replace(/\/+$/, "") || "/";
+      if (!p.startsWith("/")) return fail("INVALID", `${what}: "${raw}" precisa ser caminho absoluto (ou começar com ~/)`);
+      if (p.split("/").includes("..")) return fail("INVALID", `${what}: "${raw}" não pode conter ".."`);
+      if (p === "/" || p === home || home.startsWith(p + "/")) return fail("INVALID", `${what}: "${raw}" exporia o sistema ou o home inteiro — escolha uma subpasta específica`);
+      if (!out.includes(p)) out.push(p);
+    }
+    return succeed(out);
+  };
+  const ro = norm(iso.ro, "somente leitura"); if (!ro.ok) return ro;
+  const rw = norm(iso.rw, "gravável"); if (!rw.ok) return rw;
+  return succeed({ network: iso.network, ...(ro.value.length ? { ro: ro.value } : {}), ...(rw.value.length ? { rw: rw.value } : {}), ...(iso.memoryMaxMb ? { memoryMaxMb: iso.memoryMaxMb } : {}), ...(iso.tasksMax ? { tasksMax: iso.tasksMax } : {}) });
+}
+/** Capacidades de um agente ISOLADO por padrão: nada que execute código fora do sandbox (sem hooks/rotinas, sem terminais, sem Maestro). */
+export const ISOLATED_DEFAULT_CAPS = ["files:read", "files:write", "chat:post", "nodes:read", "messages:send"] as const;
+/** O que o usuário pode conceder a um agente isolado por pedido de aprovação — nunca o que viabiliza execução fora do sandbox. */
+export const ISOLATED_APPROVABLE_CAPS = ["nodes:write", "messages:send", "nodes:read", "chat:post", "files:read", "files:write"] as const;
 

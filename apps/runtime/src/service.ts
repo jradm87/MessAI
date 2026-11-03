@@ -4,7 +4,9 @@ import type { ChatAttachment, ExportAttachment, InstructionsStatus, InstructionF
 import type { Band, CreateBand, PatchBand, AskBand, BandAnswer, BandAskResult, MaestroRecruit } from "@messai/contracts";
 import type { FloorHookSection, FloorHooksConfig, PutFloorHooks, FloorHookStatus, FloorHooksState, RunFloorHookInput, StopFloorHookInput, FloorCopyInfo, PutFloorExcludes, ConnectedPeer, CrossNodeCandidate, GitHostEntry, PutGitHostsInput, FloorPrState, CreateFloorPrInput, PatchFloorPrInput, FloorPrReviewStatus, FloorPrChecksStatus, EnvVarEntry, PutEnvVarsInput, EnvironmentsState, WorkspaceBundle, WorkspaceBundlePreview, ImportWorkspaceInput, DuplicateWorkspaceInput, BundleNode, BundleConnection, BundleGroup, BundleBand, BundleDrawing, NotificationItem, NotificationKind, SendNotifyInput, Routine, CreateRoutineInput, PatchRoutineInput, RoutineRunResult } from "@messai/contracts";
 import { WORKSPACE_BUNDLE_FORMAT } from "@messai/contracts";
-import type { AgentCapability, IssueAgentTokenInput, AgentTokenInfo } from "@messai/contracts";
+import type { AgentCapability, IssueAgentTokenInput, AgentTokenInfo, Approval, CreateApproval, NodeIsolation } from "@messai/contracts";
+import { ISOLATED_APPROVABLE_CAPS, ISOLATED_DEFAULT_CAPS, validateIsolation } from "@messai/domain";
+import { buildIsolatedPlan, probeIsolation } from "./isolation.js";
 import { readProcTree } from "./procs.js";
 import type { SessionProcs, KillProcInput } from "@messai/contracts";
 import { listProviders } from "./providers.js";
@@ -32,7 +34,7 @@ import { watch, type FSWatcher } from "chokidar";
 const MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", svg: "image/svg+xml", pdf: "application/pdf", md: "text/markdown", markdown: "text/markdown", txt: "text/plain", json: "application/json", csv: "text/csv", html: "text/html", log: "text/plain", ts: "text/plain", js: "text/plain", py: "text/plain", sh: "text/plain", yml: "text/plain", yaml: "text/plain" };
 export const mimeOf = (name: string): string => MIME[extname(name).slice(1).toLowerCase()] ?? "application/octet-stream";
 
-export type ServiceEvents = { workspace: [snapshot: WorkspaceSnapshot]; message: [message: Message]; sidebar: [sidebar: Sidebar]; chat: [message: ChatMessage]; taskSummary: [summary: TaskSummary]; floorHook: [workspaceId: string, status: FloorHookStatus]; notification: [notification: NotificationItem] };
+export type ServiceEvents = { workspace: [snapshot: WorkspaceSnapshot]; message: [message: Message]; sidebar: [sidebar: Sidebar]; chat: [message: ChatMessage]; taskSummary: [summary: TaskSummary]; floorHook: [workspaceId: string, status: FloorHookStatus]; notification: [notification: NotificationItem]; approval: [approval: Approval] };
 
 export type AgentUsageLimit = { label: string; pct: number; resets: string };
 export type AgentUsageItem = { id: string; label: string; available: boolean; note?: string; plan?: string; limits?: AgentUsageLimit[]; metrics: { label: string; value: string }[]; models: { name: string; input: number; output: number }[] };
@@ -149,6 +151,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
   agentCapsFor(node: Node): AgentCapability[] {
     const custom = this.readNodeCaps()[node.nodeId];
     if (custom) return [...custom];
+    if (node.isolation) return [...ISOLATED_DEFAULT_CAPS]; // #93 isolado: nada que execute código fora do sandbox
     return ["files:read", "files:write", "chat:post", "nodes:read", "nodes:write", "messages:send", "workspace:manage", "terminal:control", ...(node.maestro ? ["maestro:conduct" as const] : [])];
   }
   /** Emite (rotaciona) a credencial do agente de um terminal; as anteriores do nó são revogadas. */
@@ -584,6 +587,53 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     return succeed(undefined);
   }
   /** Reatribui as habilidades de um terminal; se estiver rodando, reinicia só o processo (como o papel). */
+  // ---- #93 aprovação humana: o agente PEDE uma capacidade; só o usuário (app) concede ----
+  requestApproval(nodeId: string, input: CreateApproval): Result<Approval> {
+    const node = this.store.getNode(nodeId);
+    if (!node || node.kind !== "terminal") return fail("NOT_FOUND", "terminal não encontrado");
+    const cap = input.capability;
+    if (this.agentCapsFor(node).includes(cap)) return fail("CONFLICT", `este terminal já possui a capacidade "${cap}"`);
+    if (node.isolation && !(ISOLATED_APPROVABLE_CAPS as readonly string[]).includes(cap)) {
+      return fail("FORBIDDEN", `"${cap}" não pode ser concedida a um terminal isolado (permitiria executar código fora do sandbox). Peça ao usuário para desligar o isolamento desse terminal.`);
+    }
+    const pending = this.store.pendingApprovalFor(nodeId, cap); if (pending) return succeed(pending);
+    const id = newId();
+    this.store.insertApproval({ approvalId: id, nodeId, workspaceId: node.workspaceId, capability: cap, reason: (input.reason ?? "").trim(), createdAt: nowIso() });
+    const a = this.store.getApproval(id)!;
+    this.emit("approval", a);
+    return succeed(a);
+  }
+  listApprovals(status?: string): Approval[] { return this.store.listApprovals(status); }
+  getApproval(id: string): Result<Approval> { const a = this.store.getApproval(id); return a ? succeed(a) : fail("NOT_FOUND", "pedido não encontrado"); }
+  /** Aprovar concede a capacidade ao terminal (vale também para a credencial JÁ em uso, sem reiniciar); negar só registra. */
+  decideApproval(id: string, approve: boolean): Result<Approval> {
+    const a = this.store.getApproval(id);
+    if (!a) return fail("NOT_FOUND", "pedido não encontrado");
+    if (a.status !== "pending") return fail("CONFLICT", `pedido já ${a.status === "approved" ? "aprovado" : "negado"}`);
+    if (approve) {
+      const node = this.store.getNode(a.nodeId);
+      if (!node) return fail("NOT_FOUND", "terminal não existe mais");
+      const caps = [...new Set([...this.agentCapsFor(node), a.capability])];
+      this.writeNodeCaps(a.nodeId, caps);
+      for (const v of this.agentTokens.values()) if (v.nodeId === a.nodeId) v.capabilities = caps;
+      this.saveAgentTokens();
+    }
+    this.store.decideApproval(id, approve ? "approved" : "denied", nowIso());
+    const out = this.store.getApproval(id)!;
+    this.emit("approval", out);
+    return succeed(out);
+  }
+
+  /** Reinicia só o processo do terminal (mesma sessão/nó), relendo o plano — usado quando algo que muda o ambiente muda. */
+  private respawnTerminal(nodeId: string): void {
+    const node = this.store.getNode(nodeId); if (!node) return;
+    const s = node.sessionId ? this.store.getSession(node.sessionId) : undefined;
+    if (!s || s.state !== "running") return;
+    const w = this.store.getWorkspace(node.workspaceId)!;
+    this.sessions.dispose(s.sessionId);
+    this.store.updateSession(s.sessionId, { state: "starting", exitCode: null, pid: null });
+    this.sessions.start({ ...s, state: "starting" }, this.plan(w, node, s));
+  }
   setNodeSkills(nodeId: string, skillIds: string[]): Result<Node> {
     const node = this.store.getNode(nodeId);
     if (!node || node.kind !== "terminal") return fail("NOT_FOUND", "nó terminal não encontrado");
@@ -616,6 +666,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     for (const a of this.sessions.awaitingList()) { const s = this.store.getSession(a.sessionId); const n = s && this.store.getNode(s.nodeId); if (n) out.push({ kind: "finished", nodeId: n.nodeId, workspaceId: n.workspaceId, workspaceName: wsName(n.workspaceId), title: n.title, at: a.at }); }
     for (const u of this.store.unreadAll()) { const n = this.store.getNode(u.nodeId); if (n) out.push({ kind: "unread", nodeId: n.nodeId, workspaceId: n.workspaceId, workspaceName: wsName(n.workspaceId), title: n.title, count: u.count }); }
     for (const s of this.store.listSessions()) { if (s.state !== "exited" && s.state !== "lost") continue; const n = this.store.getNode(s.nodeId); if (n && n.sessionId === s.sessionId) out.push({ kind: s.state, nodeId: n.nodeId, workspaceId: n.workspaceId, workspaceName: wsName(n.workspaceId), title: n.title }); }
+    for (const ap of this.store.listApprovals("pending")) { const n = this.store.getNode(ap.nodeId); if (n) out.push({ kind: "approval", nodeId: n.nodeId, workspaceId: n.workspaceId, workspaceName: wsName(n.workspaceId), title: n.title, at: ap.createdAt }); } // #93
     return out;
   }
   markSeen(nodeId: string): Result<{ cleared: boolean }> {
@@ -1691,6 +1742,11 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       ...(input.kind === "terminal" && input.skillIds?.length ? { skillIds: input.skillIds } : {}),
       ...(input.kind === "terminal" && input.maestro ? { maestro: true } : {}), // #29
     };
+    if (input.kind === "terminal" && input.isolation) { // #93
+      if (!probeIsolation().available) return fail("UNSUPPORTED", probeIsolation().reason ?? "modo isolado indisponível nesta máquina");
+      const v = validateIsolation(input.isolation, homedir()); if (!v.ok) return v;
+      node.isolation = v.value as NodeIsolation;
+    }
     for (const id of node.skillIds ?? []) if (!this.store.getSkill(id)) return fail("NOT_FOUND", `habilidade não encontrada: ${id}`);
     if (node.roleId && !this.store.getRole(node.roleId)) return fail("NOT_FOUND", "papel não encontrado");
     let titleAuto = true;
@@ -1749,6 +1805,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       if (sess) { input.command = sess.command; input.args = sess.args; input.cwd = sess.cwd; if (sess.persistent) input.persistent = true; }
       if (node.roleId) input.roleId = node.roleId;
       if (node.maestro) input.maestro = true;
+      if (node.isolation) input.isolation = node.isolation; // #93 a cópia nasce no mesmo modo
     } else {
       // nota/texto/árvore: copia o conteúdo. Nota ligada a arquivo vira nota do app com o mesmo conteúdo (não liga dois nós ao mesmo .md).
       input.content = node.content ?? "";
@@ -1796,7 +1853,13 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       // Empacotado: o launcher `mess` roda o CLI com o Node do Electron (sem Node do sistema).
       ...(process.env["MESS_RESOURCES"] ? { MESS_ELECTRON: process.execPath } : {}),
     };
-    const plan = planLocalTerminal({ command: s.command, args: applySkills(s.command, applyRole(s.command, s.args, role), skills), cwd: s.cwd, defaultShell: this.cfg.defaultShell, baseEnv, inject });
+    let plan = planLocalTerminal({ command: s.command, args: applySkills(s.command, applyRole(s.command, s.args, role), skills), cwd: s.cwd, defaultShell: this.cfg.defaultShell, baseEnv, inject });
+    // #93 modo isolado: bubblewrap por fora (e tmux, se persistente, por fora dele). Falha FECHADA se o isolamento não for possível.
+    if (node.kind === "terminal" && node.isolation) {
+      const st = this.settings();
+      plan = buildIsolatedPlan({ plan, iso: node.isolation, home: homedir(), baseEnv, inject, workspaceCwd: w.cwd, groundCwd: ground?.cwd, socketPath: this.cfg.socketPath,
+        cliRoot: process.env["MESS_RESOURCES"] ?? join(CLI_DIR, "../../.."), globalRo: st.isolationRo ?? [], globalRw: st.isolationRw ?? [] });
+    }
     return s.persistent ? wrapInTmux(plan, tmuxSessionName(s.sessionId), { ...inject, PATH: baseEnv["PATH"]! }, this.cfg.tmuxSocket) : plan;
   }
 
@@ -1887,6 +1950,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
         ...(n.termTheme ? { termTheme: n.termTheme } : {}),
         ...(n.maestro ? { maestro: true } : {}),
         ...(n.memLimitMb ? { memLimitMb: n.memLimitMb } : {}),
+        ...(n.isolation ? { isolation: n.isolation } : {}),
         ...(role ? { roleName: role.name } : {}),
         ...(skillNames.length ? { skillNames } : {}),
         ...(groupKey ? { groupKey } : {}),
@@ -2058,6 +2122,8 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
         ...(role ? { roleId: role.roleId } : {}),
         ...(skillIds.length ? { skillIds } : {}),
         ...(n.maestro ? { maestro: true } : {}),
+        // #93 bundle de terceiros: mantém o modo isolado (rede/limites) mas NÃO herda caminhos ro/rw do arquivo
+        ...(n.kind === "terminal" && n.isolation ? { isolation: { network: n.isolation.network, ...(n.isolation.memoryMaxMb ? { memoryMaxMb: n.isolation.memoryMaxMb } : {}), ...(n.isolation.tasksMax ? { tasksMax: n.isolation.tasksMax } : {}) } } : {}),
         ...(n.kind === "terminal" && n.command ? { command: n.command, args: n.args ?? [] } : {}),
         ...(n.kind === "terminal" ? { cwd: nodeCwd } : {}),
         ...(n.persistent ? { persistent: true } : {}),
@@ -2148,6 +2214,13 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
   }
   resetPresets(): PresetInput[] { const d = defaultPresets(this.cfg.defaultShell); this.store.setMeta(PRESETS_META_KEY, JSON.stringify(d)); return d; }
 
+  private readPathList(key: string): string[] { try { const j = JSON.parse(this.store.getMeta(key) ?? "[]") as unknown; return Array.isArray(j) ? j.filter((x): x is string => typeof x === "string") : []; } catch { return []; } }
+  /** #93 o nó existe e roda isolado? / qual o tipo do nó? (guardas do servidor para chamadores isolados) */
+  isNodeIsolated(nodeId: string): boolean { return !!this.store.getNode(nodeId)?.isolation; }
+  nodeKindOf(nodeId: string): string | undefined { return this.store.getNode(nodeId)?.kind; }
+  /** #93 o modo isolado funciona nesta máquina? (bwrap utilizável; cgroup só para os limites duros) */
+  isolationSupport(): { available: boolean; reason?: string; cgroup: boolean } { return probeIsolation(); }
+
   // #55 — configurações do runtime, persistidas na tabela meta (chave `settings.<nome>`).
   settings(): RuntimeSettings {
     const lim = Number(this.store.getMeta("settings.termMemLimitMb") ?? 0) || 0;
@@ -2160,6 +2233,8 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       ...(act === "kill" || act === "warn" ? { termMemAction: act } : {}),
       ...(autoUnload > 0 ? { autoUnloadMinutes: autoUnload } : {}),
       reloadOnSelect: reloadOnSel !== "0",
+      ...(this.readPathList("settings.isolationRo").length ? { isolationRo: this.readPathList("settings.isolationRo") } : {}),
+      ...(this.readPathList("settings.isolationRw").length ? { isolationRw: this.readPathList("settings.isolationRw") } : {}),
     };
   }
   patchSettings(p: PatchRuntimeSettings): Result<RuntimeSettings> {
@@ -2168,6 +2243,11 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     if (p.termMemAction !== undefined) this.store.setMeta("settings.termMemAction", p.termMemAction === "kill" ? "kill" : "warn");
     if (p.autoUnloadMinutes !== undefined) this.store.setMeta("settings.autoUnloadMinutes", String(Math.max(0, Math.round(p.autoUnloadMinutes))));
     if (p.reloadOnSelect !== undefined) this.store.setMeta("settings.reloadOnSelect", p.reloadOnSelect ? "1" : "0");
+    for (const [k, list] of [["settings.isolationRo", p.isolationRo], ["settings.isolationRw", p.isolationRw]] as const) {
+      if (list === undefined) continue;
+      const v = validateIsolation({ network: "none", ro: list }, homedir()); if (!v.ok) return v; // mesmas regras: nunca a raiz/home
+      this.store.setMeta(k, JSON.stringify(v.value.ro ?? []));
+    }
     return succeed(this.settings());
   }
 
@@ -2359,6 +2439,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       return { key: keyOf.get(n.nodeId)!, kind: n.kind, title: n.title, geometry: { ...n.geometry, x: n.geometry.x - minX, y: n.geometry.y - minY },
         ...(n.kind !== "terminal" && n.content !== undefined ? { content: n.content } : {}), ...(n.color ? { color: n.color } : {}), ...(n.icon ? { icon: n.icon } : {}), ...(n.termTheme ? { termTheme: n.termTheme } : {}),
         ...(role ? { roleName: role.name } : {}), ...(skillNames.length ? { skillNames } : {}),
+        ...(n.isolation ? { isolation: n.isolation } : {}),
         ...(ses ? { command: ses.command, args: ses.args, cwd: ses.cwd, ...(ses.persistent ? { persistent: true } : {}) } : {}) };
     });
     const connections = connectionsWithin(this.store.listConnections(workspaceId), ids).map((c) => ({ from: keyOf.get(c.sourceNodeId)!, to: keyOf.get(c.targetNodeId)!, ...(c.style && c.style !== "rope" ? { style: c.style } : {}) }));
@@ -2390,7 +2471,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       const r = this.createNode(workspaceId, { expectedRevision: cur(), kind: n.kind, title: n.title, geometry: geos.get(n.key)!,
         ...(n.content !== undefined ? { content: n.content } : {}), ...(n.color ? { color: n.color } : {}), ...(n.icon ? { icon: n.icon } : {}), ...(n.termTheme ? { termTheme: n.termTheme as never } : {}),
         ...(role ? { roleId: role.roleId } : {}), ...(skillIds.length ? { skillIds } : {}),
-        ...(n.kind === "terminal" && n.command ? { command: n.command, args: n.args ?? [] } : {}), ...(cwd ? { cwd } : {}), ...(n.persistent ? { persistent: true } : {}) });
+        ...(n.kind === "terminal" && n.command ? { command: n.command, args: n.args ?? [] } : {}), ...(cwd ? { cwd } : {}), ...(n.persistent ? { persistent: true } : {}), ...(n.kind === "terminal" && n.isolation ? { isolation: n.isolation } : {}) });
       if (!r.ok) { warnings.push(`não criou "${n.title}": ${r.error.message}`); continue; }
       made.set(n.key, r.value.node.nodeId); nodeIds.push(r.value.node.nodeId);
     }
@@ -2691,6 +2772,16 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     if (!rev.ok) return rev;
     if (node.kind === "note" && byAgent && node.locked && (input.content !== undefined || input.title !== undefined || input.filePath !== undefined)) return fail("FORBIDDEN", "nota bloqueada: agentes só podem ler");
     if (typeof input.groupId === "string") { const g = this.store.getGroup(input.groupId); if (!g || g.workspaceId !== node.workspaceId) return fail("NOT_FOUND", "grupo não encontrado neste espaço"); } // #78
+    // #93 um agente NUNCA mexe no próprio isolamento, no Maestro (ganharia capacidades) nem no limite de memória: só o app.
+    if (byAgent && (input.isolation !== undefined || input.maestro !== undefined || input.memLimitMb !== undefined)) return fail("FORBIDDEN", "isolamento, Maestro e limite de memória só podem ser alterados pelo app");
+    let newIso: NodeIsolation | null | undefined;
+    if (input.isolation !== undefined && node.kind === "terminal") {
+      if (input.isolation === null) newIso = null;
+      else {
+        if (!probeIsolation().available) return fail("UNSUPPORTED", probeIsolation().reason ?? "modo isolado indisponível nesta máquina");
+        const v = validateIsolation(input.isolation, homedir()); if (!v.ok) return v; newIso = v.value as NodeIsolation;
+      }
+    }
     let title = input.title; let titleAuto: boolean | undefined;
     let filePath: string | undefined;
     if (node.kind === "note") {
@@ -2705,12 +2796,13 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       }
     }
     this.store.transaction(() => {
-      this.store.updateNode(nodeId, { title, geometry: input.geometry ? normalizeGeometry(input.geometry) : undefined, content: input.content, locked: input.locked, color: input.color, filePath, titleAuto, icon: input.icon, termTheme: input.termTheme === "system" ? null : input.termTheme, groupId: input.groupId, maestro: node.kind === "terminal" ? input.maestro : undefined, memLimitMb: node.kind === "terminal" && input.memLimitMb !== undefined ? (input.memLimitMb || null) : undefined });
+      this.store.updateNode(nodeId, { title, geometry: input.geometry ? normalizeGeometry(input.geometry) : undefined, content: input.content, locked: input.locked, color: input.color, filePath, titleAuto, icon: input.icon, termTheme: input.termTheme === "system" ? null : input.termTheme, groupId: input.groupId, maestro: node.kind === "terminal" ? input.maestro : undefined, memLimitMb: node.kind === "terminal" && input.memLimitMb !== undefined ? (input.memLimitMb || null) : undefined, isolation: newIso });
       if (input.groupId !== undefined) this.store.pruneEmptyGroups(node.workspaceId); // #78 sair de um grupo pode esvaziá-lo
       this.store.bumpRevision(node.workspaceId, rev.value);
     });
     if (node.kind === "note" && input.content !== undefined) this.writeNoteFile(this.store.getNode(nodeId)!, input.content);
     else if (filePath) { try { this.noteMtime.set(nodeId, statSync(filePath).mtimeMs); } catch { /* ignorar */ } }
+    if (newIso !== undefined) { this.writeNodeCaps(nodeId, null); this.respawnTerminal(nodeId); } // #93 trocar o modo zera concessões e reinicia SÓ o processo
     if (input.skillIds !== undefined) { const r = this.setNodeSkills(nodeId, input.skillIds); if (!r.ok) return r; } // já publica (e reinicia o processo se rodando)
     if (input.roleId !== undefined && (node.roleId ?? null) !== input.roleId) {
       const r = this.setNodeRole(nodeId, input.roleId); // já publica

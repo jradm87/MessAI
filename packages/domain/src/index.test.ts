@@ -254,3 +254,66 @@ describe("árvore de arquivos", () => {
     expect(looksBinary(new Uint8Array([104, 105]))).toBe(false); expect(looksBinary(new Uint8Array([104, 0, 105]))).toBe(true);
   });
 });
+
+// ---------- #93 modo isolado: bubblewrap ----------
+import { bwrapPlan, expandHome, isolationMounts, scrubEnv, validateIsolation, ISOLATED_APPROVABLE_CAPS, ISOLATED_DEFAULT_CAPS, type IsolationContext } from "./index.js";
+const ictx = (o: Partial<IsolationContext> = {}): IsolationContext => ({ cwd: "/work/proj", home: "/home/agent", systemDirs: ["/usr", "/etc"], systemLinks: [["usr/bin", "/bin"], ["usr/lib", "/lib"]], roPaths: ["/opt/cli"], rwPaths: ["/home/u/.claude"], env: { PATH: "/usr/bin", MESS_TOKEN: "agt_x" }, ...o });
+const base = { command: "claude", args: ["--x"], cwd: "/work/proj", env: { TERM: "xterm-256color" } };
+describe("bwrapPlan (#93)", () => {
+  it("rede none → --unshare-net; host → compartilha (sem a flag) e liga o resolv.conf real; sempre namespaces + cap-drop + die-with-parent", () => {
+    const none = bwrapPlan(base, { network: "none" }, ictx()); expect(none.command).toBe("bwrap");
+    for (const f of ["--die-with-parent", "--unshare-user", "--unshare-ipc", "--unshare-pid", "--unshare-uts", "--unshare-net"]) expect(none.args).toContain(f);
+    expect(none.args.join(" ")).toContain("--cap-drop ALL");
+    const host = bwrapPlan(base, { network: "host" }, ictx({ resolvConf: "/run/systemd/resolve/stub-resolv.conf" }));
+    expect(host.args).not.toContain("--unshare-net"); expect(host.args.join(" ")).toContain("--ro-bind /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf");
+    expect(none.args.join(" ")).not.toContain("resolv.conf");
+    // /etc/resolv.conf é link: o bwrap não monta SOBRE ele, então o arquivo real vai para o alvo do link
+    const lnk = bwrapPlan(base, { network: "host" }, ictx({ resolvConf: "/run/systemd/resolve/resolv.conf", resolvDest: "/run/systemd/resolve/stub-resolv.conf" }));
+    expect(lnk.args.join(" ")).toContain("--ro-bind /run/systemd/resolve/resolv.conf /run/systemd/resolve/stub-resolv.conf"); expect(lnk.args.join(" ")).not.toContain(" /etc/resolv.conf");
+  });
+  it("raiz vazia: só sistema RO + ro/rw explícitos + cwd gravável; /home nunca é montado; HOME vazio; ambiente limpo e só o declarado; comando no fim", () => {
+    const p = bwrapPlan(base, { network: "none" }, ictx());
+    const j = p.args.join(" ");
+    expect(j).toContain("--ro-bind /usr /usr"); expect(j).toContain("--ro-bind /etc /etc"); expect(j).toContain("--symlink usr/bin /bin");
+    expect(j).toContain("--ro-bind /opt/cli /opt/cli"); expect(j).toContain("--bind /work/proj /work/proj"); expect(j).toContain("--bind /home/u/.claude /home/u/.claude");
+    expect(j).not.toMatch(/--(ro-)?bind \/home /); expect(j).not.toMatch(/--ro-bind \/ \//); // nunca a raiz inteira
+    expect(j).toContain("--dir /home/agent"); expect(j).toContain("--tmpfs /tmp"); expect(j).toContain("--clearenv");
+    expect(j).toContain("--setenv MESS_TOKEN agt_x"); expect(j).toContain("--setenv HOME /home/agent");
+    expect(p.args.slice(-3)).toEqual(["--", "claude", "--x"]);
+    expect(p.env["HOME"]).toBe("/home/agent"); expect(Object.keys(p.env).sort()).toEqual(["HOME", "PATH", "TERM"]); // o processo externo só tem o mínimo
+  });
+  it("protect: monta SOMENTE LEITURA depois dos gravávEIS (sobrepõe, ex.: .git/hooks)".replace("gravávEIS", "graváveis"), () => {
+    const a = bwrapPlan(base, { network: "none" }, ictx({ protect: ["/work/proj/.git/hooks"] })).args;
+    const iw = a.indexOf("/work/proj", a.indexOf("--bind")); const ip = a.findIndex((x, i) => x === "--ro-bind" && a[i + 1] === "/work/proj/.git/hooks");
+    expect(iw).toBeGreaterThan(-1); expect(ip).toBeGreaterThan(iw); // o ro-bind vem depois do bind gravável
+  });
+  it("limites de cgroup só quando há systemd de usuário; senão rodam sem eles (o chamador avisa)", () => {
+    const lim = { network: "none" as const, memoryMaxMb: 512, tasksMax: 100 };
+    const w = bwrapPlan(base, lim, ictx({ cgroupScope: true, outerEnv: { XDG_RUNTIME_DIR: "/run/user/1000" } }));
+    expect(w.command).toBe("systemd-run"); expect(w.args.slice(0, 3)).toEqual(["--user", "--scope", "--quiet"]);
+    expect(w.args.join(" ")).toContain("-p MemoryMax=512M"); expect(w.args.join(" ")).toContain("-p TasksMax=100"); expect(w.args).toContain("bwrap"); expect(w.env["XDG_RUNTIME_DIR"]).toBe("/run/user/1000");
+    expect(bwrapPlan(base, lim, ictx({ cgroupScope: false })).command).toBe("bwrap");
+  });
+  it("isolationMounts: cwd e rw ganham de ro igual; scrubEnv só deixa passar a lista segura; expandHome", () => {
+    expect(isolationMounts(ictx({ roPaths: ["/work/proj", "/a"], rwPaths: [] }))).toEqual({ ro: ["/a"], rw: ["/work/proj"] });
+    const e = scrubEnv({ PATH: "/usr/bin", LANG: "pt_BR", AWS_SECRET_ACCESS_KEY: "x", SSH_AUTH_SOCK: "/s", GITHUB_TOKEN: "t", TERM: "dumb" }, { MESS_TOKEN: "agt" });
+    expect(e).toEqual({ PATH: "/usr/bin", LANG: "pt_BR", TERM: "xterm-256color", MESS_TOKEN: "agt" });
+    expect(expandHome("~/x", "/home/u")).toBe("/home/u/x"); expect(expandHome("~", "/home/u")).toBe("/home/u"); expect(expandHome("/abs", "/home/u")).toBe("/abs"); expect(expandHome("~u/x", "/home/u")).toBe("~u/x");
+  });
+});
+describe("validateIsolation (#93)", () => {
+  const H = "/home/u";
+  it("normaliza ~, remove barra final e duplicatas; mantém limites", () => {
+    const r = validateIsolation({ network: "host", ro: ["~/tools/", "/opt/x", "~/tools"], rw: ["~/.claude"], memoryMaxMb: 512 }, H);
+    expect(r).toEqual({ ok: true, value: { network: "host", ro: ["/home/u/tools", "/opt/x"], rw: ["/home/u/.claude"], memoryMaxMb: 512 } });
+  });
+  it("recusa relativo, '..', a raiz, o home e ancestrais do home (anula o isolamento)", () => {
+    for (const bad of ["rel/dir", "/a/../b", "/", "/home/u", "~", "/home", "~/"]) { const r = validateIsolation({ network: "none", rw: [bad] }, H); expect(r.ok, bad).toBe(false); }
+    expect(validateIsolation({ network: "none", ro: ["/home/u/sub"] }, H).ok).toBe(true); // subpasta específica pode
+  });
+  it("padrão do isolado não tem nenhuma capacidade que execute fora do sandbox, e nada disso é aprovável por pedido", () => {
+    for (const c of ["workspace:manage", "terminal:control", "maestro:conduct"]) { expect(ISOLATED_DEFAULT_CAPS as readonly string[]).not.toContain(c); expect(ISOLATED_APPROVABLE_CAPS as readonly string[]).not.toContain(c); }
+    expect(ISOLATED_APPROVABLE_CAPS as readonly string[]).toContain("nodes:write");
+  });
+});
+

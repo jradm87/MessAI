@@ -2,7 +2,7 @@ import { Type, type Static } from "@sinclair/typebox";
 
 export const PROTOCOL_VERSION = 1 as const;
 /** Incrementar a cada mudança de snapshot/rotas; o cliente avisa quando o runtime está atrás. */
-export const BUILD_VERSION = 29 as const;
+export const BUILD_VERSION = 30 as const;
 
 // ---------- Identidades ----------
 export const Id = Type.String({ minLength: 8, maxLength: 64 });
@@ -57,6 +57,17 @@ export type Geometry = Static<typeof Geometry>;
 export const NodeKind = Type.Union([Type.Literal("terminal"), Type.Literal("note"), Type.Literal("text"), Type.Literal("tree"), Type.Literal("binder")]); // binder = fichário (#74)
 export type NodeKind = Static<typeof NodeKind>;
 
+// #93 [MESS-09] Modo isolado: worktree separa código, não processos/rede/filesystem. Um terminal "isolado" roda sob bubblewrap:
+// namespaces próprios, raiz vazia (só /usr, /etc… somente leitura), sem $HOME, ambiente limpo, só o cwd do espaço gravável.
+export const NodeIsolation = Type.Object({
+  network: Type.Union([Type.Literal("none"), Type.Literal("host")]), // none = sem rede (netns vazio); host = compartilha a rede
+  ro: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 500 }), { maxItems: 40 })), // caminhos extras SOMENTE LEITURA
+  rw: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 500 }), { maxItems: 40 })), // caminhos extras graváveis (ex.: ~/.claude)
+  memoryMaxMb: Type.Optional(Type.Integer({ minimum: 64, maximum: 1048576 })), // limite DURO de memória (cgroup, quando o systemd de usuário permite)
+  tasksMax: Type.Optional(Type.Integer({ minimum: 8, maximum: 65536 })), // limite de processos/threads (cgroup)
+});
+export type NodeIsolation = Static<typeof NodeIsolation>;
+
 export const Node = Type.Object({
   nodeId: Id,
   workspaceId: Id,
@@ -78,6 +89,7 @@ export const Node = Type.Object({
   groupId: Type.Optional(Id), // #78 grupo de nós
   maestro: Type.Optional(Type.Boolean()), // #29 terminal condutor (recruta/dispensa/reatribui agentes)
   memLimitMb: Type.Optional(Type.Integer({ minimum: 0 })), // #80 limite de memória do terminal (0/ausente = sem limite)
+  isolation: Type.Optional(NodeIsolation), // #93 ausente = modo confiável (padrão)
   createdAt: Type.String(),
 });
 export type Node = Static<typeof Node>;
@@ -439,6 +451,9 @@ export const RuntimeSettings = Type.Object({
   // #84 descarregar espaços ociosos automaticamente (0 = desligado, em minutos) e recarregar ao abrir o espaço
   autoUnloadMinutes: Type.Optional(Type.Integer({ minimum: 0, maximum: 10080 })),
   reloadOnSelect: Type.Optional(Type.Boolean()),
+  // #93 caminhos que TODO terminal isolado enxerga além do cwd (ex.: ~/.claude para o agente logar): somente leitura / gravável
+  isolationRo: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 500 }), { maxItems: 40 })),
+  isolationRw: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 500 }), { maxItems: 40 })),
 });
 export type RuntimeSettings = Static<typeof RuntimeSettings>;
 export const PatchRuntimeSettings = Type.Partial(RuntimeSettings);
@@ -612,6 +627,7 @@ export const CreateNode = Type.Object({
   termTheme: Type.Optional(TermTheme),
   skillIds: Type.Optional(Type.Array(Id, { maxItems: 20 })), // #57
   maestro: Type.Optional(Type.Boolean()), // #29 nasce condutor (preset com Maestro)
+  isolation: Type.Optional(NodeIsolation), // #93 nasce no modo isolado
 });
 export type CreateNode = Static<typeof CreateNode>;
 
@@ -637,6 +653,8 @@ export const PatchNode = Type.Object({
   /** #29 promover/rebaixar condutor · #80 limite de memória em MB (0 remove). */
   maestro: Type.Optional(Type.Boolean()),
   memLimitMb: Type.Optional(Type.Integer({ minimum: 0, maximum: 1048576 })),
+  /** #93 ligar/desligar/ajustar o modo isolado (null volta ao confiável); reinicia só o processo do terminal. */
+  isolation: Type.Optional(Type.Union([NodeIsolation, Type.Null()])),
 });
 export type PatchNode = Static<typeof PatchNode>;
 
@@ -709,6 +727,34 @@ export const SendNotifyInput = Type.Object({
 export type SendNotifyInput = Static<typeof SendNotifyInput>;
 
 // runtime -> cliente
+// #87 capacidades de agente (declarada aqui porque o WS e as aprovações #93 a usam)
+export const AgentCapability = Type.Union([
+  Type.Literal("files:read"),
+  Type.Literal("files:write"),
+  Type.Literal("chat:post"),
+  Type.Literal("nodes:read"),
+  Type.Literal("nodes:write"),
+  Type.Literal("messages:send"),
+  Type.Literal("workspace:manage"),
+  Type.Literal("terminal:control"),
+  Type.Literal("maestro:conduct"),
+]);
+export type AgentCapability = Static<typeof AgentCapability>;
+
+// ---------- #93 aprovação humana: agente isolado PEDE uma capacidade; o usuário aprova ou nega ----------
+export const ApprovalStatus = Type.Union([Type.Literal("pending"), Type.Literal("approved"), Type.Literal("denied")]);
+export type ApprovalStatus = Static<typeof ApprovalStatus>;
+export const Approval = Type.Object({
+  approvalId: Id, nodeId: Id, workspaceId: Id, nodeTitle: Type.String(),
+  capability: AgentCapability, reason: Type.String(), status: ApprovalStatus,
+  createdAt: Type.String(), decidedAt: Type.Optional(Type.String()),
+});
+export type Approval = Static<typeof Approval>;
+export const CreateApproval = Type.Object({ capability: AgentCapability, reason: Type.Optional(Type.String({ maxLength: 500 })) });
+export type CreateApproval = Static<typeof CreateApproval>;
+export const DecideApproval = Type.Object({ approve: Type.Boolean() });
+export type DecideApproval = Static<typeof DecideApproval>;
+
 export const WsServerMessage = Type.Union([
   Type.Object({ type: Type.Literal("hello"), clientId: Id, protocolVersion: Type.Integer() }),
   Type.Object({ type: Type.Literal("snapshot"), sessionId: Id, sequence: Type.Integer(), data: Type.String(), session: Session }),
@@ -720,6 +766,7 @@ export const WsServerMessage = Type.Union([
   Type.Object({ type: Type.Literal("message"), message: Message }),
   Type.Object({ type: Type.Literal("taskFinished"), event: TaskFinished }),
   Type.Object({ type: Type.Literal("taskSummary"), summary: TaskSummary }),
+  Type.Object({ type: Type.Literal("approval"), approval: Approval }), // #93 pedido de aprovação criado/decidido
   Type.Object({ type: Type.Literal("floorHook"), workspaceId: Id, status: FloorHookStatus }),
   Type.Object({ type: Type.Literal("notification"), notification: NotificationItem }),
   Type.Object({ type: Type.Literal("error"), error: ApiError, sessionId: Type.Optional(Id) }),
@@ -749,7 +796,7 @@ export type FindKind = Static<typeof FindKind>;
 export const FindHit = Type.Object({ kind: FindKind, refId: Id, workspaceId: Id, nodeId: Id, nodeTitle: Type.String(), title: Type.String(), snippet: Type.String() });
 export type FindHit = Static<typeof FindHit>;
 // #69 — atenção global: quem espera você, em todos os espaços. GET /v1/attention · POST /v1/nodes/:id/seen
-export const AttentionKind = Type.Union([Type.Literal("finished"), Type.Literal("unread"), Type.Literal("exited"), Type.Literal("lost")]);
+export const AttentionKind = Type.Union([Type.Literal("finished"), Type.Literal("unread"), Type.Literal("exited"), Type.Literal("lost"), Type.Literal("approval")]);
 export type AttentionKind = Static<typeof AttentionKind>;
 export const AttentionItem = Type.Object({ kind: AttentionKind, nodeId: Id, workspaceId: Id, workspaceName: Type.String(), title: Type.String(), at: Type.Optional(Type.String()), count: Type.Optional(Type.Integer()) });
 export type AttentionItem = Static<typeof AttentionItem>;
@@ -811,6 +858,7 @@ export const ScoreNode = Type.Object({
   kind: NodeKind, title: Type.String(), geometry: Geometry, // geometria RELATIVA ao canto superior esquerdo do arranjo
   content: Type.Optional(Type.String()), color: Type.Optional(Type.String()), icon: Type.Optional(Type.String()), termTheme: Type.Optional(Type.String()),
   roleName: Type.Optional(Type.String()), skillNames: Type.Optional(Type.Array(Type.String())), // por NOME: o id é do banco de quem salvou
+  isolation: Type.Optional(NodeIsolation), // #93 a partitura recoloca terminais NO MESMO modo em que foram salvos
   command: Type.Optional(Type.String()), args: Type.Optional(Type.Array(Type.String())), cwd: Type.Optional(Type.String()), persistent: Type.Optional(Type.Boolean()),
 });
 export type ScoreNode = Static<typeof ScoreNode>;
@@ -857,6 +905,7 @@ export const BundleNode = Type.Object({
   termTheme: Type.Optional(Type.String()),
   maestro: Type.Optional(Type.Boolean()),
   memLimitMb: Type.Optional(Type.Integer()),
+  isolation: Type.Optional(NodeIsolation), // #93 (no import, só rede e limites valem: caminhos de um bundle de terceiros não ganham acesso ao disco)
   roleName: Type.Optional(Type.String()),
   skillNames: Type.Optional(Type.Array(Type.String())),
   groupKey: Type.Optional(Type.String()),
@@ -1025,18 +1074,7 @@ export const RoutineRunResult = Type.Object({
 export type RoutineRunResult = Static<typeof RoutineRunResult>;
 
 // ---------- #87 [MESS-02] Credencial por agente + autorização por capacidade ----------
-export const AgentCapability = Type.Union([
-  Type.Literal("files:read"),
-  Type.Literal("files:write"),
-  Type.Literal("chat:post"),
-  Type.Literal("nodes:read"),
-  Type.Literal("nodes:write"),
-  Type.Literal("messages:send"),
-  Type.Literal("workspace:manage"),
-  Type.Literal("terminal:control"),
-  Type.Literal("maestro:conduct"),
-]);
-export type AgentCapability = Static<typeof AgentCapability>;
+
 
 export const IssueAgentTokenInput = Type.Object({
   capabilities: Type.Optional(Type.Array(AgentCapability)),
@@ -1053,10 +1091,6 @@ export const AgentTokenInfo = Type.Object({
   expiresAt: Type.String(),
 });
 export type AgentTokenInfo = Static<typeof AgentTokenInfo>;
-
-
-
-
 
 
 

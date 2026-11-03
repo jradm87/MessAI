@@ -5,7 +5,7 @@ import { Map as MapIcon, Minus, Plus, Activity, Layers, AlignStartVertical, Alig
 import { useAtomValue } from "jotai";
 import { themeAtom } from "./atoms.js";
 import { getThemePref, setThemePref, nextTheme, THEME_LABEL, cssVar } from "./theme.js";
-import { BUILD_VERSION, type Role, type Drawing, type Folder, type Geometry, type Node, type NodeGroup, type Preset, type Sidebar as SidebarData, type Skill, type TermTheme, type Workspace, type WorkspaceSnapshot } from "@messai/contracts";
+import { BUILD_VERSION, type Role, type Drawing, type Folder, type Geometry, type Node, type NodeGroup, type NodeIsolation, type Preset, type Sidebar as SidebarData, type Skill, type TermTheme, type Workspace, type WorkspaceSnapshot } from "@messai/contracts";
 import { gridLayout, alignGeometries, type AlignMode, snapGeometry } from "@messai/domain";
 import { Sidebar } from "./Sidebar.js";
 import { WorkspaceDialog, type WorkspaceInput } from "./WorkspaceDialog.js";
@@ -41,6 +41,7 @@ import { Palette, type PaletteAction } from "./Palette.js";
 import { ScoresDialog } from "./ScoresDialog.js";
 import { BandsDialog } from "./BandsDialog.js";
 import { RoutinesDialog } from "./RoutinesDialog.js";
+import { ApprovalsDialog } from "./ApprovalsDialog.js";
 import { bandsOfNode } from "./bands.js";
 import { BinderNode } from "./BinderNode.js";
 import { binderAddPage, binderRemovePage, emptyBinder, parseBinder, serializeBinder } from "@messai/domain";
@@ -142,6 +143,9 @@ function Canvas({ conn }: { conn: Connection }) {
   const [scoresOpen, setScoresOpen] = useState(false); // #71 partituras
   const [bandsOpen, setBandsOpen] = useState(false); // #70 bandas
   const [routinesOpen, setRoutinesOpen] = useState(false); // #27 rotinas agendadas
+  const [approvalsOpen, setApprovalsOpen] = useState(false); // #93 pedidos de permissão de agentes isolados
+  const [isoSupport, setIsoSupport] = useState<{ available: boolean; reason?: string } | null>(null);
+  useEffect(() => { void api.isolationSupport().then(setIsoSupport).catch(() => {}); }, [api]);
   const keymap = useKeymap(); const keymapRef = useRef<Keymap>(keymap); keymapRef.current = keymap; // #58 atalhos editáveis
   // #67: estado da janela flutuante do companheiro (vive no processo principal; aqui só espelho + preferência).
   const [hud, setHud] = useState(false);
@@ -214,6 +218,7 @@ function Canvas({ conn }: { conn: Connection }) {
     if (!current) { setSnap(null); return; }
     stream.subscribe(current);
     const off = stream.on((m) => {
+      if (m.type === "approval" && m.approval.status === "pending") toast(`${m.approval.nodeTitle} pede permissão: ${m.approval.capability} — Paleta → “Pedidos de permissão”`, "info"); // #93
       if (m.type === "workspace" && m.snapshot.workspace.workspaceId === current) { setSnap(m.snapshot); void api.unread(current).then(setUnread).catch(() => {}); }
       if (m.type === "message" && m.message.workspaceId === current) void api.unread(current).then(setUnread).catch(() => {});
       if (m.type === "taskFinished" && m.event.workspaceId === current) store.set(finishedMapAtom, (p) => ({ ...p, [m.event.nodeId]: m.event.at })); // #65: acende atenção no nó
@@ -438,7 +443,7 @@ function Canvas({ conn }: { conn: Connection }) {
         data: n.kind === "terminal" ? { title: n.title, sessionId: n.sessionId!, api, stream, onDelete: del, onRename: rename,
             ...(n.icon ? { icon: n.icon } : {}), ...(n.color ? { color: n.color } : {}), ...(n.termTheme ? { termTheme: n.termTheme } : {}), // #56 aparência do nó
             ...(n.groupId ? { groupId: n.groupId } : {}), // #78
-            bands: bandsOfNode(snap.bands, n.nodeId), onOpenBands: () => setBandsOpen(true), ...(n.maestro ? { maestro: true } : {}), onMaestro: (on: boolean) => patchRec(n, { maestro: on }, on ? "ligar Modo Maestro" : "desligar Modo Maestro"), ...(n.memLimitMb ? { memLimitMb: n.memLimitMb } : {}), onMemLimit: (memLimitMb: number) => patchRec(n, { memLimitMb }, "limite de memória do terminal"), // #70 #29 #80
+            bands: bandsOfNode(snap.bands, n.nodeId), onOpenBands: () => setBandsOpen(true), ...(n.maestro ? { maestro: true } : {}), onMaestro: (on: boolean) => patchRec(n, { maestro: on }, on ? "ligar Modo Maestro" : "desligar Modo Maestro"), ...(n.isolation ? { isolation: n.isolation } : {}), ...(isoSupport ? { isoAvailable: isoSupport.available } : {}), onIsolation: (isolation: NodeIsolation | null) => patchRec(n, { isolation }, isolation ? "ligar modo isolado" : "desligar modo isolado"), ...(n.memLimitMb ? { memLimitMb: n.memLimitMb } : {}), onMemLimit: (memLimitMb: number) => patchRec(n, { memLimitMb }, "limite de memória do terminal"), // #70 #29 #80
             onAppearance: (p: { icon?: string | null; color?: string | null; termTheme?: TermTheme | null }) => patchRec(n, p, "aparência do terminal"), editSignal: renameSig.id === n.nodeId ? renameSig.n : 0, ...extras,
             composerOpen: composerFor === n.nodeId, onComposerClose: () => setComposerFor(null), workspaceId: snap.workspace.workspaceId,
             chatOpen: chatFor === n.nodeId, onChatClose: () => setChatFor(null),
@@ -505,6 +510,7 @@ function Canvas({ conn }: { conn: Connection }) {
     { id: "theme", label: "Alternar tema", keywords: "claro escuro sistema" },
     { id: "minimap", label: "Alternar minimapa", detail: "Ctrl+Shift+M" },
     { id: "hud", label: "Janela flutuante do companheiro", keywords: "hud resumo" },
+    { id: "approvals", label: "Pedidos de permissão dos agentes isolados…", keywords: "aprovar isolado sandbox permissão capacidade" },
     { id: "attention.next", label: "Ir ao próximo terminal esperando você", detail: "Ctrl+Shift+A", keywords: "atenção" },
   ];
   const onPalettePick = (it: PaletteItem) => {
@@ -523,6 +529,7 @@ function Canvas({ conn }: { conn: Connection }) {
       case "scores": setScoresOpen(true); return;
       case "bands": if (current) setBandsOpen(true); return;
       case "routines": if (current) setRoutinesOpen(true); return;
+      case "approvals": setApprovalsOpen(true); return;
       case "instructions": setPref("agentsSub", "instructions"); setPref("prefsTab", "agents"); setPrefsOpen(true); return;
       case "theme": setThemePref(nextTheme(getThemePref())); return;
       case "minimap": setMinimap((v) => !v); return;
@@ -669,7 +676,7 @@ function Canvas({ conn }: { conn: Connection }) {
     const icon = i.icon ?? preset?.icon ?? ""; const color = i.color ?? preset?.color ?? ""; const termTheme = i.termTheme ?? preset?.theme ?? "system";
     const look = { ...(icon ? { icon } : {}), ...(color ? { color } : {}), ...(termTheme !== "system" ? { termTheme } : {}) };
     const target = i.target ?? preset?.target ?? "terminal";
-    void mutate(async (r) => { const input = { expectedRevision: r, kind: "terminal", geometry, title: i.title, ...look, ...(usePreset ? { command: preset.command, args: preset.args } : cmdParts ? { command: cmdParts[0]!, args: cmdParts.slice(1) } : {}), ...(i.cwd ? { cwd: i.cwd } : {}), ...(i.roleId ? { roleId: i.roleId } : {}), ...(i.persistent ? { persistent: true } : {}), ...(usePreset && preset.maestro ? { maestro: true } : {}) }; const made = await api.createNode(current, input); const { expectedRevision: _er, ...sp } = input; rec({ label: "criar terminal", forward: [{ type: "createNode", ref: made.node.nodeId, spec: sp as NodeSpec }], inverse: [{ type: "deleteNode", id: made.node.nodeId }] }); ensureVisible(geometry); if (target === "chat") setTimeout(() => openChat(made.node.nodeId), 300); });
+    void mutate(async (r) => { const input = { expectedRevision: r, kind: "terminal", geometry, title: i.title, ...look, ...(usePreset ? { command: preset.command, args: preset.args } : cmdParts ? { command: cmdParts[0]!, args: cmdParts.slice(1) } : {}), ...(i.cwd ? { cwd: i.cwd } : {}), ...(i.roleId ? { roleId: i.roleId } : {}), ...(i.persistent ? { persistent: true } : {}), ...(i.isolation ? { isolation: i.isolation } : {}), ...(usePreset && preset.maestro ? { maestro: true } : {}) }; const made = await api.createNode(current, input); const { expectedRevision: _er, ...sp } = input; rec({ label: "criar terminal", forward: [{ type: "createNode", ref: made.node.nodeId, spec: sp as NodeSpec }], inverse: [{ type: "deleteNode", id: made.node.nodeId }] }); ensureVisible(geometry); if (target === "chat") setTimeout(() => openChat(made.node.nodeId), 300); });
     setTool("select");
   };
   const createSimple = (kind: "note" | "text" | "tree" | "binder", geometry: Geometry) => {
@@ -856,7 +863,7 @@ function Canvas({ conn }: { conn: Connection }) {
   const sessMap = useAtomValue(sessStateMapAtom); const finMap = useAtomValue(finishedMapAtom); const unrMap = useAtomValue(unreadMapAtom);
   const barAgents = agentPresence((snap?.nodes ?? []).filter((n) => n.kind === "terminal").map((n) => ({ id: n.nodeId, kind: agentKind(n.title) })), sessMap, (id) => !!finMap[id] || (unrMap[id] ?? 0) > 0);
   const [attnItems, setAttnItems] = useState<import("@messai/contracts").AttentionItem[]>([]);
-  useEffect(() => { let alive = true; const load = () => api.attentionList().then((a) => { if (alive) setAttnItems(a); }).catch(() => {}); void load(); const t = setInterval(load, 5000); const off = stream.on((m) => { if (m.type === "taskFinished" || m.type === "message" || m.type === "session") void load(); }); return () => { alive = false; clearInterval(t); off(); }; }, [api, stream]);
+  useEffect(() => { let alive = true; const load = () => api.attentionList().then((a) => { if (alive) setAttnItems(a); }).catch(() => {}); void load(); const t = setInterval(load, 5000); const off = stream.on((m) => { if (m.type === "taskFinished" || m.type === "message" || m.type === "session" || m.type === "approval") void load(); }); return () => { alive = false; clearInterval(t); off(); }; }, [api, stream]);
   const wsSignals = attentionByWorkspace(attnItems, Object.fromEntries(side.workspaces.filter((w) => w.parentId).map((w) => [w.workspaceId, w.parentId])));
   const curWs = side.workspaces.find((w) => w.workspaceId === current);
   const grd = groundOf(current);
@@ -936,12 +943,13 @@ function Canvas({ conn }: { conn: Connection }) {
         {wsDialog && <WorkspaceDialog api={api} {...(wsDialog.edit ? { edit: wsDialog.edit } : {})} {...(wsDialog.folderId ? { defaultFolderId: wsDialog.folderId } : {})} defaultCwd={homeDir} folders={side.folders} onSubmit={(i) => void submitWs(i)} onClose={() => setWsDialog(null)} />}
         {transferDialog && <WorkspaceTransferDialog api={api} mode={transferDialog.mode} {...(transferDialog.workspace ? { workspace: transferDialog.workspace } : {})} onImported={(w) => { void refreshList(); setCurrent(w.workspaceId); toast(`Espaço "${w.name}" importado!`, "ok"); }} onClose={() => setTransferDialog(null)} />}
         {menu && <AddMenu presets={presets.filter((p) => p.enabled)}x={menu.x} y={menu.y} onClose={() => setMenu(null)} onPick={(c) => add(c, menu.at)} />}
-        {dialog && <NewTerminalDialog presets={presets.filter((p) => p.enabled)}roles={roles} defaultCwd={snap?.workspace.cwd || homeDir} onClose={() => { setDialog(null); setTool("select"); }} onCreate={(i) => createTerminal(dialog.rect, i)} onManageRoles={() => setRolesDialog(true)} tmux={features.includes("terminal.tmux")} />}
+        {dialog && <NewTerminalDialog presets={presets.filter((p) => p.enabled)}roles={roles} defaultCwd={snap?.workspace.cwd || homeDir} onClose={() => { setDialog(null); setTool("select"); }} onCreate={(i) => createTerminal(dialog.rect, i)} onManageRoles={() => setRolesDialog(true)} tmux={features.includes("terminal.tmux")} iso={isoSupport} />}
         {preview && snap && <FilePreview api={api} workspaceId={snap.workspace.workspaceId} path={preview} onClose={() => setPreview(null)} onOpenNote={(rel) => { setPreview(null); void mutate((r) => api.createNode(snap.workspace.workspaceId, { expectedRevision: r, kind: "note", geometry: { ...freeSpot(snap.nodes, { w: 360, h: 260 }), w: 360, h: 260 }, filePath: `${snap.workspace.cwd}/${rel}` })); }} />}
         {floorDialog && <FloorDialog ground={floorDialog} api={api} onSubmit={(i) => void submitFloor(floorDialog, i)} onClose={() => setFloorDialog(null)} />}
         {overview && groundOf(overview) && <FloorOverview ground={groundOf(overview)!} floors={side.workspaces.filter((w) => w.parentId === overview)} current={current} terminals={side.terminals} api={api} stream={stream}
           onOpen={(id) => { setCurrent(id); setOverview(null); }} onNew={() => { setFloorDialog(groundOf(overview)!); }} onClose={() => setOverview(null)} onChanged={() => void refreshList()} onError={toast} />}
         {bandsOpen && current && snap && <BandsDialog api={api} workspaceId={current} bands={snap.bands ?? []} terminals={snap.nodes.filter((n) => n.kind === "terminal").map((n) => ({ nodeId: n.nodeId, title: n.title }))} selected={flowRef.current.filter((n) => n.selected).map((n) => n.id)} onClose={() => setBandsOpen(false)} />}
+        {approvalsOpen && <ApprovalsDialog api={api} onClose={() => setApprovalsOpen(false)} onChanged={() => void api.attentionList().then(setAttnItems).catch(() => {})} />}
         {routinesOpen && current && snap && <RoutinesDialog api={api} workspaceId={current} terminals={snap.nodes.filter((n) => n.kind === "terminal").map((n) => ({ nodeId: n.nodeId, title: n.title }))} onClose={() => setRoutinesOpen(false)} />}
         {scoresOpen && current && <ScoresDialog api={api} hasSelection={flowRef.current.filter((n) => n.selected).length} onClose={() => setScoresOpen(false)}
           onSave={async (name, description) => { const ids = flowRef.current.filter((n) => n.selected).map((n) => n.id); await runOp((rev) => api.saveScore(current, { expectedRevision: rev, name, ...(description ? { description } : {}), ...(ids.length ? { nodeIds: ids } : {}) })); }}

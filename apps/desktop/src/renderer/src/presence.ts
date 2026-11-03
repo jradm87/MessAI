@@ -1,7 +1,7 @@
 /** #47 — presença de agentes (barra inferior) e sinais de status (sidebar). Puro e testável. */
 import type { AttentionItem } from "@messai/contracts";
 
-export type WsSignal = { total: number; finished: number; unread: number; dead: number };
+export type WsSignal = { total: number; finished: number; unread: number; dead: number; approvals?: number };
 const ZERO: WsSignal = { total: 0, finished: 0, unread: 0, dead: 0 };
 /** Atenção global por espaço; os andares somam no térreo (parentOf: andar → térreo). */
 export function attentionByWorkspace(items: AttentionItem[], parentOf: Record<string, string | undefined> = {}): Record<string, WsSignal> {
@@ -9,12 +9,12 @@ export function attentionByWorkspace(items: AttentionItem[], parentOf: Record<st
   const add = (id: string, it: AttentionItem) => {
     const s = (out[id] ??= { ...ZERO });
     s.total += 1;
-    if (it.kind === "finished") s.finished += 1; else if (it.kind === "unread") s.unread += it.count ?? 1; else s.dead += 1;
+    if (it.kind === "finished") s.finished += 1; else if (it.kind === "unread") s.unread += it.count ?? 1; else if (it.kind === "approval") s.approvals = (s.approvals ?? 0) + 1; else s.dead += 1; // #93: pedido de capacidade de um agente isolado espera o usuário
   };
   for (const it of items) { add(it.workspaceId, it); const p = parentOf[it.workspaceId]; if (p) add(p, it); }
   return out;
 }
-export const signalTitle = (s: WsSignal): string => [s.finished ? `${s.finished} agente(s) concluiu` : "", s.unread ? `${s.unread} mensagem(ns) não lida(s)` : "", s.dead ? `${s.dead} terminal(is) encerrado(s)` : ""].filter(Boolean).join(" · ");
+export const signalTitle = (s: WsSignal): string => [s.finished ? `${s.finished} agente(s) concluiu` : "", s.unread ? `${s.unread} mensagem(ns) não lida(s)` : "", s.dead ? `${s.dead} terminal(is) encerrado(s)` : "", s.approvals ? `${s.approvals} pedido(s) de permissão` : ""].filter(Boolean).join(" · ");
 
 export type AgentState = "attention" | "running" | "idle" | "dead";
 export type AgentPresence = { kind: string; count: number; state: AgentState; attention: number; running: number };

@@ -5,7 +5,7 @@ import type { WebSocket } from "ws";
 import {
   BUILD_VERSION, PROTOCOL_VERSION, SendMessage, Ask, CreateConnection, CreateDrawing, CreateNode, CreateWorkspace, DeleteNode, PatchNode, PatchWorkspace, ApplyLayout, WsClientMessage,
   type Capabilities, type WsServerMessage, type ApiError,
- CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, PutFloorHooks, RunFloorHookInput, StopFloorHookInput, PutFloorExcludes, CreateFloorPrInput, PatchFloorPrInput, PutGitHostsInput, PutEnvVarsInput, PreviewWorkspaceImportInput, ImportWorkspaceInput, DuplicateWorkspaceInput, SendNotifyInput, CreateRoutineInput, PatchRoutineInput, FsOp, PatchRuntimeSettings, PutPresets, CreateSkill, PatchSkill, BackupInput, RestoreInput, MoveDataInput, ResetInput, CreateNodeGroup, PatchNodeGroup, SaveScore, PatchScore, PlaceScore, CreateBand, PatchBand, AskBand, MaestroRecruit, MaestroTarget, MaestroAssign, ExportAttachment, PutInstructions, SyncInstructions, KillProcInput, IssueAgentTokenInput, type PresetInput, type Preset } from "@messai/contracts";
+ CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, PutFloorHooks, RunFloorHookInput, StopFloorHookInput, PutFloorExcludes, CreateFloorPrInput, PatchFloorPrInput, PutGitHostsInput, PutEnvVarsInput, PreviewWorkspaceImportInput, ImportWorkspaceInput, DuplicateWorkspaceInput, SendNotifyInput, CreateRoutineInput, PatchRoutineInput, FsOp, PatchRuntimeSettings, PutPresets, CreateSkill, PatchSkill, CreateApproval, DecideApproval, BackupInput, RestoreInput, MoveDataInput, ResetInput, CreateNodeGroup, PatchNodeGroup, SaveScore, PatchScore, PlaceScore, CreateBand, PatchBand, AskBand, MaestroRecruit, MaestroTarget, MaestroAssign, ExportAttachment, PutInstructions, SyncInstructions, KillProcInput, IssueAgentTokenInput, type PresetInput, type Preset } from "@messai/contracts";
 import type { Result } from "@messai/domain";
 import { newId, type Config } from "./config.js";
 import type { WorkspaceService } from "./service.js";
@@ -72,8 +72,32 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
       const from = (req.body as { fromNodeId?: string } | undefined)?.fromNodeId;
       if (from !== who.nodeId) return reply.status(403).send({ error: { code: "FORBIDDEN", message: "um agente só pergunta à banda em nome do próprio nó" } });
     }
+    // #93 agente ISOLADO não cria processos fora do sandbox: nada de terminal novo (nem por cópia ou partitura).
+    if (svc.isNodeIsolated(who.nodeId)) {
+      const nope = (m: string) => reply.status(403).send({ error: { code: "FORBIDDEN", message: `${m} — um agente isolado não cria terminais (escaparia do sandbox). Peça ao usuário.` } });
+      const id = (req.params as Record<string, string | undefined>)["id"] ?? "";
+      if (req.method === "POST" && url === "/v1/workspaces/:id/nodes" && (req.body as { kind?: string } | undefined)?.kind === "terminal") return nope("criar terminal");
+      if (req.method === "POST" && url === "/v1/nodes/:id/duplicate" && svc.nodeKindOf(id) === "terminal") return nope("duplicar terminal");
+      if (req.method === "POST" && url === "/v1/workspaces/:id/scores/:scoreId/place") return nope("colocar partitura");
+    }
   });
 
+  // #93 — modo isolado: suporte nesta máquina e pedidos de aprovação (o agente pede; só o app lista e decide)
+  app.get("/v1/isolation", async () => svc.isolationSupport());
+  app.post("/v1/approvals", async (req, reply) => {
+    const who = (req as unknown as { auth: Caller | null }).auth;
+    if (!who || who.kind !== "agent") return reply.status(403).send({ error: { code: "FORBIDDEN", message: "só um terminal (credencial de agente) pede aprovação" } });
+    const b = body<CreateApproval>(CreateApproval, req.body); if ("code" in b) return invalid(reply, b);
+    return send(reply, svc.requestApproval(who.nodeId, b), 201);
+  });
+  app.get("/v1/approvals", async (req) => svc.listApprovals((req.query as { status?: string }).status));
+  app.get<{ Params: { id: string } }>("/v1/approvals/:id", async (req, reply) => {
+    const r = svc.getApproval(req.params.id); if (!r.ok) return send(reply, r);
+    const who = (req as unknown as { auth: Caller | null }).auth;
+    if (who?.kind === "agent" && r.value.nodeId !== who.nodeId) return reply.status(403).send({ error: { code: "FORBIDDEN", message: "pedido de outro terminal" } });
+    return send(reply, r);
+  });
+  app.post<{ Params: { id: string } }>("/v1/approvals/:id/decide", async (req, reply) => { const b = body<DecideApproval>(DecideApproval, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.decideApproval(req.params.id, b.approve)); });
   app.get("/v1/health", async () => ({ ok: true, protocolVersion: PROTOCOL_VERSION, buildVersion: BUILD_VERSION, machineId: cfg.machineId }));
   // Tela de encerramento do app: o que está rodando agora (terminais/agentes).
   app.get("/v1/running", async () => ({ sessions: svc.sessions.runningList() }));
@@ -434,6 +458,8 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
         svc.on("floorHook", onFloorHook);
         const onNotification = (notification: import("@messai/contracts").NotificationItem) => push({ type: "notification", notification });
         svc.on("notification", onNotification);
+        const onApproval = (approval: import("@messai/contracts").Approval) => { if (workspaces.has(approval.workspaceId)) push({ type: "approval", approval }); };
+        svc.on("approval", onApproval); // #93
         svc.sessions.on("output", onOutput);
         svc.sessions.on("session", onSession);
         svc.on("workspace", onWorkspace);
@@ -476,7 +502,7 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
         });
         socket.on("close", () => {
           for (const id of attached) svc.sessions.releaseLease(id, clientId);
-          svc.sessions.off("output", onOutput); svc.sessions.off("session", onSession); svc.off("workspace", onWorkspace); svc.off("message", onMessage); svc.sessions.off("taskFinished", onTaskFinished); svc.off("taskSummary", onTaskSummary); svc.off("floorHook", onFloorHook); svc.off("notification", onNotification); svc.off("sidebar", onSidebar); svc.off("chat", onChat);
+          svc.sessions.off("output", onOutput); svc.sessions.off("session", onSession); svc.off("workspace", onWorkspace); svc.off("message", onMessage); svc.sessions.off("taskFinished", onTaskFinished); svc.off("taskSummary", onTaskSummary); svc.off("floorHook", onFloorHook); svc.off("notification", onNotification); svc.off("approval", onApproval); svc.off("sidebar", onSidebar); svc.off("chat", onChat);
         });
       });
     });

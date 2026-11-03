@@ -10,8 +10,8 @@ import { loadPrompts, onPrompts, promptTitle, savePrompts, type SavedPrompt } fr
 import { setPref, usePref } from "./prefs.js";
 
 /** #57 — Preferências → Agentes: Papéis, Prompts, Skills, Contas e Uso (#38). */
-export type AgentsSub = "roles" | "prompts" | "skills" | "instructions" | "accounts" | "usage";
-const SUBS: { id: AgentsSub; label: string }[] = [{ id: "roles", label: "Papéis" }, { id: "prompts", label: "Prompts" }, { id: "skills", label: "Skills" }, { id: "instructions", label: "Instruções (CLAUDE/AGENTS)" }, { id: "accounts", label: "Contas" }, { id: "usage", label: "Uso" }];
+export type AgentsSub = "roles" | "prompts" | "skills" | "instructions" | "accounts" | "usage" | "isolation";
+const SUBS: { id: AgentsSub; label: string }[] = [{ id: "roles", label: "Papéis" }, { id: "prompts", label: "Prompts" }, { id: "skills", label: "Skills" }, { id: "instructions", label: "Instruções (CLAUDE/AGENTS)" }, { id: "accounts", label: "Contas" }, { id: "usage", label: "Uso" }, { id: "isolation", label: "Isolamento" }];
 export type OpenTerminal = (t: { title: string; command: string }) => void;
 type Props = { api: Api; workspaceId?: string; workspaceCwd: string; onRolesChanged: () => void; onOpenTerminal: OpenTerminal; onOpenUsage: () => void };
 
@@ -46,6 +46,27 @@ function PromptsPanel() {
           </div>
         </>) : <div className="mut empty-roles">Selecione um prompt ou crie um novo. No compositor, o ícone 🔖 insere o texto na mensagem.</div>}
       </div>
+    </div>
+  );
+}
+
+/** #93 — Isolamento: suporte nesta máquina e caminhos extras que TODO terminal isolado enxerga (somente leitura / graváveis). */
+function IsolationPanel({ api }: { api: Api }) {
+  const [sup, setSup] = useState<{ available: boolean; reason?: string; cgroup: boolean } | null>(null);
+  const [ro, setRo] = useState(""); const [rw, setRw] = useState(""); const [msg, setMsg] = useState<string | null>(null);
+  useEffect(() => { void api.isolationSupport().then(setSup).catch(() => {}); void api.settings().then((s) => { setRo((s.isolationRo ?? []).join("\n")); setRw((s.isolationRw ?? []).join("\n")); }).catch(() => {}); }, [api]);
+  const lines = (t: string) => t.split("\n").map((l) => l.trim()).filter(Boolean);
+  const save = async () => { setMsg(null); try { await api.patchSettings({ isolationRo: lines(ro), isolationRw: lines(rw) }); setMsg("Salvo. Vale na próxima vez que um terminal isolado iniciar."); } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); } };
+  return (
+    <div data-testid="iso-panel">
+      <p className={sup?.available ? "" : "mut"} data-testid="iso-status">{sup === null ? "Verificando…" : sup.available ? `Disponível (bubblewrap)${sup.cgroup ? " · limites de memória/processos ativos (cgroup)" : " · sem limites duros de memória/processos (systemd de usuário indisponível)"}` : `Indisponível: ${sup.reason ?? "bubblewrap não encontrado"}`}</p>
+      <p className="mut">Um terminal isolado roda num sandbox: ambiente limpo, só a pasta do espaço gravável, sistema somente leitura, sem seus segredos. Estes caminhos valem para todos eles (um por linha, absolutos; <code>~</code> é a sua pasta pessoal no host). A raiz, a sua pasta pessoal inteira e seus ancestrais são recusados.</p>
+      <div className="lbl">Somente leitura (ex.: ~/.gitconfig, ~/.local/share/uv)</div>
+      <textarea data-testid="iso-ro" rows={4} value={ro} onChange={(e) => setRo(e.target.value)} />
+      <div className="lbl">Graváveis (ex.: ~/.claude, ~/.codex — onde o agente guarda login e histórico)</div>
+      <textarea data-testid="iso-rw" rows={4} value={rw} onChange={(e) => setRw(e.target.value)} />
+      <div className="row"><button className="pri" data-testid="iso-save" onClick={() => void save()}>Salvar</button>{msg && <span className="mut" data-testid="iso-msg"> {msg}</span>}</div>
+      <p className="mut">Limites: o agente isolado fala com o runtime por um socket e uma credencial própria, com poucas capacidades; o que ele precisar a mais, ele pede e você aprova (Paleta → “Pedidos de permissão”). Arquivos do espaço continuam graváveis por ele — e um terminal isolado conectado a um não isolado é um canal de confiança entre os dois.</p>
     </div>
   );
 }
@@ -164,5 +185,6 @@ export function PrefsAgents({ api, workspaceId, workspaceCwd, onRolesChanged, on
     {sub === "instructions" && <InstructionsPanel api={api} {...(workspaceId ? { workspaceId } : {})} workspaceCwd={workspaceCwd} />}
     {sub === "accounts" && <AccountsPanel api={api} onOpenTerminal={onOpenTerminal} />}
     {sub === "usage" && <UsagePanel api={api} onOpenUsage={onOpenUsage} />}
+    {sub === "isolation" && <IsolationPanel api={api} />}
   </>);
 }

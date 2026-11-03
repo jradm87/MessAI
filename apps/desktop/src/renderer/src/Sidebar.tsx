@@ -6,7 +6,7 @@ import { useHint } from "./shortcuts.js";
 import { signalTitle, type WsSignal } from "./presence.js";
 import { useI18n } from "./i18n.js";
 /** #47 selo de atenção do espaço: bolinha âmbar com a contagem (concluiu + não lidas + encerrados). */
-function Signal({ s }: { s?: WsSignal }) { if (!s || !s.total) return null; const n = s.finished + s.unread + s.dead; return <span className={`att-badge ${s.dead && !s.finished && !s.unread ? "dead" : ""}`} data-testid="ws-signal" title={signalTitle(s)}>{n}</span>; }
+function Signal({ s }: { s?: WsSignal }) { if (!s || !s.total) return null; const n = s.finished + s.unread + s.dead + (s.approvals ?? 0); return <span className={`att-badge ${s.dead && !s.finished && !s.unread && !s.approvals ? "dead" : ""}`} data-testid="ws-signal" title={signalTitle(s)}>{n}</span>; }
 
 export type SidebarActions = {
   select: (id: string) => void;

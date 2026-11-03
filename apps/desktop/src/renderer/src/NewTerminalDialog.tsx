@@ -1,16 +1,16 @@
 import { useEffect, useState } from "react";
 import { SquareTerminal } from "lucide-react";
 import { AgentIcon } from "./agentIcons.js";
-import type { Preset, PresetTarget, Role, TermTheme } from "@messai/contracts";
+import type { NodeIsolation, Preset, PresetTarget, Role, TermTheme } from "@messai/contracts";
 import { WS_COLORS, WS_ICONS, WsIcon } from "./wsicons.js";
 import { TermPreview } from "./PrefsTerminal.js";
 
-export type NewTerminalInput = { title: string; command?: string; cwd?: string; presetId?: string; roleId?: string; persistent?: boolean; icon?: string; color?: string; termTheme?: TermTheme; target?: PresetTarget };
+export type NewTerminalInput = { title: string; command?: string; cwd?: string; presetId?: string; roleId?: string; persistent?: boolean; icon?: string; color?: string; termTheme?: TermTheme; target?: PresetTarget; isolation?: NodeIsolation };
 const THEMES: { id: TermTheme; label: string }[] = [{ id: "system", label: "Sistema" }, { id: "dark", label: "Escuro" }, { id: "light", label: "Claro" }, { id: "custom", label: "Custom" }];
 const ICON: Record<string, React.ReactNode> = { claude: <AgentIcon id="claude" size={26} />, codex: <AgentIcon id="codex" size={26} />, antigravity: <AgentIcon id="antigravity" size={26} />, opencode: <AgentIcon id="opencode" size={26} />, gemini: <AgentIcon id="gemini" size={26} />, shell: <SquareTerminal size={26} /> };
 
 /** Diálogo "Novo terminal": Início rápido + Detalhes (nome, comando, diretório). Aparência e Papel ficam para depois. */
-export function NewTerminalDialog({ presets, roles, defaultCwd, onCreate, onClose, onManageRoles, tmux }: { presets: Preset[]; roles: Role[]; defaultCwd: string; onCreate: (i: NewTerminalInput) => void; onClose: () => void; onManageRoles: () => void; tmux: boolean }) {
+export function NewTerminalDialog({ presets, roles, defaultCwd, onCreate, onClose, onManageRoles, tmux, iso }: { iso?: { available: boolean; reason?: string } | null; presets: Preset[]; roles: Role[]; defaultCwd: string; onCreate: (i: NewTerminalInput) => void; onClose: () => void; onManageRoles: () => void; tmux: boolean }) {
   const [roleId, setRoleId] = useState("");
   const [persistent, setPersistent] = useState(tmux);
   const first = presets.find((p) => p.available) ?? presets[0];
@@ -18,12 +18,13 @@ export function NewTerminalDialog({ presets, roles, defaultCwd, onCreate, onClos
   const [title, setTitle] = useState(first?.label ?? "Terminal");
   const [command, setCommand] = useState(first ? [first.command, ...first.args.filter((a) => !a.startsWith("--append-system-prompt") && !a.includes("MessAI"))].join(" ") : "");
   const [cwd, setCwd] = useState(defaultCwd);
+  const [isolated, setIsolated] = useState(false); const [isoNet, setIsoNet] = useState<"none" | "host">("none"); // #93
   const [tab, setTab] = useState<"details" | "appearance" | "role">("details");
   // #56 aparência: começa com a do preset; o usuário pode mudar antes de criar
   const [icon, setIcon] = useState(first?.icon ?? ""); const [color, setColor] = useState(first?.color ?? ""); const [theme, setTheme] = useState<TermTheme>(first?.theme ?? "system"); const [target, setTarget] = useState<PresetTarget>(first?.target ?? "terminal");
   useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); }; window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, [onClose]);
   const pick = (p: Preset) => { setSel(p); setTitle(p.label); setCommand(p.command); setIcon(p.icon); setColor(p.color); setTheme(p.theme); setTarget(p.target); };
-  const submit = () => onCreate({ title: title.trim() || (sel?.label ?? "Terminal"), icon, color, termTheme: theme, target, ...(command.trim() ? { command: command.trim() } : {}), ...(cwd.trim() ? { cwd: cwd.trim() } : {}), ...(sel ? { presetId: sel.id } : {}), ...(roleId ? { roleId } : {}), ...(persistent ? { persistent: true } : {}) });
+  const submit = () => onCreate({ title: title.trim() || (sel?.label ?? "Terminal"), icon, color, termTheme: theme, target, ...(command.trim() ? { command: command.trim() } : {}), ...(cwd.trim() ? { cwd: cwd.trim() } : {}), ...(sel ? { presetId: sel.id } : {}), ...(roleId ? { roleId } : {}), ...(persistent ? { persistent: true } : {}), ...(isolated ? { isolation: { network: isoNet } } : {}) });
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
       <div className="modal" onMouseDown={(e) => e.stopPropagation()} onKeyDown={(e) => { if (e.key === "Enter" && (e.target as HTMLElement).tagName !== "TEXTAREA") submit(); }}>
@@ -46,6 +47,9 @@ export function NewTerminalDialog({ presets, roles, defaultCwd, onCreate, onClos
             <label className="chk" title={tmux ? "A sessão roda dentro do tmux e sobrevive a reinícios do runtime; reabrir reanexa." : "tmux não encontrado no PATH"}><input type="checkbox" data-testid="nt-persistent" checked={persistent} disabled={!tmux} onChange={(e) => setPersistent(e.target.checked)} /> Sessão persistente (tmux){!tmux && <span className="mut"> — tmux não instalado</span>}</label>
             <label className="chk"><input type="checkbox" checked readOnly /> Monitorar atividade <span className="mut">(em breve)</span></label>
             <label className="chk"><input type="checkbox" disabled /> Maestro <span className="mut">(em breve)</span></label>
+            <label className="chk" title={iso?.available === false ? iso.reason : "Roda dentro de um sandbox (bubblewrap): ambiente limpo, só enxerga a pasta do espaço, sistema somente leitura, sem segredos do seu usuário."}><input type="checkbox" data-testid="nt-isolated" checked={isolated} disabled={iso?.available === false} onChange={(e) => setIsolated(e.target.checked)} /> Modo isolado (sandbox){iso?.available === false && <span className="mut"> — indisponível: instale o bubblewrap</span>}</label>
+            {isolated && <div className="seg" data-testid="nt-iso-net">{(["none", "host"] as const).map((n) => <button key={n} type="button" className={isoNet === n ? "on" : ""} title={n === "none" ? "Sem rede nenhuma (mais seguro; o agente de IA em nuvem não conseguirá falar com a API dele)" : "Compartilha a rede do computador (necessário para agentes que usam API na internet)"} onClick={() => setIsoNet(n)}>{n === "none" ? "Sem rede" : "Rede do host"}</button>)}</div>}
+            {isolated && isoNet === "host" && <div className="mut">Com rede, um agente comprometido ainda alcança a internet e serviços locais; o sandbox limita arquivos e segredos, não o tráfego.</div>}
             <div className="lbl">Diretório de trabalho</div>
             <div className="row"><input value={cwd} onChange={(e) => setCwd(e.target.value)} /><button onClick={() => void window.messai.pickDirectory?.().then((d) => d && setCwd(d))}>Procurar…</button></div>
           </div>

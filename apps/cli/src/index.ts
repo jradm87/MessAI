@@ -46,6 +46,7 @@ try {
   mess check <id|título>            lê a tela atual de um nó conectado (sem enviar nada)
   mess reply <idMsg> <texto>        responde uma mensagem recebida
   mess inbox [--all]                mensagens recebidas (marca como lidas)
+  mess request <capacidade> [motivo...] [--wait seg]   pede ao USUÁRIO uma capacidade que você não tem (aprovação humana)
   mess say <texto> [--thread N] [--attach arquivo]...   responde no chat do seu terminal (Markdown; anexos viram cards)
   mess chat [--thread N] [--all]    histórico do chat do seu terminal (padrão: 30 recentes)
   mess band list                    bandas do espaço (grupos de terminais) e seus membros
@@ -260,6 +261,19 @@ try {
     if (!ref) throw new Error("uso: mess check <id|título|Nome @ Espaço>");
     const r = await call<{ agentType: string; screen: string }>("GET", `/v1/nodes/${nodeId}/check?ref=${encodeURIComponent(ref)}`);
     console.log(r.screen || "(tela vazia ou destino não está rodando)");
+  } else if (cmd === "request") {
+    // #93 aprovação humana: um terminal (isolado, sobretudo) pede uma capacidade; o usuário decide no app.
+    const args = [sub, ...rest].filter((a): a is string => a !== undefined);
+    let waitSec = 0; const wi = args.indexOf("--wait"); if (wi >= 0) { waitSec = Math.max(0, Math.min(600, Number(args[wi + 1]) || 60)); args.splice(wi, 2); }
+    const cap = args.shift(); if (!cap) throw new Error("uso: mess request <capacidade> [motivo...] [--wait seg]  (ex.: nodes:write)");
+    const created = await call<{ approvalId: string; status: string; capability: string }>("POST", "/v1/approvals", { capability: cap, ...(args.length ? { reason: args.join(" ") } : {}) });
+    console.log(`Pedido ${short(created.approvalId)}: "${created.capability}" — ${created.status === "pending" ? "aguardando o usuário decidir no app" : created.status}.`);
+    if (waitSec > 0 && created.status === "pending") {
+      const until = Date.now() + waitSec * 1000; let st = created.status;
+      while (st === "pending" && Date.now() < until) { await new Promise((r) => setTimeout(r, 1500)); st = (await call<{ status: string }>("GET", `/v1/approvals/${created.approvalId}`)).status; }
+      console.log(st === "approved" ? "APROVADO: a capacidade já vale para este terminal." : st === "denied" ? "NEGADO pelo usuário." : "Sem resposta no prazo; o pedido continua pendente.");
+      if (st === "denied") process.exitCode = 3; else if (st === "pending") process.exitCode = 4;
+    }
   } else if (cmd === "inbox") {
     if (!nodeId) throw new Error("sem MESS_NODE_ID");
     const all = sub === "--all";

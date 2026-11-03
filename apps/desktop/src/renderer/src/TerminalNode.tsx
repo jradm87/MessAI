@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState, type CSSProperties, memo } from "react";
 import { useAtomValue } from "jotai";
-import { Search, Eraser, Lock, Eye, Folder, SquareTerminal, Crown, Activity, Link2 } from "lucide-react";
+import { Search, Eraser, Lock, Eye, Folder, SquareTerminal, Crown, Activity, Link2, ShieldCheck } from "lucide-react";
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { SearchAddon } from "@xterm/addon-search";
 import "@xterm/xterm/css/xterm.css";
-import type { Session, TermTheme } from "@messai/contracts";
+import type { NodeIsolation, Session, TermTheme } from "@messai/contracts";
 import { usePref } from "./prefs.js";
 import { countRender } from "./perf.js";
 import { effectiveScrollback, fontStack, parseCustomPalette, resolveTermTheme } from "./term-theme.js";
@@ -23,7 +23,7 @@ import type { ChatMessage, Role, Skill, SessionProcs, ConnectedPeer, CrossNodeCa
 import type { NodeBand } from "./bands.js";
 
 export type NodeExtras = { onLink: () => void; linkCount: number; onChat: () => void; onRaise: () => void };
-export type ComposerExtras = { composerOpen: boolean; onComposerClose: () => void; onFocus: () => void; workspaceId: string; targets: MentionTarget[]; chatOpen: boolean; onChatClose: () => void; role?: Role; roles: Role[]; onSetRole: (roleId: string | null) => void; onManageRoles: () => void; skills?: Skill[]; skillIds?: string[]; onSetSkills?: (ids: string[]) => void; onManageSkills?: () => void; bands?: NodeBand[]; onOpenBands?: () => void; maestro?: boolean; onMaestro?: (on: boolean) => void; memLimitMb?: number; onMemLimit?: (mb: number) => void; onFocusNode?: (wsId: string, nodeId: string) => void; onCrossConnect?: (target: { targetNodeId?: string; targetRef?: string }) => Promise<void> | void; onCrossDisconnect?: (connectionId: string) => Promise<void> | void };
+export type ComposerExtras = { composerOpen: boolean; onComposerClose: () => void; onFocus: () => void; workspaceId: string; targets: MentionTarget[]; chatOpen: boolean; onChatClose: () => void; role?: Role; roles: Role[]; onSetRole: (roleId: string | null) => void; onManageRoles: () => void; skills?: Skill[]; skillIds?: string[]; onSetSkills?: (ids: string[]) => void; onManageSkills?: () => void; bands?: NodeBand[]; onOpenBands?: () => void; maestro?: boolean; onMaestro?: (on: boolean) => void; isolation?: NodeIsolation; isoAvailable?: boolean; onIsolation?: (iso: NodeIsolation | null) => void; memLimitMb?: number; onMemLimit?: (mb: number) => void; onFocusNode?: (wsId: string, nodeId: string) => void; onCrossConnect?: (target: { targetNodeId?: string; targetRef?: string }) => Promise<void> | void; onCrossDisconnect?: (connectionId: string) => Promise<void> | void };
 export type Appearance = { icon?: string | null; color?: string | null; termTheme?: TermTheme | null };
 export type TerminalData = { title: string; sessionId: string; api: Api; stream: Stream; onDelete: () => void; onRename: (t: string) => void; onResume: () => void; editSignal?: number; icon?: string; color?: string; termTheme?: string; onAppearance: (p: Appearance) => void } & NodeExtras & ComposerExtras;
 const THEMES: { id: TermTheme; label: string }[] = [{ id: "system", label: "Sistema" }, { id: "dark", label: "Escuro" }, { id: "light", label: "Claro" }, { id: "custom", label: "Custom" }];
@@ -199,6 +199,7 @@ function TerminalNodeImpl({ id, data, selected }: NodeProps & { data: TerminalDa
             <div className="mi" onClick={() => { setRoleMenu(false); data.onManageSkills?.(); }}>Gerenciar habilidades…</div>
           </div>
         )}
+        {data.isolation && <span className="iso-pill nodrag" data-testid="iso-pill" title={`Modo isolado (sandbox): ${data.isolation.network === "none" ? "sem rede" : "com a rede do host"}, ambiente limpo, só a pasta do espaço gravável`}><ShieldCheck size={11} /></span>}
         {data.maestro && <span className="maestro-pill nodrag" title="Modo Maestro: este terminal recruta, dispensa e reatribui agentes (mess maestro …)" data-testid="maestro-pill"><Crown size={11} /></span>}
         {data.bands?.map((b) => <span key={b.id} className={`band-pill nodrag ${b.asking ? "asking" : ""}`} style={{ "--band-color": b.color } as CSSProperties} title={b.asking ? `Banda ${b.name}: pergunta em andamento neste terminal` : `Banda ${b.name} (clique para gerenciar)`} data-testid="band-pill" onClick={(e) => { e.stopPropagation(); data.onOpenBands?.(); }}>{b.name}{b.asking ? " …" : ""}</span>)}
         {crossPeers.map((p) => (
@@ -219,6 +220,7 @@ function TerminalNodeImpl({ id, data, selected }: NodeProps & { data: TerminalDa
         {unread > 0 && <span className="badge" title="mensagens não lidas de outros agentes (mess inbox)">✉ {unread}</span>}
         {chatUnread > 0 && <span className="badge chatb" title="respostas no chat (Ctrl+J)">💬 {chatUnread}</span>}
         <span className="sp" />
+        {data.onIsolation && <button title={data.isolation ? "Modo isolado ligado (clique para desligar — reinicia o terminal)" : data.isoAvailable === false ? "Modo isolado indisponível: instale o bubblewrap" : "Ligar o modo isolado (reinicia o terminal dentro do sandbox, sem rede)"} className={`nodrag iso-toggle ${data.isolation ? "on" : ""}`} data-testid="iso-toggle" disabled={!data.isolation && data.isoAvailable === false} onClick={() => data.onIsolation?.(data.isolation ? null : { network: "none" })}><ShieldCheck size={12} /></button>}
         {data.onMaestro && <button title={data.maestro ? "Modo Maestro ligado (clique para desligar)" : "Ligar o Modo Maestro (recrutar/dispensar/reatribuir agentes)"} className={`nodrag maestro-toggle ${data.maestro ? "on" : ""}`} data-testid="maestro-toggle" onClick={() => data.onMaestro?.(!data.maestro)}><Crown size={12} /></button>}
         <button title="Conexões entre andares e espaços (Nome @ Espaço)" className={`nodrag ${crossOpen || crossPeers.length > 0 ? "on" : ""}`} data-testid="node-cross-link-btn" onClick={() => setCrossOpen((v) => !v)}><Link2 size={12} /></button>
         <button title="Monitor de processos e limite de memória" className={`nodrag ${procsOpen ? "on" : ""}`} data-testid="term-procs-btn" onClick={() => { setProcsOpen((v) => !v); void loadProcs(); }}><Activity size={12} /></button>

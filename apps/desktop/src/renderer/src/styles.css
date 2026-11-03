@@ -621,6 +621,15 @@ button.danger:hover { border-color: var(--danger); color: var(--danger-fg); }
 @keyframes band-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
 .maestro-pill { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 16px; border-radius: 8px; background: #e5a23a; color: #1a1205; }
 .maestro-toggle.on { color: #e5a23a; }
+/* #93 modo isolado */
+.iso-pill { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 16px; border-radius: 8px; background: #43a047; color: #06210a; }
+.iso-toggle.on { color: #43a047; }
+.iso-toggle:disabled { opacity: .35; cursor: not-allowed; }
+.approvals-list { display: flex; flex-direction: column; gap: 8px; max-height: 50vh; overflow: auto; margin: 8px 0; }
+.approval { border: 1px solid var(--border, #444); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; }
+.approval.pending { border-color: #e5a23a; }
+.approval .row { display: flex; gap: 6px; margin-top: 4px; }
+[data-testid="iso-panel"] textarea { width: 100%; font-family: ui-monospace, monospace; font-size: 12px; }
 .bands-modal { width: 720px; max-height: 84vh; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
 .band-list { display: flex; flex-direction: column; gap: 10px; }
 .band-card { border: 1px solid var(--line); border-left: 4px solid var(--acc); border-radius: 8px; background: var(--surface-2); padding: 8px 10px; display: flex; flex-direction: column; gap: 8px; }
