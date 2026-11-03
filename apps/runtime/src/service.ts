@@ -2,7 +2,7 @@ import { AGENT_ENV, type TreeEntry, type FileContent, type FsOp, type SearchHit,
 import type { RuntimeSettings, PatchRuntimeSettings, PresetInput, Skill, CreateSkill, PatchSkill, FindHit, FindKind, NodeGroup, CreateNodeGroup, PatchNodeGroup, AttentionItem, Score, ScoreNode, SaveScore, PatchScore, PlaceScore, PlaceScoreResult } from "@messai/contracts";
 import type { ChatAttachment, ExportAttachment, InstructionsStatus, InstructionFileInfo, PutInstructions, SyncInstructions } from "@messai/contracts";
 import type { Band, CreateBand, PatchBand, AskBand, BandAnswer, BandAskResult, MaestroRecruit } from "@messai/contracts";
-import type { FloorHookSection, FloorHooksConfig, PutFloorHooks, FloorHookStatus, FloorHooksState, RunFloorHookInput, StopFloorHookInput, FloorCopyInfo, PutFloorExcludes, ConnectedPeer, CrossNodeCandidate, GitHostEntry, PutGitHostsInput, FloorPrState, CreateFloorPrInput, PatchFloorPrInput, FloorPrReviewStatus, FloorPrChecksStatus, EnvVarEntry, PutEnvVarsInput, EnvironmentsState, WorkspaceBundle, WorkspaceBundlePreview, ImportWorkspaceInput, DuplicateWorkspaceInput, BundleNode, BundleConnection, BundleGroup, BundleBand, BundleDrawing, NotificationItem, NotificationKind, SendNotifyInput } from "@messai/contracts";
+import type { FloorHookSection, FloorHooksConfig, PutFloorHooks, FloorHookStatus, FloorHooksState, RunFloorHookInput, StopFloorHookInput, FloorCopyInfo, PutFloorExcludes, ConnectedPeer, CrossNodeCandidate, GitHostEntry, PutGitHostsInput, FloorPrState, CreateFloorPrInput, PatchFloorPrInput, FloorPrReviewStatus, FloorPrChecksStatus, EnvVarEntry, PutEnvVarsInput, EnvironmentsState, WorkspaceBundle, WorkspaceBundlePreview, ImportWorkspaceInput, DuplicateWorkspaceInput, BundleNode, BundleConnection, BundleGroup, BundleBand, BundleDrawing, NotificationItem, NotificationKind, SendNotifyInput, Routine, CreateRoutineInput, PatchRoutineInput, RoutineRunResult } from "@messai/contracts";
 import { WORKSPACE_BUNDLE_FORMAT } from "@messai/contracts";
 import { readProcTree } from "./procs.js";
 import type { SessionProcs, KillProcInput } from "@messai/contracts";
@@ -99,6 +99,9 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
   readonly companion: Companion;
   /** #85 histórico recente de notificações em memória (para inspeção e testes). */
   private recentNotifications: NotificationItem[] = [];
+  /** #27 timer de execução de rotinas agendadas. */
+  private routineTimer: ReturnType<typeof setInterval> | null = null;
+  private runningRoutines = new Set<string>();
   constructor(private readonly cfg: Config, private readonly store: Store, readonly sessions: SessionManager) {
     super();
     this.companion = new Companion({ enabled: cfg.companionEnabled, ollamaUrl: cfg.ollamaUrl, ollamaModel: cfg.ollamaModel });
@@ -117,6 +120,8 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       });
       void this.companion.summarize(ev).then((s) => { if (s) this.emit("taskSummary", s); });
     });
+    this.routineTimer = setInterval(() => void this.tickRoutines(), 1000);
+    this.routineTimer.unref();
   }
 
   // ---- #85 Notificações do SO + mess notify ----
@@ -154,6 +159,163 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       ...(node ? { nodeId: node.nodeId, nodeTitle: node.title } : input.nodeId ? { nodeId: input.nodeId } : {}),
     });
     return succeed(item);
+  }
+
+  // ---- #27 Rotinas: comandos e prompts agendados e recorrentes ----
+  private readAllRoutines(): Routine[] {
+    const raw = this.store.getMeta("routines.all");
+    if (!raw) return [];
+    try {
+      const arr = JSON.parse(raw) as unknown;
+      return Array.isArray(arr) ? (arr as Routine[]) : [];
+    } catch { return []; }
+  }
+
+  private saveAllRoutines(list: Routine[]): void {
+    this.store.setMeta("routines.all", JSON.stringify(list));
+  }
+
+  listRoutines(workspaceId?: string): Routine[] {
+    const all = this.readAllRoutines();
+    return workspaceId ? all.filter((r) => r.workspaceId === workspaceId) : all;
+  }
+
+  createRoutine(workspaceId: string, input: CreateRoutineInput): Result<Routine> {
+    const w = this.store.getWorkspace(workspaceId);
+    if (!w) return fail("NOT_FOUND", "espaço não encontrado");
+    const name = input.name.trim();
+    const payload = input.payload.trim();
+    if (!name || !payload) return fail("INVALID", "nome e comando/prompt obrigatórios");
+    if (input.targetNodeId) {
+      const n = this.store.getNode(input.targetNodeId);
+      if (!n || n.workspaceId !== workspaceId || n.kind !== "terminal") return fail("NOT_FOUND", "terminal de destino não encontrado neste espaço");
+    }
+    const r: Routine = {
+      routineId: newId(),
+      workspaceId,
+      name,
+      actionType: input.actionType,
+      ...(input.targetNodeId ? { targetNodeId: input.targetNodeId } : {}),
+      payload,
+      scheduleType: input.scheduleType ?? "interval",
+      intervalSeconds: Math.max(1, Math.round(input.intervalSeconds ?? 300)),
+      enabled: input.enabled ?? true,
+      wakeIfUnloaded: input.wakeIfUnloaded ?? true,
+      runCount: 0,
+      createdAt: nowIso(),
+    };
+    const all = this.readAllRoutines();
+    all.push(r);
+    this.saveAllRoutines(all);
+    return succeed(r);
+  }
+
+  patchRoutine(routineId: string, input: PatchRoutineInput): Result<Routine> {
+    const all = this.readAllRoutines();
+    const idx = all.findIndex((x) => x.routineId === routineId);
+    if (idx < 0) return fail("NOT_FOUND", "rotina não encontrada");
+    const cur = all[idx]!;
+    const next: Routine = {
+      ...cur,
+      ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+      ...(input.actionType !== undefined ? { actionType: input.actionType } : {}),
+      ...(input.payload !== undefined ? { payload: input.payload.trim() } : {}),
+      ...(input.scheduleType !== undefined ? { scheduleType: input.scheduleType } : {}),
+      ...(input.intervalSeconds !== undefined ? { intervalSeconds: Math.max(1, Math.round(input.intervalSeconds)) } : {}),
+      ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
+      ...(input.wakeIfUnloaded !== undefined ? { wakeIfUnloaded: input.wakeIfUnloaded } : {}),
+    };
+    if (input.targetNodeId === null) delete next.targetNodeId;
+    else if (input.targetNodeId !== undefined) next.targetNodeId = input.targetNodeId;
+    all[idx] = next;
+    this.saveAllRoutines(all);
+    return succeed(next);
+  }
+
+  deleteRoutine(routineId: string): Result<void> {
+    const all = this.readAllRoutines();
+    const idx = all.findIndex((x) => x.routineId === routineId);
+    if (idx < 0) return fail("NOT_FOUND", "rotina não encontrada");
+    all.splice(idx, 1);
+    this.saveAllRoutines(all);
+    return succeed(undefined);
+  }
+
+  async runRoutine(routineId: string): Promise<Result<RoutineRunResult>> {
+    const all = this.readAllRoutines();
+    const r = all.find((x) => x.routineId === routineId);
+    if (!r) return fail("NOT_FOUND", "rotina não encontrada");
+    const w = this.store.getWorkspace(r.workspaceId);
+    if (!w) return fail("NOT_FOUND", "espaço da rotina não encontrado");
+
+    let status: "ok" | "error" = "ok";
+    let output = "";
+
+    if (r.actionType === "prompt") {
+      const nodes = this.store.listNodes(r.workspaceId).filter((n) => n.kind === "terminal");
+      const target = (r.targetNodeId ? nodes.find((n) => n.nodeId === r.targetNodeId) : nodes[0]) ?? null;
+      if (!target || !target.sessionId) {
+        status = "error";
+        output = "nenhum terminal de destino encontrado";
+      } else {
+        let sess = this.store.getSession(target.sessionId);
+        if (sess && sess.state !== "running" && r.wakeIfUnloaded) {
+          const rel = this.reloadNode(target.nodeId);
+          if (rel.ok) {
+            sess = rel.value;
+            await new Promise((res) => setTimeout(res, 150));
+          }
+        }
+        const del = this.sessions.deliver(target.sessionId, `${r.payload}\r`);
+        if (del.ok) {
+          status = "ok";
+          output = `prompt entregue a "${target.title}"`;
+        } else {
+          status = "error";
+          output = del.error.message;
+        }
+      }
+    } else {
+      const env = { ...process.env, ...this.effectiveEnvForWorkspace(w) } as NodeJS.ProcessEnv;
+      try {
+        const { stdout } = await execFileP("/bin/sh", ["-c", r.payload], { cwd: w.cwd, env, timeout: 15_000, maxBuffer: 2 * 1024 * 1024, encoding: "utf8" });
+        status = "ok";
+        output = String(stdout ?? "").trim().slice(0, 500);
+      } catch (e) {
+        const err = e as { stdout?: string; stderr?: string; message?: string };
+        status = "error";
+        output = String(err.stderr || err.stdout || err.message || "erro ao executar comando").trim().slice(0, 500);
+      }
+    }
+
+    const latest = this.readAllRoutines();
+    const idx = latest.findIndex((x) => x.routineId === routineId);
+    const updated: Routine = {
+      ...(idx >= 0 ? latest[idx]! : r),
+      lastRunAt: nowIso(),
+      lastStatus: status,
+      lastOutput: output,
+      runCount: ((idx >= 0 ? latest[idx]!.runCount : r.runCount) ?? 0) + 1,
+      ...(r.scheduleType === "once" ? { enabled: false } : {}),
+    };
+    if (idx >= 0) {
+      latest[idx] = updated;
+      this.saveAllRoutines(latest);
+    }
+    return succeed({ routine: updated, status, output });
+  }
+
+  private async tickRoutines(): Promise<void> {
+    const now = Date.now();
+    for (const r of this.readAllRoutines()) {
+      if (!r.enabled || this.runningRoutines.has(r.routineId)) continue;
+      const baseMs = Date.parse(r.lastRunAt ?? r.createdAt);
+      if (!Number.isFinite(baseMs)) continue;
+      if (now - baseMs >= r.intervalSeconds * 1000) {
+        this.runningRoutines.add(r.routineId);
+        try { await this.runRoutine(r.routineId); } finally { this.runningRoutines.delete(r.routineId); }
+      }
+    }
   }
 
   /** Resumo sob demanda do estado atual de um nó-terminal (mesmo caminho do automático). */

@@ -2,7 +2,7 @@ import { Type, type Static } from "@sinclair/typebox";
 
 export const PROTOCOL_VERSION = 1 as const;
 /** Incrementar a cada mudança de snapshot/rotas; o cliente avisa quando o runtime está atrás. */
-export const BUILD_VERSION = 27 as const;
+export const BUILD_VERSION = 28 as const;
 
 // ---------- Identidades ----------
 export const Id = Type.String({ minLength: 8, maxLength: 64 });
@@ -960,6 +960,70 @@ export const DuplicateWorkspaceInput = Type.Object({
   startTerminals: Type.Optional(Type.Boolean()),
 });
 export type DuplicateWorkspaceInput = Static<typeof DuplicateWorkspaceInput>;
+
+// ---------- #27 Rotinas: comandos/prompts agendados e recorrentes ----------
+export const RoutineActionType = Type.Union([
+  Type.Literal("prompt"),
+  Type.Literal("command"),
+]);
+export type RoutineActionType = Static<typeof RoutineActionType>;
+
+export const RoutineScheduleType = Type.Union([
+  Type.Literal("interval"),
+  Type.Literal("once"),
+]);
+export type RoutineScheduleType = Static<typeof RoutineScheduleType>;
+
+export const Routine = Type.Object({
+  routineId: Id,
+  workspaceId: Id,
+  name: Type.String(),
+  actionType: RoutineActionType,
+  targetNodeId: Type.Optional(Id),
+  payload: Type.String(),
+  scheduleType: RoutineScheduleType,
+  intervalSeconds: Type.Integer({ minimum: 1 }),
+  enabled: Type.Boolean(),
+  wakeIfUnloaded: Type.Boolean(),
+  lastRunAt: Type.Optional(Type.String()),
+  lastStatus: Type.Optional(Type.Union([Type.Literal("ok"), Type.Literal("error")])),
+  lastOutput: Type.Optional(Type.String()),
+  runCount: Type.Integer(),
+  createdAt: Type.String(),
+});
+export type Routine = Static<typeof Routine>;
+
+export const CreateRoutineInput = Type.Object({
+  name: Type.String({ minLength: 1, maxLength: 120 }),
+  actionType: RoutineActionType,
+  targetNodeId: Type.Optional(Id),
+  payload: Type.String({ minLength: 1, maxLength: 4000 }),
+  scheduleType: Type.Optional(RoutineScheduleType),
+  intervalSeconds: Type.Optional(Type.Integer({ minimum: 1, maximum: 604800 })),
+  enabled: Type.Optional(Type.Boolean()),
+  wakeIfUnloaded: Type.Optional(Type.Boolean()),
+});
+export type CreateRoutineInput = Static<typeof CreateRoutineInput>;
+
+export const PatchRoutineInput = Type.Object({
+  name: Type.Optional(Type.String({ minLength: 1, maxLength: 120 })),
+  actionType: Type.Optional(RoutineActionType),
+  targetNodeId: Type.Optional(Type.Union([Id, Type.Null()])),
+  payload: Type.Optional(Type.String({ minLength: 1, maxLength: 4000 })),
+  scheduleType: Type.Optional(RoutineScheduleType),
+  intervalSeconds: Type.Optional(Type.Integer({ minimum: 1, maximum: 604800 })),
+  enabled: Type.Optional(Type.Boolean()),
+  wakeIfUnloaded: Type.Optional(Type.Boolean()),
+});
+export type PatchRoutineInput = Static<typeof PatchRoutineInput>;
+
+export const RoutineRunResult = Type.Object({
+  routine: Routine,
+  status: Type.Union([Type.Literal("ok"), Type.Literal("error")]),
+  output: Type.String(),
+});
+export type RoutineRunResult = Static<typeof RoutineRunResult>;
+
 
 
 

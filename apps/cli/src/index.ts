@@ -3,7 +3,7 @@
 import { request } from "node:http";
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
-import { AGENT_ENV, type Band, type BandAskResult, type AskResult, type ChatMessage, type EnvVarEntry, type FloorCopyInfo, type FloorHooksState, type FloorPrState, type GitHostEntry, type Message, type Node, type NotificationItem, type Session, type Workspace, type WorkspaceBundle, type WorkspaceBundlePreview, type WorkspaceSnapshot } from "@messai/contracts";
+import { AGENT_ENV, type Band, type BandAskResult, type AskResult, type ChatMessage, type EnvVarEntry, type FloorCopyInfo, type FloorHooksState, type FloorPrState, type GitHostEntry, type Message, type Node, type NotificationItem, type Routine, type RoutineRunResult, type Session, type Workspace, type WorkspaceBundle, type WorkspaceBundlePreview, type WorkspaceSnapshot } from "@messai/contracts";
 
 const env = (k: keyof typeof AGENT_ENV) => process.env[AGENT_ENV[k]];
 const socketPath = env("socket"), token = env("token"), workspaceId = env("workspaceId"), nodeId = env("nodeId");
@@ -429,5 +429,63 @@ try {
       ...(nodeId ? { nodeId } : {}),
     });
     console.log(`notificação enviada [${short(n.notificationId)}]`);
+  } else if (cmd === "routine") {
+    const args = [sub, ...rest].filter((a): a is string => a !== undefined);
+    const flag = (f: string) => { const i = args.indexOf(f); if (i < 0) return undefined; const v = args[i + 1]; args.splice(i, 2); return v; };
+    const has = (f: string) => { const i = args.indexOf(f); if (i < 0) return false; args.splice(i, 1); return true; };
+    const op = args.shift() ?? "list";
+    const listRoutines = () => call<Routine[]>("GET", `/v1/workspaces/${workspaceId}/routines`);
+    const findRoutine = async (ref: string | undefined) => {
+      const r = (ref ?? "").toLowerCase();
+      const all = await listRoutines();
+      const found = all.find((x) => x.routineId.startsWith(r) || x.name.toLowerCase() === r);
+      if (!found || !r) throw new Error(`rotina não encontrada: ${ref ?? ""}`);
+      return found;
+    };
+    if (op === "list") {
+      const list = await listRoutines();
+      if (!list.length) console.log("nenhuma rotina");
+      for (const r of list) {
+        console.log(`${short(r.routineId)}  ${(r.enabled ? "ativa" : "pausada").padEnd(8)}  ${r.name.padEnd(20)}  ${r.actionType} (${r.intervalSeconds}s)  runs=${r.runCount}`);
+      }
+    } else if (op === "create") {
+      const prompt = flag("--prompt");
+      const command = flag("--command");
+      const every = flag("--every");
+      const nodeRef = flag("--node");
+      const once = has("--once");
+      const noWake = has("--no-wake");
+      const name = args.join(" ").trim();
+      if (!name || (!prompt && !command)) throw new Error("uso: mess routine create <nome> (--prompt <texto> [--node <ref>] | --command <cmd>) [--every <seg>] [--once]");
+      let targetNodeId: string | undefined;
+      if (nodeRef) {
+        const s = await snapshot();
+        const n = findNode(s.nodes, nodeRef);
+        if (!n) throw new Error(`terminal não encontrado: ${nodeRef}`);
+        targetNodeId = n.nodeId;
+      }
+      const r = await call<Routine>("POST", `/v1/workspaces/${workspaceId}/routines`, {
+        name,
+        actionType: prompt ? "prompt" : "command",
+        payload: (prompt ?? command)!,
+        ...(targetNodeId ? { targetNodeId } : {}),
+        scheduleType: once ? "once" : "interval",
+        intervalSeconds: every ? Math.max(1, Number(every)) : 300,
+        wakeIfUnloaded: !noWake,
+      });
+      console.log(`rotina "${r.name}" criada [${short(r.routineId)}]`);
+    } else if (op === "run") {
+      const r = await findRoutine(args[0]);
+      const res = await call<RoutineRunResult>("POST", `/v1/routines/${r.routineId}/run`);
+      console.log(`[${res.status}] ${res.output}`);
+    } else if (op === "enable" || op === "disable") {
+      const r = await findRoutine(args[0]);
+      const upd = await call<Routine>("PATCH", `/v1/routines/${r.routineId}`, { enabled: op === "enable" });
+      console.log(`rotina "${upd.name}": ${upd.enabled ? "ativa" : "pausada"}`);
+    } else if (op === "delete") {
+      const r = await findRoutine(args[0]);
+      await call("DELETE", `/v1/routines/${r.routineId}`);
+      console.log(`rotina "${r.name}" removida`);
+    } else throw new Error("uso: mess routine [list|create|run|enable|disable|delete]");
   } else { console.error(`comando desconhecido: ${cmd} ${sub ?? ""}`); process.exit(2); }
 } catch (e) { console.error(String(e instanceof Error ? e.message : e)); process.exit(1); }

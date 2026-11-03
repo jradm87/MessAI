@@ -1,4 +1,4 @@
-import type { NotificationItem, SendNotifyInput, WorkspaceBundle, WorkspaceBundlePreview, ImportWorkspaceInput, DuplicateWorkspaceInput, EnvVarEntry, EnvironmentsState, GitHostEntry, FloorPrState, CreateFloorPrInput, PatchFloorPrInput, ConnectedPeer, CrossNodeCandidate, FloorCopyInfo, PutFloorExcludes, FloorHooksState, PutFloorHooks, RunFloorHookInput, StopFloorHookInput, SessionProcs, KillProcInput, InstructionsStatus, PutInstructions, SyncInstructions, ChatAttachment, ExportAttachment, Band, CreateBand, PatchBand, AskBand, BandAskResult, ApiError, Score, SaveScore, PatchScore, PlaceScore, PlaceScoreResult, AttentionItem, FindHit, FindKind, CompanionConfig, NodeGroup, CreateNodeGroup, PatchNodeGroup, RuntimeSettings, PatchRuntimeSettings, PresetInput, Skill, CreateSkill, PatchSkill, TaskSummary, TreeEntry, FileContent, FsOp, SearchHit, CreateFloor, LandFloor, LandResult, PatchConnection, Role, CreateRole, PatchRole, ChatMessage, SendChat, Attachment, CreateAttachment, FileEntry, Connection as WsConnection, CreateDrawing, PatchDrawing, GroupDrawings, CreateFolder, CreateNode, CreateWorkspace, Drawing, Folder, Geometry, PatchFolder, PatchWorkspace, Preset, Node, PatchNode, Session, Sidebar, Workspace, WorkspaceSnapshot, WsClientMessage, WsServerMessage } from "@messai/contracts";
+import type { Routine, CreateRoutineInput, PatchRoutineInput, RoutineRunResult, NotificationItem, SendNotifyInput, WorkspaceBundle, WorkspaceBundlePreview, ImportWorkspaceInput, DuplicateWorkspaceInput, EnvVarEntry, EnvironmentsState, GitHostEntry, FloorPrState, CreateFloorPrInput, PatchFloorPrInput, ConnectedPeer, CrossNodeCandidate, FloorCopyInfo, PutFloorExcludes, FloorHooksState, PutFloorHooks, RunFloorHookInput, StopFloorHookInput, SessionProcs, KillProcInput, InstructionsStatus, PutInstructions, SyncInstructions, ChatAttachment, ExportAttachment, Band, CreateBand, PatchBand, AskBand, BandAskResult, ApiError, Score, SaveScore, PatchScore, PlaceScore, PlaceScoreResult, AttentionItem, FindHit, FindKind, CompanionConfig, NodeGroup, CreateNodeGroup, PatchNodeGroup, RuntimeSettings, PatchRuntimeSettings, PresetInput, Skill, CreateSkill, PatchSkill, TaskSummary, TreeEntry, FileContent, FsOp, SearchHit, CreateFloor, LandFloor, LandResult, PatchConnection, Role, CreateRole, PatchRole, ChatMessage, SendChat, Attachment, CreateAttachment, FileEntry, Connection as WsConnection, CreateDrawing, PatchDrawing, GroupDrawings, CreateFolder, CreateNode, CreateWorkspace, Drawing, Folder, Geometry, PatchFolder, PatchWorkspace, Preset, Node, PatchNode, Session, Sidebar, Workspace, WorkspaceSnapshot, WsClientMessage, WsServerMessage } from "@messai/contracts";
 
 export type Connection = { baseUrl: string; wsUrl: string; token: string; homeDir?: string };
 export type RunningEntry = { title: string; agentType: string; isAgent: boolean; workspace: string };
@@ -191,6 +191,12 @@ export class Api {
   // #85 Notificações do SO + mess notify
   notifications() { return this.req<NotificationItem[]>("GET", "/v1/notifications"); }
   notify(input: SendNotifyInput) { return this.req<NotificationItem>("POST", "/v1/notify", input); }
+  // #27 Rotinas agendadas e recorrentes
+  routines(wsId: string) { return this.req<Routine[]>("GET", `/v1/workspaces/${wsId}/routines`); }
+  createRoutine(wsId: string, input: CreateRoutineInput) { return this.req<Routine>("POST", `/v1/workspaces/${wsId}/routines`, input); }
+  patchRoutine(id: string, input: PatchRoutineInput) { return this.req<Routine>("PATCH", `/v1/routines/${id}`, input); }
+  deleteRoutine(id: string) { return this.req<void>("DELETE", `/v1/routines/${id}`); }
+  runRoutine(id: string) { return this.req<RoutineRunResult>("POST", `/v1/routines/${id}/run`); }
 }
 
 type Listener = (m: WsServerMessage) => void;

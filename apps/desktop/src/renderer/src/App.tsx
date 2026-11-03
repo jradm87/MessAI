@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Background, BackgroundVariant, MiniMap, ReactFlow, applyNodeChanges, applyEdgeChanges, type EdgeChange, useReactFlow, ReactFlowProvider, useOnViewportChange, type Connection as FlowConnection, type Edge, type EdgeTypes, type Node as FlowNode, type NodeChange, type NodeTypes } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Map as MapIcon, Minus, Plus, Activity, Layers, AlignStartVertical, AlignCenterVertical, AlignEndVertical, AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal, LayoutGrid, Sun, Moon, Monitor, Sparkles, Undo2, Redo2, Magnet } from "lucide-react";
+import { Map as MapIcon, Minus, Plus, Activity, Layers, AlignStartVertical, AlignCenterVertical, AlignEndVertical, AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal, LayoutGrid, Sun, Moon, Monitor, Sparkles, Undo2, Redo2, Magnet, Clock } from "lucide-react";
 import { useAtomValue } from "jotai";
 import { themeAtom } from "./atoms.js";
 import { getThemePref, setThemePref, nextTheme, THEME_LABEL, cssVar } from "./theme.js";
@@ -39,6 +39,7 @@ import { GroupLayer, type Guides } from "./GroupLayer.js";
 import { Palette, type PaletteAction } from "./Palette.js";
 import { ScoresDialog } from "./ScoresDialog.js";
 import { BandsDialog } from "./BandsDialog.js";
+import { RoutinesDialog } from "./RoutinesDialog.js";
 import { bandsOfNode } from "./bands.js";
 import { BinderNode } from "./BinderNode.js";
 import { binderAddPage, binderRemovePage, emptyBinder, parseBinder, serializeBinder } from "@messai/domain";
@@ -59,7 +60,7 @@ function freeSpot(nodes: { geometry: Geometry }[], size: { w: number; h: number 
 const isTyping = () => { const el = document.activeElement as HTMLElement | null; return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable || el.classList.contains("xterm-helper-textarea")); };
 
 type UndoProps = { canUndo: boolean; canRedo: boolean; undoLabel: string | null; redoLabel: string | null; onUndo: () => void; onRedo: () => void };
-function ZoomBar({ minimap, setMinimap, onUsage, agents, wsName, inFloors, onFloors, hud, onHud, history }: { minimap: boolean; setMinimap: (v: boolean) => void; onUsage: () => void; agents: AgentPresence[]; wsName?: string; inFloors: boolean; onFloors: () => void; hud: boolean; onHud: () => void; history: UndoProps }) {
+function ZoomBar({ minimap, setMinimap, onUsage, onRoutines, agents, wsName, inFloors, onFloors, hud, onHud, history }: { minimap: boolean; setMinimap: (v: boolean) => void; onUsage: () => void; onRoutines: () => void; agents: AgentPresence[]; wsName?: string; inFloors: boolean; onFloors: () => void; hud: boolean; onHud: () => void; history: UndoProps }) {
   const rf = useReactFlow(); const [z, setZ] = useState(100);
   useOnViewportChange({ onChange: (v) => setZ(Math.round(v.zoom * 100)) });
   useAtomValue(themeAtom); // re-renderiza o botão quando o tema efetivo muda
@@ -74,6 +75,7 @@ function ZoomBar({ minimap, setMinimap, onUsage, agents, wsName, inFloors, onFlo
       {wsName && <button className={`bb-pill ${inFloors ? "on" : ""}`} title="Andares" onClick={onFloors} data-testid="ws-pill"><Layers size={15} /><span className="bb-name">{inFloors ? "Floors" : wsName}</span></button>}
       {shownAgents.slice(0, 6).map((a) => <button key={a.kind} className={`bb-circle presence ${a.state}`} title={`${presenceTitle(a)} — clique abre o Agent Usage`} data-testid="bb-agent" data-state={a.state} onClick={onUsage}><AgentIcon id={a.kind} size={20} />{a.count > 1 && <span className="pr-count">{a.count}</span>}<span className="pr-dot" /></button>)}
       {usageOn && shownAgents.length === 0 && <button className="bb-circle" title="Agent Usage" data-testid="bb-usage" onClick={onUsage}><Activity size={15} /></button>}
+      <button className="bb-circle" title="Rotinas agendadas (#27)" data-testid="routines-open-btn" onClick={onRoutines}><Clock size={15} /></button>
       <button className="bb-circle" title={`Tema: ${THEME_LABEL[pref]} (clique alterna Sistema → Claro → Escuro)`} data-testid="theme-toggle" onClick={() => setThemePref(nextTheme(pref))}><ThemeIcon size={15} /></button>
       <button className={`bb-circle ${magnetOn ? "on" : ""}`} title={`Encaixe magnético ao arrastar: ${magnetOn ? "ligado" : "desligado"}${hMagnet}`} data-testid="snap-toggle" onClick={() => setPref("snapMagnetic", !magnetOn)}><Magnet size={15} /></button>
       <button className="bb-circle" title={history.canUndo ? `Desfazer: ${history.undoLabel} (Ctrl+Z)` : "Nada para desfazer"} disabled={!history.canUndo} data-testid="undo" onClick={history.onUndo}><Undo2 size={15} /></button>
@@ -137,6 +139,7 @@ function Canvas({ conn }: { conn: Connection }) {
   const [paletteOpen, setPaletteOpen] = useState(false); // #69 paleta global
   const [scoresOpen, setScoresOpen] = useState(false); // #71 partituras
   const [bandsOpen, setBandsOpen] = useState(false); // #70 bandas
+  const [routinesOpen, setRoutinesOpen] = useState(false); // #27 rotinas agendadas
   const keymap = useKeymap(); const keymapRef = useRef<Keymap>(keymap); keymapRef.current = keymap; // #58 atalhos editáveis
   // #67: estado da janela flutuante do companheiro (vive no processo principal; aqui só espelho + preferência).
   const [hud, setHud] = useState(false);
@@ -495,6 +498,7 @@ function Canvas({ conn }: { conn: Connection }) {
     { id: "scores", label: "Partituras…", detail: "salvar/colocar arranjos", keywords: "template time arranjo salvar colocar" },
     { id: "prefs", label: "Preferências", detail: "Ctrl+,", keywords: "configurações tema atalhos" },
     { id: "bands", label: "Bandas: perguntar/transmitir em lote…", keywords: "banda grupo agentes broadcast" },
+    { id: "routines", label: "Rotinas agendadas…", detail: "comandos e prompts recorrentes", keywords: "rotina cron agendar timer" },
     { id: "instructions", label: "Instruções do projeto (CLAUDE.md / AGENTS.md)…", keywords: "claude agents md instrucoes sincronizar" },
     { id: "theme", label: "Alternar tema", keywords: "claro escuro sistema" },
     { id: "minimap", label: "Alternar minimapa", detail: "Ctrl+Shift+M" },
@@ -516,6 +520,7 @@ function Canvas({ conn }: { conn: Connection }) {
       case "prefs": setPrefsOpen(true); return;
       case "scores": setScoresOpen(true); return;
       case "bands": if (current) setBandsOpen(true); return;
+      case "routines": if (current) setRoutinesOpen(true); return;
       case "instructions": setPref("agentsSub", "instructions"); setPref("prefsTab", "agents"); setPrefsOpen(true); return;
       case "theme": setThemePref(nextTheme(getThemePref())); return;
       case "minimap": setMinimap((v) => !v); return;
@@ -935,6 +940,7 @@ function Canvas({ conn }: { conn: Connection }) {
         {overview && groundOf(overview) && <FloorOverview ground={groundOf(overview)!} floors={side.workspaces.filter((w) => w.parentId === overview)} current={current} terminals={side.terminals} api={api} stream={stream}
           onOpen={(id) => { setCurrent(id); setOverview(null); }} onNew={() => { setFloorDialog(groundOf(overview)!); }} onClose={() => setOverview(null)} onChanged={() => void refreshList()} onError={toast} />}
         {bandsOpen && current && snap && <BandsDialog api={api} workspaceId={current} bands={snap.bands ?? []} terminals={snap.nodes.filter((n) => n.kind === "terminal").map((n) => ({ nodeId: n.nodeId, title: n.title }))} selected={flowRef.current.filter((n) => n.selected).map((n) => n.id)} onClose={() => setBandsOpen(false)} />}
+        {routinesOpen && current && snap && <RoutinesDialog api={api} workspaceId={current} terminals={snap.nodes.filter((n) => n.kind === "terminal").map((n) => ({ nodeId: n.nodeId, title: n.title }))} onClose={() => setRoutinesOpen(false)} />}
         {scoresOpen && current && <ScoresDialog api={api} hasSelection={flowRef.current.filter((n) => n.selected).length} onClose={() => setScoresOpen(false)}
           onSave={async (name, description) => { const ids = flowRef.current.filter((n) => n.selected).map((n) => n.id); await runOp((rev) => api.saveScore(current, { expectedRevision: rev, name, ...(description ? { description } : {}), ...(ids.length ? { nodeIds: ids } : {}) })); }}
           onPlace={async (sc) => { const c = viewCenter(); const r = await runOp((rev) => api.placeScore(current, sc.scoreId, { expectedRevision: rev, at: { x: Math.round(c.x - 200), y: Math.round(c.y - 120) } })); rec({ label: `partitura "${sc.name}"`, forward: [], inverse: r.nodeIds.map((id): Op => ({ type: "deleteNode", id })) }); toast(`Partitura "${sc.name}" colocada: ${plural(r.nodeIds.length, "nó", "nós")}`, "ok"); return r.warnings; }} />}
@@ -957,7 +963,7 @@ function Canvas({ conn }: { conn: Connection }) {
             onErase={(id) => { const dd = snap?.drawings.find((x) => x.drawingId === id); void mutate((r) => api.deleteDrawing(id, r)); if (dd) rec({ label: "apagar desenho", forward: [{ type: "deleteDrawing", id }], inverse: [{ type: "createDrawing", ref: id, spec: drawSpec(dd) }] }); }}
             onCreateRect={onCreateRect} />
         </ReactFlow>
-        <ZoomBar minimap={minimap} setMinimap={setMinimap} onUsage={() => setUsage(true)} agents={barAgents} {...(curWs ? { wsName: curWs.name } : {})} inFloors={!!overview} onFloors={() => (overview ? setOverview(null) : grd && setOverview(grd.workspaceId))} hud={hud} onHud={() => void window.messai.hudToggle?.().then(setHud)} history={{ canUndo: hist().canUndo, canRedo: hist().canRedo, undoLabel: hist().undoLabel, redoLabel: hist().redoLabel, onUndo: () => void undo(), onRedo: () => void redo() }} />
+        <ZoomBar minimap={minimap} setMinimap={setMinimap} onUsage={() => setUsage(true)} onRoutines={() => { if (current) setRoutinesOpen(true); }} agents={barAgents} {...(curWs ? { wsName: curWs.name } : {})} inFloors={!!overview} onFloors={() => (overview ? setOverview(null) : grd && setOverview(grd.workspaceId))} hud={hud} onHud={() => void window.messai.hudToggle?.().then(setHud)} history={{ canUndo: hist().canUndo, canRedo: hist().canRedo, undoLabel: hist().undoLabel, redoLabel: hist().redoLabel, onUndo: () => void undo(), onRedo: () => void redo() }} />
         {usage && <AgentUsage api={api} onClose={() => setUsage(false)} />}
       </main>
     </div>

@@ -5,7 +5,7 @@ import type { WebSocket } from "ws";
 import {
   BUILD_VERSION, PROTOCOL_VERSION, SendMessage, Ask, CreateConnection, CreateDrawing, CreateNode, CreateWorkspace, DeleteNode, PatchNode, PatchWorkspace, ApplyLayout, WsClientMessage,
   type Capabilities, type WsServerMessage, type ApiError,
- CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, PutFloorHooks, RunFloorHookInput, StopFloorHookInput, PutFloorExcludes, CreateFloorPrInput, PatchFloorPrInput, PutGitHostsInput, PutEnvVarsInput, PreviewWorkspaceImportInput, ImportWorkspaceInput, DuplicateWorkspaceInput, SendNotifyInput, FsOp, PatchRuntimeSettings, PutPresets, CreateSkill, PatchSkill, BackupInput, RestoreInput, MoveDataInput, ResetInput, CreateNodeGroup, PatchNodeGroup, SaveScore, PatchScore, PlaceScore, CreateBand, PatchBand, AskBand, MaestroRecruit, MaestroTarget, MaestroAssign, ExportAttachment, PutInstructions, SyncInstructions, KillProcInput, type PresetInput, type Preset } from "@messai/contracts";
+ CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, PutFloorHooks, RunFloorHookInput, StopFloorHookInput, PutFloorExcludes, CreateFloorPrInput, PatchFloorPrInput, PutGitHostsInput, PutEnvVarsInput, PreviewWorkspaceImportInput, ImportWorkspaceInput, DuplicateWorkspaceInput, SendNotifyInput, CreateRoutineInput, PatchRoutineInput, FsOp, PatchRuntimeSettings, PutPresets, CreateSkill, PatchSkill, BackupInput, RestoreInput, MoveDataInput, ResetInput, CreateNodeGroup, PatchNodeGroup, SaveScore, PatchScore, PlaceScore, CreateBand, PatchBand, AskBand, MaestroRecruit, MaestroTarget, MaestroAssign, ExportAttachment, PutInstructions, SyncInstructions, KillProcInput, type PresetInput, type Preset } from "@messai/contracts";
 import type { Result } from "@messai/domain";
 import { newId, type Config } from "./config.js";
 import type { WorkspaceService } from "./service.js";
@@ -176,6 +176,19 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
     const b = body<SendNotifyInput>(SendNotifyInput, req.body); if ("code" in b) return invalid(reply, b);
     return send(reply, svc.sendNotify(b), 201);
   });
+  // #27 — rotinas agendadas e recorrentes
+  app.get<{ Querystring: { workspaceId?: string } }>("/v1/routines", async (req) => svc.listRoutines(req.query.workspaceId));
+  app.get<{ Params: { id: string } }>("/v1/workspaces/:id/routines", async (req) => svc.listRoutines(req.params.id));
+  app.post<{ Params: { id: string } }>("/v1/workspaces/:id/routines", async (req, reply) => {
+    const b = body<CreateRoutineInput>(CreateRoutineInput, req.body); if ("code" in b) return invalid(reply, b);
+    return send(reply, svc.createRoutine(req.params.id, b), 201);
+  });
+  app.patch<{ Params: { id: string } }>("/v1/routines/:id", async (req, reply) => {
+    const b = body<PatchRoutineInput>(PatchRoutineInput, req.body); if ("code" in b) return invalid(reply, b);
+    return send(reply, svc.patchRoutine(req.params.id, b));
+  });
+  app.delete<{ Params: { id: string } }>("/v1/routines/:id", async (req, reply) => send(reply, svc.deleteRoutine(req.params.id), 204));
+  app.post<{ Params: { id: string } }>("/v1/routines/:id/run", async (req, reply) => send(reply, await svc.runRoutine(req.params.id)));
   // #62 — dados: estatísticas, backups, restauração/reset/mover (estas três respondem 202 e o runtime sai; o app sobe outro)
   app.get("/v1/data", async () => svc.dataInfo());
   app.post("/v1/data/backup", async (req, reply) => { const b = body<BackupInput>(BackupInput, req.body ?? {}); if ("code" in b) return invalid(reply, b); return send(reply, svc.createBackup(b.dir), 201); });
