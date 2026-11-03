@@ -2,7 +2,7 @@ import { Type, type Static } from "@sinclair/typebox";
 
 export const PROTOCOL_VERSION = 1 as const;
 /** Incrementar a cada mudança de snapshot/rotas; o cliente avisa quando o runtime está atrás. */
-export const BUILD_VERSION = 25 as const;
+export const BUILD_VERSION = 26 as const;
 
 // ---------- Identidades ----------
 export const Id = Type.String({ minLength: 8, maxLength: 64 });
@@ -113,6 +113,7 @@ export const Workspace = Type.Object({
   excludeDirs: Type.Optional(Type.Array(Type.String())),
   status: Type.Optional(Type.Union([Type.Literal("working"), Type.Literal("blocked"), Type.Literal("review"), Type.Literal("done")])),
   statusText: Type.Optional(Type.String()),
+  unloaded: Type.Optional(Type.Boolean()), // #84 espaço descarregado (hibernado) para poupar CPU/RAM
 });
 export type Workspace = Static<typeof Workspace>;
 export const FloorStatus = Type.Union([Type.Literal("working"), Type.Literal("blocked"), Type.Literal("review"), Type.Literal("done")]);
@@ -435,6 +436,9 @@ export const RuntimeSettings = Type.Object({
   // #80 limite de memória por terminal (0 = sem limite global; o limite por nó vence) e ação ao estourar
   termMemLimitMb: Type.Optional(Type.Integer({ minimum: 0, maximum: 1048576 })),
   termMemAction: Type.Optional(Type.Union([Type.Literal("warn"), Type.Literal("kill")])),
+  // #84 descarregar espaços ociosos automaticamente (0 = desligado, em minutos) e recarregar ao abrir o espaço
+  autoUnloadMinutes: Type.Optional(Type.Integer({ minimum: 0, maximum: 10080 })),
+  reloadOnSelect: Type.Optional(Type.Boolean()),
 });
 export type RuntimeSettings = Static<typeof RuntimeSettings>;
 export const PatchRuntimeSettings = Type.Partial(RuntimeSettings);
@@ -474,6 +478,7 @@ export const SessionState = Type.Union([
   Type.Literal("running"),
   Type.Literal("exited"),
   Type.Literal("lost"), // runtime reiniciou e o PTY não existe mais
+  Type.Literal("unloaded"), // #84 descarregado para poupar CPU/RAM (mantido entre sessões até recarregar)
 ]);
 export type SessionState = Static<typeof SessionState>;
 

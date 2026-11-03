@@ -238,12 +238,22 @@ function GeneralTab({ api, workspaceId }: { api: Api; workspaceId?: string | und
   const webCursor = usePref("webCursor"); const powerMode = usePref("powerMode"); const confirmExit = usePref("confirmExit"); const closeToTray = usePref("closeToTray");
   const [main, setMain] = useState<UiPrefsState | null>(null); // estado real no processo principal (inibidor ativo?)
   const [restore, setRestore] = useState<boolean | null | "erro">(null); // config do runtime
+  const [reloadOnSelect, setReloadOnSelectState] = useState<boolean>(true);
+  const [autoUnloadMin, setAutoUnloadMin] = useState<number>(0);
   useEffect(() => {
     const load = () => window.messai.uiPrefsState?.().then(setMain).catch(() => {});
     void load(); const t = setInterval(() => void load(), 3000); return () => clearInterval(t);
   }, [powerMode]);
-  useEffect(() => { api.settings().then((s) => setRestore(s.restoreSessions)).catch(() => setRestore("erro")); }, [api]);
+  useEffect(() => {
+    api.settings().then((s) => {
+      setRestore(s.restoreSessions);
+      setReloadOnSelectState(s.reloadOnSelect ?? true);
+      setAutoUnloadMin(s.autoUnloadMinutes ?? 0);
+    }).catch(() => setRestore("erro"));
+  }, [api]);
   const setRestoreSessions = (v: boolean) => { setRestore(v); api.patchSettings({ restoreSessions: v }).then((s) => setRestore(s.restoreSessions)).catch(() => setRestore("erro")); };
+  const setReloadOnSelect = (v: boolean) => { setReloadOnSelectState(v); api.patchSettings({ reloadOnSelect: v }).then((s) => setReloadOnSelectState(s.reloadOnSelect ?? true)).catch(() => {}); };
+  const setAutoUnload = (v: number) => { const n = Math.max(0, Math.round(v)); setAutoUnloadMin(n); api.patchSettings({ autoUnloadMinutes: n }).then((s) => setAutoUnloadMin(s.autoUnloadMinutes ?? 0)).catch(() => {}); };
   return (<>
     <Section title="Sistema">
       <Field label="Idioma" hint="A tradução da interface chega com a issue #51; até lá o app é em pt-BR.">
@@ -259,6 +269,12 @@ function GeneralTab({ api, workspaceId }: { api: Api; workspaceId?: string | und
         </div>
       </Field>
       <div className="pf-status" data-testid="power-status">{main ? (main.powerBlocking ? "Inibidor de suspensão ativo agora." : "Inibidor de suspensão inativo.") : ""}</div>
+      <Field label="Recarregar espaço automaticamente ao abrir" hint="Ao selecionar um espaço descarregado na barra lateral, religa seus terminais automaticamente.">
+        <Toggle on={reloadOnSelect} onChange={setReloadOnSelect} testId="pref-reload-on-select" />
+      </Field>
+      <Field label="Descarregar espaços inativos após (min)" hint="0 = nunca descarregar automaticamente. Espaços sem atividade nos terminais são descarregados para poupar RAM.">
+        <input type="number" min={0} max={1440} step={5} style={{ width: 80 }} value={autoUnloadMin} data-testid="pref-auto-unload" onChange={(e) => setAutoUnload(Number(e.target.value) || 0)} />
+      </Field>
     </Section>
     <EnvironmentsEditor api={api} workspaceId={workspaceId} />
     <Section title="Saída do app">

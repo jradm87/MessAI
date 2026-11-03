@@ -224,6 +224,8 @@ function TerminalNodeImpl({ id, data, selected }: NodeProps & { data: TerminalDa
         <button title="Monitor de processos e limite de memória" className={`nodrag ${procsOpen ? "on" : ""}`} data-testid="term-procs-btn" onClick={() => { setProcsOpen((v) => !v); void loadProcs(); }}><Activity size={12} /></button>
         <button title="Buscar no terminal (Ctrl+F)" className="nodrag" onClick={() => setFind((v) => (v === null ? "" : null))}><Search size={12} /></button>
         <button title="Limpar a tela" className="nodrag" onClick={() => termRef.current?.clear()}><Eraser size={12} /></button>
+        {state === "running" && <button title="Descarregar terminal (poupar RAM preservando scrollback)" className="nodrag" data-testid="term-unload-btn" onClick={() => void api.unloadNode(id)}>💤</button>}
+        {state === "unloaded" && <button title="Recarregar terminal" className="nodrag" data-testid="term-reload-btn" onClick={() => void api.reloadNode(id)}>▶</button>}
         {state === "running" && <button title="Parar processo" onClick={() => void api.stop(sessionId)}>■</button>}
         {(state === "exited" || state === "lost") && <button title="Reiniciar" onClick={() => void api.restart(id)}>↻</button>}
         <button title="Remover nó" onClick={data.onDelete}>✕</button>

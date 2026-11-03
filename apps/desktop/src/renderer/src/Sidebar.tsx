@@ -24,6 +24,8 @@ export type SidebarActions = {
   duplicateWorkspace?: (w: Workspace) => void;
   exportWorkspace?: (w: Workspace) => void;
   importWorkspace?: () => void;
+  unloadWorkspace?: (w: Workspace) => void;
+  reloadWorkspace?: (w: Workspace) => void;
 };
 const STATUS_COLOR: Record<string, string> = { working: "#5aa9ff", blocked: "#ff6b6b", review: "#f6c344", done: "#4cd964" };
 type Ctx = { x: number; y: number; ws?: Workspace; folder?: Folder };
@@ -57,10 +59,10 @@ export function Sidebar({ data, current, collapsed, machine, act, signals = {} }
     const floors = data.workspaces.filter((f) => f.parentId === w.workspaceId && (!q || f.name.toLowerCase().includes(q) || (f.branch ?? "").includes(q)));
     const hasFloors = floors.length > 0;
     return [
-      <li key={w.workspaceId} className={`ws ${w.workspaceId === current && !hasFloors ? "on" : ""} ${hasFloors ? "parent" : ""}`} style={{ paddingLeft: 8 + depth * 14 }} draggable onDragStart={(e) => onDragStart(e, "ws", w.workspaceId)}
+      <li key={w.workspaceId} className={`ws ${w.workspaceId === current && !hasFloors ? "on" : ""} ${hasFloors ? "parent" : ""} ${w.unloaded ? "unloaded" : ""}`} style={{ paddingLeft: 8 + depth * 14 }} draggable onDragStart={(e) => onDragStart(e, "ws", w.workspaceId)}
         onClick={() => act.select(w.workspaceId)} onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtx({ x: e.clientX, y: e.clientY, ws: w }); }} title={w.cwd}>
         <WsIcon icon={w.icon} color={w.color} size={13} />
-        {!collapsed && <><span className="nm">{w.name}</span>{hasFloors && <span className="cnt floors" title={`${floors.length} andar(es) — Ctrl+Shift+\\ abre a visão geral`} onClick={(e) => { e.stopPropagation(); act.overview(w); }}><Layers size={11} /></span>}{n > 0 && <span className="cnt" title={`${n} terminais`}><Terminal size={11} /> {n}</span>}<Signal s={signals[w.workspaceId]} /></>}
+        {!collapsed && <><span className="nm">{w.name}</span>{w.unloaded && <span className="cnt unloaded-badge" data-testid="ws-unloaded-badge" title="Espaço descarregado (poupando RAM)">💤</span>}{hasFloors && <span className="cnt floors" title={`${floors.length} andar(es) — Ctrl+Shift+\\ abre a visão geral`} onClick={(e) => { e.stopPropagation(); act.overview(w); }}><Layers size={11} /></span>}{n > 0 && <span className="cnt" title={`${n} terminais`}><Terminal size={11} /> {n}</span>}<Signal s={signals[w.workspaceId]} /></>}
       </li>,
       ...floors.map((f) => (
         <li key={f.workspaceId} className={`ws floor ${f.workspaceId === current ? "on" : ""}`} style={{ paddingLeft: 8 + (depth + 1) * 14 }} data-testid="side-floor"
@@ -127,6 +129,9 @@ export function Sidebar({ data, current, collapsed, machine, act, signals = {} }
             {ctx.ws && <>
               {!ctx.ws.parentId && <><div className="mi" onClick={() => act.newFloor(ctx.ws!)}>Novo andar…</div><div className="mi" onClick={() => act.overview(ctx.ws!)}>Visão geral dos andares</div><hr /></>}
               <div className="mi" onClick={() => act.editWorkspace(ctx.ws!)}>Editar…</div>
+              {ctx.ws.unloaded
+                ? act.reloadWorkspace && <div className="mi" data-testid="ctx-ws-reload" onClick={() => act.reloadWorkspace!(ctx.ws!)}>Recarregar espaço</div>
+                : act.unloadWorkspace && <div className="mi" data-testid="ctx-ws-unload" onClick={() => act.unloadWorkspace!(ctx.ws!)}>Descarregar espaço (poupar RAM)</div>}
               {act.duplicateWorkspace && <div className="mi" data-testid="ctx-ws-duplicate" onClick={() => act.duplicateWorkspace!(ctx.ws!)}>Duplicar espaço</div>}
               {act.exportWorkspace && <div className="mi" data-testid="ctx-ws-export" onClick={() => act.exportWorkspace!(ctx.ws!)}>Exportar espaço (.messai)…</div>}
               <div className="mi" onClick={() => act.moveWorkspace(ctx.ws!, null)}>Tirar da pasta</div>

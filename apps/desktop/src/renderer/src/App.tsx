@@ -791,7 +791,17 @@ function Canvas({ conn }: { conn: Connection }) {
     } catch (e) { toast(e instanceof ApiClientError ? `${e.error.code}: ${e.message}` : String(e)); }
   };
   const sideActions = {
-    select: (id: string) => setCurrent(id),
+    select: (id: string) => {
+      setCurrent(id);
+      const w = side.workspaces.find((x) => x.workspaceId === id);
+      if (w?.unloaded) {
+        void api.settings().then((st) => {
+          if (st.reloadOnSelect !== false) {
+            return api.reloadWorkspace(id).then(() => refreshList());
+          }
+        }).catch(() => {});
+      }
+    },
     settings: () => setPrefsOpen(true),
     newWorkspace: (folderId?: string) => setWsDialog(folderId ? { folderId } : {}),
     editWorkspace: (w: Workspace) => setWsDialog({ edit: w }),
@@ -807,6 +817,8 @@ function Canvas({ conn }: { conn: Connection }) {
     duplicateWorkspace: (w: Workspace) => void api.duplicateWorkspace(w.workspaceId).then(async (dup) => { await refreshList(); setCurrent(dup.workspaceId); toast(`Espaço duplicado: "${dup.name}"`, "ok"); }).catch((e) => toast(e instanceof ApiClientError ? `${e.error.code}: ${e.message}` : String(e))),
     exportWorkspace: (w: Workspace) => setTransferDialog({ mode: "export", workspace: w }),
     importWorkspace: () => setTransferDialog({ mode: "import" }),
+    unloadWorkspace: (w: Workspace) => void api.unloadWorkspace(w.workspaceId).then(async (r) => { await refreshList(); if (current === w.workspaceId) setSnap(await api.snapshot(w.workspaceId)); toast(`Espaço "${w.name}" descarregado (${r.unloadedCount} terminal(is))`, "ok"); }).catch((e) => toast(e instanceof ApiClientError ? `${e.error.code}: ${e.message}` : String(e))),
+    reloadWorkspace: (w: Workspace) => void api.reloadWorkspace(w.workspaceId).then(async (r) => { await refreshList(); if (current === w.workspaceId) setSnap(await api.snapshot(w.workspaceId)); toast(`Espaço "${w.name}" recarregado (${r.reloadedCount} terminal(is))`, "ok"); }).catch((e) => toast(e instanceof ApiClientError ? `${e.error.code}: ${e.message}` : String(e))),
   };
   const submitFloor = async (g: Workspace, i: Parameters<typeof api.createFloor>[1]) => {
     setFloorDialog(null);

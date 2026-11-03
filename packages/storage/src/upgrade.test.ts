@@ -34,6 +34,8 @@ describe("upgrade de bancos antigos", () => {
         for (const t of ["node_groups", "scores", "skills", "search"]) expect(!!s.db.prepare("SELECT 1 FROM sqlite_master WHERE name=?").get(t), t).toBe(true);
         const cols = (s.db.prepare("PRAGMA table_info(nodes)").all() as { name: string }[]).map((c) => c.name);
         for (const c of ["icon", "term_theme", "skill_ids", "group_id"]) expect(cols, c).toContain(c);
+        const wsCols = (s.db.prepare("PRAGMA table_info(workspaces)").all() as { name: string }[]).map((c) => c.name);
+        for (const c of ["copy_mode", "exclude_dirs", "unloaded"]) expect(wsCols, c).toContain(c);
         // funciona de verdade: grupo, skill, score, novo nó indexado por trigger
         s.insertNode({ nodeId: "n2", workspaceId: "w1", kind: "note", title: "Nova", geometry: { x: 0, y: 0, w: 1, h: 1 }, content: "pós-upgrade", createdAt: now, skillIds: ["x"] });
         expect(s.search("upgrade")).toHaveLength(1);

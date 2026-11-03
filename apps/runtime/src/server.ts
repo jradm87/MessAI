@@ -101,6 +101,9 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
     const b = body<DuplicateWorkspaceInput>(DuplicateWorkspaceInput, req.body ?? {}); if ("code" in b) return invalid(reply, b);
     return send(reply, svc.duplicateWorkspace(req.params.id, b), 201);
   });
+  // #84 — Descarregar/recarregar espaços e terminais (poupar CPU/RAM)
+  app.post<{ Params: { id: string } }>("/v1/workspaces/:id/unload", async (req, reply) => send(reply, svc.unloadWorkspace(req.params.id)));
+  app.post<{ Params: { id: string } }>("/v1/workspaces/:id/reload", async (req, reply) => send(reply, svc.reloadWorkspace(req.params.id)));
 
   // #76 — arquivos de instrução do projeto (CLAUDE.md / AGENTS.md)
   app.get<{ Params: { id: string } }>("/v1/workspaces/:id/instructions", async (req, reply) => send(reply, svc.getInstructions(req.params.id)));
@@ -334,6 +337,8 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
   app.get<{ Params: { id: string } }>("/v1/nodes/:id/connected", async (req, reply) => send(reply, svc.connectedNodes(req.params.id)));
   app.get<{ Params: { id: string } }>("/v1/nodes/:id/cross-candidates", async (req, reply) => send(reply, svc.listCrossCandidates(req.params.id)));
   app.post<{ Params: { id: string } }>("/v1/nodes/:id/restart", async (req, reply) => send(reply, svc.restartTerminal(req.params.id)));
+  app.post<{ Params: { id: string } }>("/v1/nodes/:id/unload", async (req, reply) => send(reply, svc.unloadNode(req.params.id)));
+  app.post<{ Params: { id: string } }>("/v1/nodes/:id/reload", async (req, reply) => send(reply, svc.reloadNode(req.params.id)));
   app.get<{ Params: { id: string } }>("/v1/sessions/:id", async (req, reply) => {
     const s = svc.sessions.get(req.params.id);
     return s ? s : reply.status(404).send({ error: { code: "NOT_FOUND", message: "sessão não encontrada" } });

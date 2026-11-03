@@ -180,6 +180,11 @@ export class Api {
   previewWorkspaceImport(bundle: WorkspaceBundle) { return this.req<WorkspaceBundlePreview>("POST", "/v1/workspaces/import/preview", { bundle }); }
   importWorkspace(input: ImportWorkspaceInput) { return this.req<Workspace>("POST", "/v1/workspaces/import", input); }
   duplicateWorkspace(wsId: string, input: DuplicateWorkspaceInput = {}) { return this.req<Workspace>("POST", `/v1/workspaces/${wsId}/duplicate`, input); }
+  // #84 Descarregar/recarregar espaços e terminais
+  unloadWorkspace(wsId: string) { return this.req<{ workspace: Workspace; unloadedCount: number }>("POST", `/v1/workspaces/${wsId}/unload`); }
+  reloadWorkspace(wsId: string) { return this.req<{ workspace: Workspace; reloadedCount: number }>("POST", `/v1/workspaces/${wsId}/reload`); }
+  unloadNode(nodeId: string) { return this.req<Session>("POST", `/v1/nodes/${nodeId}/unload`); }
+  reloadNode(nodeId: string) { return this.req<Session>("POST", `/v1/nodes/${nodeId}/reload`); }
 }
 
 type Listener = (m: WsServerMessage) => void;

@@ -1681,16 +1681,22 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
   settings(): RuntimeSettings {
     const lim = Number(this.store.getMeta("settings.termMemLimitMb") ?? 0) || 0;
     const act = this.store.getMeta("settings.termMemAction");
+    const autoUnload = Number(this.store.getMeta("settings.autoUnloadMinutes") ?? 0) || 0;
+    const reloadOnSel = this.store.getMeta("settings.reloadOnSelect");
     return {
       restoreSessions: this.store.getMeta("settings.restoreSessions") !== "0",
       ...(lim > 0 ? { termMemLimitMb: lim } : {}),
       ...(act === "kill" || act === "warn" ? { termMemAction: act } : {}),
+      ...(autoUnload > 0 ? { autoUnloadMinutes: autoUnload } : {}),
+      reloadOnSelect: reloadOnSel !== "0",
     };
   }
   patchSettings(p: PatchRuntimeSettings): Result<RuntimeSettings> {
     if (p.restoreSessions !== undefined) this.store.setMeta("settings.restoreSessions", p.restoreSessions ? "1" : "0");
     if (p.termMemLimitMb !== undefined) this.store.setMeta("settings.termMemLimitMb", String(Math.max(0, Math.round(p.termMemLimitMb))));
     if (p.termMemAction !== undefined) this.store.setMeta("settings.termMemAction", p.termMemAction === "kill" ? "kill" : "warn");
+    if (p.autoUnloadMinutes !== undefined) this.store.setMeta("settings.autoUnloadMinutes", String(Math.max(0, Math.round(p.autoUnloadMinutes))));
+    if (p.reloadOnSelect !== undefined) this.store.setMeta("settings.reloadOnSelect", p.reloadOnSelect ? "1" : "0");
     return succeed(this.settings());
   }
 
@@ -1732,9 +1738,87 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const s = this.store.getSession(node.sessionId);
     if (!s) return fail("NOT_FOUND", "sessão não encontrada");
     if (s.state === "running") return fail("CONFLICT", "sessão já está rodando");
+    if (s.state === "unloaded") return this.reloadNode(nodeId);
     this.sessions.dispose(s.sessionId);
     this.store.updateSession(s.sessionId, { state: "starting", exitCode: null, pid: null });
     return succeed(this.sessions.start({ ...s, state: "starting" }, this.plan(w, node, s)));
+  }
+
+  // ---- #84 Descarregar/recarregar espaços e terminais (poupar recursos) ----
+  unloadNode(nodeId: string): Result<Session> {
+    const node = this.store.getNode(nodeId);
+    if (!node?.sessionId) return fail("NOT_FOUND", "nó terminal não encontrado");
+    const s = this.store.getSession(node.sessionId);
+    if (!s) return fail("NOT_FOUND", "sessão não encontrada");
+    this.sessions.dispose(s.sessionId, false);
+    this.store.updateSession(s.sessionId, { state: "unloaded", pid: null, exitCode: null });
+    const updated = this.store.getSession(s.sessionId)!;
+    this.sessions.emit("session", updated);
+    this.publish(node.workspaceId);
+    this.publishSidebar();
+    return succeed(updated);
+  }
+
+  reloadNode(nodeId: string): Result<Session> {
+    const node = this.store.getNode(nodeId);
+    if (!node?.sessionId) return fail("NOT_FOUND", "nó terminal não encontrado");
+    const w = this.store.getWorkspace(node.workspaceId)!;
+    const s = this.store.getSession(node.sessionId);
+    if (!s) return fail("NOT_FOUND", "sessão não encontrada");
+    if (s.state === "running") return succeed(s);
+    this.sessions.dispose(s.sessionId, false);
+    const resumed = this.resumeSession(s);
+    this.store.updateSession(s.sessionId, { state: "starting", exitCode: null, pid: null });
+    const started = this.sessions.start({ ...resumed, state: "starting" }, this.plan(w, node, resumed));
+    if (w.unloaded) {
+      this.store.updateWorkspace(w.workspaceId, { unloaded: false }, w.revision + 1);
+    }
+    this.publish(node.workspaceId);
+    this.publishSidebar();
+    return succeed(started);
+  }
+
+  unloadWorkspace(workspaceId: string): Result<{ unloaded: number; unloadedCount: number; workspace: Workspace }> {
+    const w = this.store.getWorkspace(workspaceId);
+    if (!w) return fail("NOT_FOUND", "espaço não encontrado");
+    let count = 0;
+    for (const n of this.store.listNodes(workspaceId)) {
+      if (n.kind !== "terminal" || !n.sessionId) continue;
+      const s = this.store.getSession(n.sessionId);
+      if (!s) continue;
+      if (s.state === "running" || s.state === "starting") count++;
+      this.sessions.dispose(s.sessionId, false);
+      this.store.updateSession(s.sessionId, { state: "unloaded", pid: null, exitCode: null });
+      const updated = this.store.getSession(s.sessionId)!;
+      this.sessions.emit("session", updated);
+    }
+    this.store.updateWorkspace(workspaceId, { unloaded: true }, w.revision + 1);
+    const out = this.publish(workspaceId).workspace;
+    this.publishSidebar();
+    return succeed({ unloaded: count, unloadedCount: count, workspace: out });
+  }
+
+  reloadWorkspace(workspaceId: string): Result<{ reloaded: number; reloadedCount: number; workspace: Workspace }> {
+    const w = this.store.getWorkspace(workspaceId);
+    if (!w) return fail("NOT_FOUND", "espaço não encontrado");
+    this.store.updateWorkspace(workspaceId, { unloaded: false }, w.revision + 1);
+    const updatedWs = this.store.getWorkspace(workspaceId)!;
+    let count = 0;
+    for (const n of this.store.listNodes(workspaceId)) {
+      if (n.kind !== "terminal" || !n.sessionId) continue;
+      const s = this.store.getSession(n.sessionId);
+      if (!s || s.state === "running") continue;
+      if (s.state === "unloaded" || s.state === "lost" || s.state === "exited") {
+        this.sessions.dispose(s.sessionId, false);
+        const resumed = this.resumeSession(s);
+        this.store.updateSession(s.sessionId, { state: "starting", exitCode: null, pid: null });
+        this.sessions.start({ ...resumed, state: "starting" }, this.plan(updatedWs, n, resumed));
+        count++;
+      }
+    }
+    const out = this.publish(workspaceId).workspace;
+    this.publishSidebar();
+    return succeed({ reloaded: count, reloadedCount: count, workspace: out });
   }
 
   createDrawing(workspaceId: string, input: CreateDrawing): Result<Drawing> {

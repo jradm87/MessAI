@@ -3,7 +3,7 @@
 import { request } from "node:http";
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
-import { AGENT_ENV, type Band, type BandAskResult, type AskResult, type ChatMessage, type EnvVarEntry, type FloorCopyInfo, type FloorHooksState, type FloorPrState, type GitHostEntry, type Message, type Node, type Workspace, type WorkspaceBundle, type WorkspaceBundlePreview, type WorkspaceSnapshot } from "@messai/contracts";
+import { AGENT_ENV, type Band, type BandAskResult, type AskResult, type ChatMessage, type EnvVarEntry, type FloorCopyInfo, type FloorHooksState, type FloorPrState, type GitHostEntry, type Message, type Node, type Session, type Workspace, type WorkspaceBundle, type WorkspaceBundlePreview, type WorkspaceSnapshot } from "@messai/contracts";
 
 const env = (k: keyof typeof AGENT_ENV) => process.env[AGENT_ENV[k]];
 const socketPath = env("socket"), token = env("token"), workspaceId = env("workspaceId"), nodeId = env("nodeId");
@@ -392,5 +392,29 @@ try {
       const w = await call<Workspace>("POST", `/v1/workspaces/${workspaceId}/duplicate`, { ...(name ? { name } : {}), ...(cwd ? { cwd } : {}) });
       console.log(`duplicado "${w.name}" [${short(w.workspaceId)}]`);
     } else throw new Error("uso: mess workspace [export [arquivo] | preview <arquivo> | import <arquivo> [--name n] [--cwd d] | duplicate [--name n]]");
+  } else if (cmd === "unload" || cmd === "reload") {
+    const args = [sub, ...rest].filter((a): a is string => a !== undefined);
+    const wsFlag = args.includes("--workspace");
+    if (wsFlag) {
+      if (cmd === "unload") {
+        const r = await call<{ workspace: Workspace; unloadedCount: number }>("POST", `/v1/workspaces/${workspaceId}/unload`);
+        console.log(`espaço "${r.workspace.name}" descarregado (${r.unloadedCount} terminal(is))`);
+      } else {
+        const r = await call<{ workspace: Workspace; reloadedCount: number }>("POST", `/v1/workspaces/${workspaceId}/reload`);
+        console.log(`espaço "${r.workspace.name}" recarregado (${r.reloadedCount} terminal(is))`);
+      }
+    } else {
+      const ref = args.join(" ").trim();
+      let targetId = nodeId;
+      if (ref) {
+        const s = await snapshot();
+        const n = findNode(s.nodes, ref);
+        if (!n) throw new Error(`nó não encontrado: ${ref}`);
+        targetId = n.nodeId;
+      }
+      if (!targetId) throw new Error(`uso: mess ${cmd} [<id|título> | --workspace]`);
+      const sess = await call<Session>("POST", `/v1/nodes/${targetId}/${cmd}`);
+      console.log(`terminal [${short(targetId)}] ${cmd === "unload" ? "descarregado" : "recarregado"} (${sess.state})`);
+    }
   } else { console.error(`comando desconhecido: ${cmd} ${sub ?? ""}`); process.exit(2); }
 } catch (e) { console.error(String(e instanceof Error ? e.message : e)); process.exit(1); }
