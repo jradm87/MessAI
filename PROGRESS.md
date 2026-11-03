@@ -32,27 +32,27 @@
 ### Fase 5 — Andares ✅
 - [x] #75 Hooks de andar — `7dd9b05` · [x] #81 Cópia isolada — `1bb5a60` · [x] #82 Conexões cross-floor — `1d5d059` · [x] #31 PR nos andares — `9f70e67`
 
-### Fase 6 — Runtime / infra
-- [ ] #72 Ambientes · #83 Export/import espaço · #84 Unload/reload · #85 Notificações SO · #27 Rotinas · #51 i18n
+### Fase 6 — Runtime / infra ✅ (commits na `auto/fase6`, ainda NÃO enviada ao GitHub)
+- [x] #72 Ambientes `10365c3` · [x] #83 Export/import espaço `cbf57ae` · [x] #84 Unload/reload `c4965f8` · [x] #85 Notificações SO `a608508` · [x] #27 Rotinas `8af8869` · [x] #51 i18n `f24d065`
 
 ### Fase 7 — Fronteira de confiança (antes do hub)
-- [ ] #86 (MESS-01) symlink · #87 (MESS-02) authz por agente
+- [x] #86 (MESS-01) symlink `c43363e` · [ ] **#87 (MESS-02) authz por agente — EM ANDAMENTO, ver "Estado atual"**
 
 ### Fase 8 — Gigantes
 - [ ] #26 Portais · #73 Portais de dispositivo · #30 Editor+git · #28 Hub (dep #87) · #93 (MESS-09) modo isolado
 
 ## Estado atual
-- **Fase atual:** 6 (Runtime / infra)
-- **Concluídas:** Fases 0, 1, 2, 3, 4 e 5 completas (#90 #40 · #54 #65–#68 · #55–#58 #60–#64 #38 · #41 #42 #47 #69 #71 #74 #77 #78 · #70 #29 #76 #79 #80 · #75 #81 #82 #31). Fase 2: só #59 (controle remoto) ficou como stub, vai com o hub #28.
-- **Em andamento:** (nenhuma — Fase 5 concluída; próxima: Fase 6 #72 → #83 → #84 → #85 → #27 → #51)
-- **Bloqueadas:** (nenhuma)
+- **Fase atual:** 7 (Fronteira de confiança) — fechando o #87; depois Fase 8
+- **Concluídas:** Fases 0–6 completas, e #86 da Fase 7 (#90 #40 · #54 #65–#68 · #55–#58 #60–#64 #38 · #41 #42 #47 #69 #71 #74 #77 #78 · #70 #29 #76 #79 #80 · #75 #81 #82 #31). Fase 2: só #59 (controle remoto) ficou como stub, vai com o hub #28.
+- **Em andamento: #87 (MESS-02) credencial por agente + autorização por capacidade.** Trabalho **NÃO commitado** na `auto/fase6` (ainda na árvore de trabalho): `apps/runtime/src/authz.ts` (novo, tabela de regras rota→capacidade), `tests/integration/agent-authz.test.ts` (novo, 4/4 passando), e mudanças em `server.ts`, `service.ts`, `packages/contracts/src/index.ts`. Faltam: suíte inteira verde, revisar cobertura das rotas (default do desktop = token mestre; agentes usam credencial própria com capacidades e expiração; o papel "agente" do chat/notas bloqueadas passa a vir da credencial), commit assinado, push, comentar/fechar #87. **Só depois disso o #28 (hub) pode começar.**
+- **Bloqueadas / quebrado agora:** `tests/integration/settings.test.ts` falha com 2 casos **já no último commit** (confirmado com o #87 guardado de lado): (1) `GET /v1/settings` agora devolve uma chave a mais além de `restoreSessions` (uma fase posterior — provável #51 idioma ou #85/#27 — adicionou configuração e o teste ficou desatualizado) → atualizar a expectativa; (2) `restoreSessions=false` NÃO está impedindo a sessão persistente de subir após "reboot" → **verificar se é regressão real** (suspeito: #84 descarregar/recarregar mexeu em `recoverPersistent`). Corrigir antes de seguir.
 - **Dívida paga:** `tests/e2e/pilot.test.ts` voltou a 18/18 (espaço padrão, tela de encerramento, nós de teste em espaço livre, compositor aberto, pílula do espaço atual).
 - **Commits (assinados, branch `auto/roadmap` + `auto/fase5`):** `e781477` setup · `df6f553` #90 · `01f125c` progress · `a498555` #54 · `09b424f` progress · `6d7fb11` #65 · `bde3e91` progress · `8393b0a` #66 · `24b28ea` progress · `f396041` #67 · `037e003` #67 escopo · `f719476` #64 shell · `c152e06` #55 · `9bfac0d` progress · `53bf1bf` #56 runtime · `5a79039` #56 desktop · `d8391fa` progress · `f031e87` #57 runtime · `a074656` #57 desktop · `6f1e147` progress · `a9654c2` e2e piloto · `c0af29a` #58 · `2e96d9d` progress · `f90d4db` #61+#63 · `10148f9` progress · `65b020a` #60 · `5a054c6` progress · `3b439f9` #62 runtime · `6e00459` #62 desktop · `3d5d748` progress · `1794568` #41 · `89283b2` progress · `ae61feb` #77 · `dfec519` progress · `18c3123` #78 runtime · `8d248fc` #78 desktop · `0f26c7a` #70+#29 · `a010f09` #79 · `73a886b` #76 · `6cb4f14` #80 · `7dd9b05` #75 · `1bb5a60` #81 · `1d5d059` #82 · `9f70e67` #31
-- **Testes:** 223 verdes na suíte determinística (`packages apps tests/integration`) + e2e Electron real fora do CI: `hud.test.ts` 3/3, `prefs.test.ts` 4/4, `terminal-prefs.test.ts` 3/3, `agents-prefs.test.ts` 3/3, `shortcuts.test.ts` 2/2, `about-updates.test.ts` 3/3, `data-prefs.test.ts` 3/3, `undo.test.ts` 3/3, `groups.test.ts` 2/2, `palette` 3/3, `fluidez` 1/1, `presence` 2/2, `scores` 1/1, `binder` 5/5, `bands` 3/3, `chat-attachments` 3/3, `instructions` 1/1, `procs` 1/1, `floor-hooks` 1/1, `floor-copy` 1/1, `cross-connections` 1/1, `floor-pr` 1/1, `pilot` 18/18
-- **Próximas (Fase 6):** #72 Ambientes → #83 Export/import espaço → #84 Unload/reload → #85 Notificações SO → #27 Rotinas → #51 i18n
+- **Testes:** 241 passam / **2 falham (pré-existentes, não são do #87)** — ver Bloqueadas na suíte determinística (`packages apps tests/integration`) + e2e Electron real fora do CI: `hud.test.ts` 3/3, `prefs.test.ts` 4/4, `terminal-prefs.test.ts` 3/3, `agents-prefs.test.ts` 3/3, `shortcuts.test.ts` 2/2, `about-updates.test.ts` 3/3, `data-prefs.test.ts` 3/3, `undo.test.ts` 3/3, `groups.test.ts` 2/2, `palette` 3/3, `fluidez` 1/1, `presence` 2/2, `scores` 1/1, `binder` 5/5, `bands` 3/3, `chat-attachments` 3/3, `instructions` 1/1, `procs` 1/1, `floor-hooks` 1/1, `floor-copy` 1/1, `cross-connections` 1/1, `floor-pr` 1/1, `pilot` 18/18
+- **Próximas:** (1) consertar `settings.test.ts`; (2) fechar #87; (3) **atualizar este arquivo**; (4) Fase 8: #28 hub (+#59) → #26 → #73 → #30 → #93.
 - **Nota:** shutdown do runtime endurecido (zumbi segurando porta) — achado pelo teste do #65.
 - **Nota:** achado pelo e2e do #56: modal ficava atrás da barra inferior (z-index) — corrigido em `5a79039`. CI verde em `c152e06`, `9bfac0d`, `53bf1bf`.
-- **Nota:** CI passou a rodar em `auto/**` a partir de `c152e06` (antes só `main`); BUILD_VERSION atual = **23** (o app troca o runtime antigo sozinho ao abrir).
+- **Nota:** CI passou a rodar em `auto/**` a partir de `c152e06` (antes só `main`); BUILD_VERSION no último commit = **28** (a árvore de trabalho do #87 já mostra 29 — confirme antes de commitar) (o app troca o runtime antigo sozinho ao abrir).
 
 ## Log de execução
 - Setup: branch `auto/roadmap`, assinatura GPG local configurada (Good signature verificada), baseline 78 verdes.
@@ -84,4 +84,9 @@
 **Limites conhecidos (documentados nas issues):** fichário não entra na busca FTS nem em `mess note read`; refazer após "colocar partitura" não recoloca; terminal recriado por undo volta como processo novo; auto-update real só validável com release publicando `latest-linux.yml`; sem medição de FPS em canvas grande.
 
 **Próximas tarefas (ordem do plano em `~/.claude/plans/robust-moseying-biscuit.md`):** Fase 4 #70 Bandas → #29 Maestro → #76 CLAUDE/AGENTS.md → #79 anexos no chat → #80 monitor de processos; Fase 5 #75 #81 #82 #31; Fase 6 #72 #83 #84 #85 #27 #51; Fase 7 **#86 e #87 (segurança) antes do #28**; Fase 8 #26 #73 #30 #28(+#59) #93.
+
+## Mapa de branches e git (atualizado)
+- `main` (`28149ac`) já contém a **Fase 4**. A `auto/fase5` está **5 commits** à frente (no GitHub). A `auto/fase6` está **7 commits à frente da fase5 e só existe local** (precisa de `git push -u origin auto/fase6`). Quando a suíte estiver verde: fazer o merge em cadeia fase5 → fase6 → `main` (fast-forward, sem force) — o dono costuma pedir "faz merge pro main".
+- Há trabalho do #87 **não commitado** na `auto/fase6`; não faça `git stash`/`checkout` que o perca. Para checar se algo falha sem ele: `git stash -u`, testar, `git stash pop`.
+- Hub (#28) depende do #87 (credencial/autorização por agente) — não começar antes.
 
