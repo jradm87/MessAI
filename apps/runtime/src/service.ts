@@ -2,7 +2,8 @@ import { AGENT_ENV, type TreeEntry, type FileContent, type FsOp, type SearchHit,
 import type { RuntimeSettings, PatchRuntimeSettings, PresetInput, Skill, CreateSkill, PatchSkill, FindHit, FindKind, NodeGroup, CreateNodeGroup, PatchNodeGroup, AttentionItem, Score, ScoreNode, SaveScore, PatchScore, PlaceScore, PlaceScoreResult } from "@messai/contracts";
 import type { ChatAttachment, ExportAttachment, InstructionsStatus, InstructionFileInfo, PutInstructions, SyncInstructions } from "@messai/contracts";
 import type { Band, CreateBand, PatchBand, AskBand, BandAnswer, BandAskResult, MaestroRecruit } from "@messai/contracts";
-import type { FloorHookSection, FloorHooksConfig, PutFloorHooks, FloorHookStatus, FloorHooksState, RunFloorHookInput, StopFloorHookInput, FloorCopyInfo, PutFloorExcludes, ConnectedPeer, CrossNodeCandidate, GitHostEntry, PutGitHostsInput, FloorPrState, CreateFloorPrInput, PatchFloorPrInput, FloorPrReviewStatus, FloorPrChecksStatus, EnvVarEntry, PutEnvVarsInput, EnvironmentsState } from "@messai/contracts";
+import type { FloorHookSection, FloorHooksConfig, PutFloorHooks, FloorHookStatus, FloorHooksState, RunFloorHookInput, StopFloorHookInput, FloorCopyInfo, PutFloorExcludes, ConnectedPeer, CrossNodeCandidate, GitHostEntry, PutGitHostsInput, FloorPrState, CreateFloorPrInput, PatchFloorPrInput, FloorPrReviewStatus, FloorPrChecksStatus, EnvVarEntry, PutEnvVarsInput, EnvironmentsState, WorkspaceBundle, WorkspaceBundlePreview, ImportWorkspaceInput, DuplicateWorkspaceInput, BundleNode, BundleConnection, BundleGroup, BundleBand, BundleDrawing } from "@messai/contracts";
+import { WORKSPACE_BUNDLE_FORMAT } from "@messai/contracts";
 import { readProcTree } from "./procs.js";
 import type { SessionProcs, KillProcInput } from "@messai/contracts";
 import { listProviders } from "./providers.js";
@@ -1372,6 +1373,299 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const groundVars = w.parentId ? this.parseStoredEnv(this.store.getMeta(this.wsEnvMetaKey(w.parentId))) : undefined;
     const wsVars = this.parseStoredEnv(this.store.getMeta(this.wsEnvMetaKey(w.workspaceId)));
     return mergeEnvLayers(globalVars, groundVars, wsVars);
+  }
+
+  // ---- #83 Exportar/importar espaço (.messai) e duplicar ----
+  exportWorkspace(workspaceId: string): Result<WorkspaceBundle> {
+    const w = this.store.getWorkspace(workspaceId);
+    if (!w) return fail("NOT_FOUND", "espaço não encontrado");
+    const allNodes = this.store.listNodes(workspaceId);
+    const nodeIds = new Set(allNodes.map((n) => n.nodeId));
+    const keyOfNode = new Map(allNodes.map((n, i) => [n.nodeId, `n${i + 1}`]));
+    const allGroups = this.store.listGroups(workspaceId);
+    const keyOfGroup = new Map(allGroups.map((g, i) => [g.groupId, `g${i + 1}`]));
+    const rolesMap = new Map<string, CreateRole>();
+    const skillsMap = new Map<string, CreateSkill>();
+
+    const nodes: BundleNode[] = allNodes.map((n) => {
+      const ses = n.kind === "terminal" && n.sessionId ? this.store.getSession(n.sessionId) : undefined;
+      const role = n.roleId ? this.store.getRole(n.roleId) : undefined;
+      if (role && !rolesMap.has(role.name)) {
+        rolesMap.set(role.name, { name: role.name, badge: role.badge, instructions: role.instructions });
+      }
+      const skillNames: string[] = [];
+      for (const sid of n.skillIds ?? []) {
+        const sk = this.store.getSkill(sid);
+        if (sk) {
+          skillNames.push(sk.name);
+          if (!skillsMap.has(sk.name)) {
+            skillsMap.set(sk.name, { name: sk.name, description: sk.description, instructions: sk.instructions });
+          }
+        }
+      }
+      const groupKey = n.groupId ? keyOfGroup.get(n.groupId) : undefined;
+      return {
+        key: keyOfNode.get(n.nodeId)!,
+        kind: n.kind,
+        title: n.title,
+        geometry: { ...n.geometry },
+        ...(n.kind !== "terminal" && n.content !== undefined ? { content: n.content } : {}),
+        ...(n.color ? { color: n.color } : {}),
+        ...(n.locked ? { locked: true } : {}),
+        ...(n.icon ? { icon: n.icon } : {}),
+        ...(n.termTheme ? { termTheme: n.termTheme } : {}),
+        ...(n.maestro ? { maestro: true } : {}),
+        ...(n.memLimitMb ? { memLimitMb: n.memLimitMb } : {}),
+        ...(role ? { roleName: role.name } : {}),
+        ...(skillNames.length ? { skillNames } : {}),
+        ...(groupKey ? { groupKey } : {}),
+        ...(ses ? { command: ses.command, args: ses.args, cwd: ses.cwd, ...(ses.persistent ? { persistent: true } : {}) } : {}),
+      };
+    });
+
+    const connections: BundleConnection[] = connectionsWithin(this.store.listConnections(workspaceId), nodeIds).map((c) => ({
+      from: keyOfNode.get(c.sourceNodeId)!,
+      to: keyOfNode.get(c.targetNodeId)!,
+      ...(c.label ? { label: c.label } : {}),
+      ...(c.style ? { style: c.style } : {}),
+    }));
+
+    const groups: BundleGroup[] = allGroups.map((g) => ({
+      key: keyOfGroup.get(g.groupId)!,
+      label: g.label,
+      color: g.color,
+    }));
+
+    const bands: BundleBand[] = this.store.listBands(workspaceId).map((b) => ({
+      name: b.name,
+      color: b.color,
+      memberKeys: b.nodeIds.map((id) => keyOfNode.get(id)).filter((k): k is string => !!k),
+    }));
+
+    const drawings: BundleDrawing[] = this.store.listDrawings(workspaceId).map((d) => ({
+      kind: d.kind,
+      points: d.points,
+      color: d.color,
+      width: d.width,
+      ...(d.groupId ? { groupId: d.groupId } : {}),
+    }));
+
+    const envVars = this.parseStoredEnv(this.store.getMeta(this.wsEnvMetaKey(workspaceId)));
+    const hooks = this.readHooksConfig(workspaceId);
+    const hasHooks = Boolean(hooks.setup || hooks.run || hooks.teardown);
+    const savedExcludes = this.store.getMeta(`excludes.${workspaceId}`);
+    let excludeDirs: string[] | undefined;
+    if (savedExcludes) {
+      try { excludeDirs = normalizeFloorExcludes(JSON.parse(savedExcludes) as string[]); } catch { /* */ }
+    }
+
+    return succeed({
+      format: WORKSPACE_BUNDLE_FORMAT,
+      exportedAt: nowIso(),
+      workspace: { name: w.name, cwd: w.cwd, icon: w.icon, color: w.color },
+      nodes,
+      connections,
+      groups,
+      bands,
+      drawings,
+      roles: [...rolesMap.values()],
+      skills: [...skillsMap.values()],
+      envVars,
+      ...(hasHooks ? { hooks } : {}),
+      ...(excludeDirs ? { excludeDirs } : {}),
+    });
+  }
+
+  previewWorkspaceImport(bundle: WorkspaceBundle): Result<WorkspaceBundlePreview> {
+    if (bundle.format !== WORKSPACE_BUNDLE_FORMAT) {
+      return fail("INVALID", `formato de pacote incompatível: ${String(bundle.format)}`);
+    }
+    const warnings: string[] = [];
+    if (!existsSync(bundle.workspace.cwd)) {
+      warnings.push(`O diretório original "${bundle.workspace.cwd}" não existe nesta máquina; será usado "${homedir()}" se não for alterado.`);
+    }
+    const secrets = bundle.envVars.filter((v) => v.secret).length;
+    if (secrets > 0) {
+      warnings.push(`O pacote inclui ${secrets} variável(is) de ambiente marcada(s) como sensível(is).`);
+    }
+    for (const r of bundle.roles) {
+      if (this.store.findRoleByName(r.name)) {
+        warnings.push(`O papel "${r.name}" já existe localmente e será reutilizado.`);
+      }
+    }
+    for (const s of bundle.skills) {
+      if (this.store.findSkillByName(s.name)) {
+        warnings.push(`A habilidade "${s.name}" já existe localmente e será reutilizada.`);
+      }
+    }
+    return succeed({
+      valid: true,
+      name: bundle.workspace.name,
+      cwd: bundle.workspace.cwd,
+      exportedAt: bundle.exportedAt,
+      counts: {
+        nodes: bundle.nodes.length,
+        terminals: bundle.nodes.filter((n) => n.kind === "terminal").length,
+        notes: bundle.nodes.filter((n) => n.kind === "note" || n.kind === "text").length,
+        binders: bundle.nodes.filter((n) => n.kind === "binder").length,
+        connections: bundle.connections.length,
+        groups: bundle.groups.length,
+        bands: bundle.bands.length,
+        drawings: bundle.drawings.length,
+        roles: bundle.roles.length,
+        skills: bundle.skills.length,
+        envVars: bundle.envVars.length,
+        secrets,
+      },
+      nodeTitles: bundle.nodes.map((n) => `${n.title} (${n.kind})`),
+      roleNames: bundle.roles.map((r) => r.name),
+      skillNames: bundle.skills.map((s) => s.name),
+      envKeys: bundle.envVars.map((v) => v.key),
+      warnings,
+    });
+  }
+
+  importWorkspace(input: ImportWorkspaceInput): Result<Workspace> {
+    const { bundle } = input;
+    if (bundle.format !== WORKSPACE_BUNDLE_FORMAT) {
+      return fail("INVALID", `formato de pacote incompatível: ${String(bundle.format)}`);
+    }
+    const targetCwd = input.cwd?.trim() || (existsSync(bundle.workspace.cwd) ? bundle.workspace.cwd : homedir());
+    const targetName = input.name?.trim() || bundle.workspace.name;
+    const wsRes = this.createWorkspace({
+      name: targetName,
+      cwd: targetCwd,
+      icon: bundle.workspace.icon,
+      color: bundle.workspace.color,
+      ...(input.folderId ? { folderId: input.folderId } : {}),
+    });
+    if (!wsRes.ok) return wsRes;
+    const wsId = wsRes.value.workspaceId;
+
+    // Configura variáveis de ambiente, hooks e pastas excluídas antes de subir os terminais
+    if (input.includeEnv !== false && bundle.envVars.length > 0) {
+      this.putWorkspaceEnv(wsId, { vars: bundle.envVars });
+    }
+    if (bundle.hooks && (bundle.hooks.setup || bundle.hooks.run || bundle.hooks.teardown)) {
+      this.store.setMeta(this.hooksMetaKey(wsId), JSON.stringify(bundle.hooks));
+    }
+    if (bundle.excludeDirs?.length) {
+      this.putFloorExcludes(wsId, { excludeDirs: bundle.excludeDirs });
+    }
+
+    // Garante papéis e habilidades referenciados
+    for (const r of bundle.roles) {
+      if (!this.store.findRoleByName(r.name)) {
+        this.createRole(r);
+      }
+    }
+    for (const s of bundle.skills) {
+      if (!this.store.findSkillByName(s.name)) {
+        this.createSkill(s);
+      }
+    }
+
+    const curRev = () => this.store.getWorkspace(wsId)!.revision;
+    const nodeMap = new Map<string, string>();
+    const groupMembers = new Map<string, string[]>();
+
+    for (const n of bundle.nodes) {
+      const role = n.roleName ? this.store.findRoleByName(n.roleName) : undefined;
+      const skillIds = (n.skillNames ?? [])
+        .map((nm) => this.store.findSkillByName(nm)?.skillId)
+        .filter((x): x is string => !!x);
+      const nodeCwd = n.cwd && existsSync(n.cwd) ? n.cwd : targetCwd;
+      const created = this.createNode(wsId, {
+        expectedRevision: curRev(),
+        kind: n.kind,
+        title: n.title,
+        geometry: n.geometry,
+        ...(n.content !== undefined ? { content: n.content } : {}),
+        ...(n.color ? { color: n.color } : {}),
+        ...(n.icon ? { icon: n.icon } : {}),
+        ...(n.termTheme ? { termTheme: n.termTheme as never } : {}),
+        ...(role ? { roleId: role.roleId } : {}),
+        ...(skillIds.length ? { skillIds } : {}),
+        ...(n.maestro ? { maestro: true } : {}),
+        ...(n.kind === "terminal" && n.command ? { command: n.command, args: n.args ?? [] } : {}),
+        ...(n.kind === "terminal" ? { cwd: nodeCwd } : {}),
+        ...(n.persistent ? { persistent: true } : {}),
+      });
+      if (!created.ok) continue;
+      const newNodeId = created.value.node.nodeId;
+      nodeMap.set(n.key, newNodeId);
+      if (n.locked || n.memLimitMb) {
+        this.patchNode(newNodeId, {
+          expectedRevision: curRev(),
+          ...(n.locked ? { locked: true } : {}),
+          ...(n.memLimitMb ? { memLimitMb: n.memLimitMb } : {}),
+        });
+      }
+      if (n.groupKey) {
+        groupMembers.set(n.groupKey, [...(groupMembers.get(n.groupKey) ?? []), newNodeId]);
+      }
+    }
+
+    for (const g of bundle.groups) {
+      const members = groupMembers.get(g.key) ?? [];
+      if (members.length > 0) {
+        this.createNodeGroup(wsId, {
+          expectedRevision: curRev(),
+          nodeIds: members,
+          label: g.label,
+          color: g.color,
+        });
+      }
+    }
+
+    for (const c of bundle.connections) {
+      const fromId = nodeMap.get(c.from);
+      const toId = nodeMap.get(c.to);
+      if (!fromId || !toId) continue;
+      const conn = this.createConnection(wsId, {
+        expectedRevision: curRev(),
+        sourceNodeId: fromId,
+        targetNodeId: toId,
+        ...(c.label ? { label: c.label } : {}),
+      });
+      if (conn.ok && c.style && c.style !== "rope") {
+        this.patchConnection(conn.value.connectionId, { expectedRevision: curRev(), style: c.style });
+      }
+    }
+
+    for (const b of bundle.bands) {
+      const memberIds = b.memberKeys.map((k) => nodeMap.get(k)).filter((x): x is string => !!x);
+      this.createBand(wsId, { name: b.name, color: b.color, nodeIds: memberIds });
+    }
+
+    for (const d of bundle.drawings) {
+      this.createDrawing(wsId, {
+        expectedRevision: curRev(),
+        kind: d.kind,
+        points: d.points,
+        color: d.color,
+        width: d.width,
+      });
+    }
+
+    this.publish(wsId);
+    this.publishSidebar();
+    return succeed(this.store.getWorkspace(wsId)!);
+  }
+
+  duplicateWorkspace(workspaceId: string, input: DuplicateWorkspaceInput = {}): Result<Workspace> {
+    const w = this.store.getWorkspace(workspaceId);
+    if (!w) return fail("NOT_FOUND", "espaço não encontrado");
+    const exp = this.exportWorkspace(workspaceId);
+    if (!exp.ok) return exp;
+    return this.importWorkspace({
+      bundle: exp.value,
+      name: input.name?.trim() || `${w.name} (cópia)`,
+      cwd: input.cwd?.trim() || w.cwd,
+      ...(input.folderId !== undefined ? { folderId: input.folderId } : w.folderId ? { folderId: w.folderId } : {}),
+      includeEnv: true,
+      ...(input.startTerminals !== undefined ? { startTerminals: input.startTerminals } : {}),
+    });
   }
   /** Reinicia o processo de um nó terminal cuja sessão saiu ou se perdeu. Mesmo sessionId. */
   // #56 — presets de Início rápido (persistidos na meta; padrões como semente).

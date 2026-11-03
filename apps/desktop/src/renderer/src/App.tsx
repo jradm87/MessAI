@@ -9,6 +9,7 @@ import { BUILD_VERSION, type Role, type Drawing, type Folder, type Geometry, typ
 import { gridLayout, alignGeometries, type AlignMode, snapGeometry } from "@messai/domain";
 import { Sidebar } from "./Sidebar.js";
 import { WorkspaceDialog, type WorkspaceInput } from "./WorkspaceDialog.js";
+import { WorkspaceTransferDialog } from "./WorkspaceTransferDialog.js";
 import { RolesDialog } from "./RolesDialog.js";
 import { askText } from "./ask.js";
 import { FloorDialog } from "./FloorDialog.js";
@@ -96,6 +97,7 @@ function Canvas({ conn }: { conn: Connection }) {
   const [side, setSide] = useState<SidebarData>({ folders: [], workspaces: [], terminals: {} });
   const [current, setCurrent] = useState<string | null>(null);
   const [wsDialog, setWsDialog] = useState<{ edit?: Workspace; folderId?: string } | null>(null);
+  const [transferDialog, setTransferDialog] = useState<{ mode: "export" | "import"; workspace?: Workspace } | null>(null);
   const [sideMini, setSideMini] = useState(false);
   const [snap, setSnap] = useState<WorkspaceSnapshot | null>(null);
   const [flow, setFlow] = useState<FlowNode[]>([]);
@@ -802,6 +804,9 @@ function Canvas({ conn }: { conn: Connection }) {
     moveFolder: (f: Folder, parentId: string | null) => void run(api.patchFolder(f.folderId, { parentId })),
     newFloor: (g: Workspace) => setFloorDialog(g),
     overview: (g: Workspace) => setOverview(g.workspaceId),
+    duplicateWorkspace: (w: Workspace) => void api.duplicateWorkspace(w.workspaceId).then(async (dup) => { await refreshList(); setCurrent(dup.workspaceId); toast(`Espaço duplicado: "${dup.name}"`, "ok"); }).catch((e) => toast(e instanceof ApiClientError ? `${e.error.code}: ${e.message}` : String(e))),
+    exportWorkspace: (w: Workspace) => setTransferDialog({ mode: "export", workspace: w }),
+    importWorkspace: () => setTransferDialog({ mode: "import" }),
   };
   const submitFloor = async (g: Workspace, i: Parameters<typeof api.createFloor>[1]) => {
     setFloorDialog(null);
@@ -892,6 +897,7 @@ function Canvas({ conn }: { conn: Connection }) {
         {stale && <div className="banner">O runtime em execução é de uma versão anterior ao app. Reinicie o runtime para usar os recursos novos (isso encerra os shells dele; eles ficam como "lost" e podem ser reiniciados).</div>}
         {!current && <div className="empty">Crie um espaço com o botão + da barra lateral ou Ctrl+Shift+N.</div>}
         {wsDialog && <WorkspaceDialog api={api} {...(wsDialog.edit ? { edit: wsDialog.edit } : {})} {...(wsDialog.folderId ? { defaultFolderId: wsDialog.folderId } : {})} defaultCwd={homeDir} folders={side.folders} onSubmit={(i) => void submitWs(i)} onClose={() => setWsDialog(null)} />}
+        {transferDialog && <WorkspaceTransferDialog api={api} mode={transferDialog.mode} {...(transferDialog.workspace ? { workspace: transferDialog.workspace } : {})} onImported={(w) => { void refreshList(); setCurrent(w.workspaceId); toast(`Espaço "${w.name}" importado!`, "ok"); }} onClose={() => setTransferDialog(null)} />}
         {menu && <AddMenu presets={presets.filter((p) => p.enabled)}x={menu.x} y={menu.y} onClose={() => setMenu(null)} onPick={(c) => add(c, menu.at)} />}
         {dialog && <NewTerminalDialog presets={presets.filter((p) => p.enabled)}roles={roles} defaultCwd={snap?.workspace.cwd || homeDir} onClose={() => { setDialog(null); setTool("select"); }} onCreate={(i) => createTerminal(dialog.rect, i)} onManageRoles={() => setRolesDialog(true)} tmux={features.includes("terminal.tmux")} />}
         {preview && snap && <FilePreview api={api} workspaceId={snap.workspace.workspaceId} path={preview} onClose={() => setPreview(null)} onOpenNote={(rel) => { setPreview(null); void mutate((r) => api.createNode(snap.workspace.workspaceId, { expectedRevision: r, kind: "note", geometry: { ...freeSpot(snap.nodes, { w: 360, h: 260 }), w: 360, h: 260 }, filePath: `${snap.workspace.cwd}/${rel}` })); }} />}

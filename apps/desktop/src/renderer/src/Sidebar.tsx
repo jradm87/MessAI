@@ -1,5 +1,5 @@
 import { useMemo, useState, type DragEvent } from "react";
-import { ChevronDown, ChevronRight, Plus, Settings, FolderPlus, Folder as FolderIcon, FolderOpen, Minus, GitBranch, Layers, Terminal } from "lucide-react";
+import { ChevronDown, ChevronRight, Plus, Settings, FolderPlus, Folder as FolderIcon, FolderOpen, Minus, GitBranch, Layers, Terminal, Upload } from "lucide-react";
 import type { Folder, Sidebar as SidebarData, Workspace } from "@messai/contracts";
 import { WsIcon } from "./wsicons.js";
 import { useHint } from "./shortcuts.js";
@@ -21,6 +21,9 @@ export type SidebarActions = {
   moveFolder: (f: Folder, parentId: string | null) => void;
   newFloor: (ground: Workspace) => void;
   overview: (ground: Workspace) => void;
+  duplicateWorkspace?: (w: Workspace) => void;
+  exportWorkspace?: (w: Workspace) => void;
+  importWorkspace?: () => void;
 };
 const STATUS_COLOR: Record<string, string> = { working: "#5aa9ff", blocked: "#ff6b6b", review: "#f6c344", done: "#4cd964" };
 type Ctx = { x: number; y: number; ws?: Workspace; folder?: Folder };
@@ -103,6 +106,7 @@ export function Sidebar({ data, current, collapsed, machine, act, signals = {} }
       {!collapsed && <div className="machine">máquina {machine}</div>}
       <div className="side-top">
         {!collapsed && <input className="filter" placeholder="Filtrar" value={filter} onChange={(e) => setFilter(e.target.value)} data-testid="ws-filter" />}
+        {!collapsed && act.importWorkspace && <button className="tb" title="Importar espaço (.messai)" data-testid="ws-import" onClick={() => act.importWorkspace!()}><Upload size={14} /></button>}
         <button className="tb" title={`Novo espaço${hNew}`} data-testid="ws-new" onClick={() => act.newWorkspace()}><Plus size={16} /></button>
       </div>
       {!collapsed && <div className="sec">WORKSPACES</div>}
@@ -123,6 +127,8 @@ export function Sidebar({ data, current, collapsed, machine, act, signals = {} }
             {ctx.ws && <>
               {!ctx.ws.parentId && <><div className="mi" onClick={() => act.newFloor(ctx.ws!)}>Novo andar…</div><div className="mi" onClick={() => act.overview(ctx.ws!)}>Visão geral dos andares</div><hr /></>}
               <div className="mi" onClick={() => act.editWorkspace(ctx.ws!)}>Editar…</div>
+              {act.duplicateWorkspace && <div className="mi" data-testid="ctx-ws-duplicate" onClick={() => act.duplicateWorkspace!(ctx.ws!)}>Duplicar espaço</div>}
+              {act.exportWorkspace && <div className="mi" data-testid="ctx-ws-export" onClick={() => act.exportWorkspace!(ctx.ws!)}>Exportar espaço (.messai)…</div>}
               <div className="mi" onClick={() => act.moveWorkspace(ctx.ws!, null)}>Tirar da pasta</div>
               <hr /><div className="mi" onClick={() => act.deleteWorkspace(ctx.ws!)}>Apagar espaço</div>
             </>}
@@ -135,6 +141,7 @@ export function Sidebar({ data, current, collapsed, machine, act, signals = {} }
             </>}
             {!ctx.ws && !ctx.folder && <>
               <div className="mi" onClick={() => act.newWorkspace()}>Novo espaço…</div>
+              {act.importWorkspace && <div className="mi" data-testid="ctx-ws-import" onClick={() => act.importWorkspace!()}>Importar espaço (.messai)…</div>}
               <div className="mi" onClick={() => act.newFolder("folder")}>Nova pasta</div>
               <div className="mi" onClick={() => act.newFolder("group")}>Novo grupo</div>
             </>}

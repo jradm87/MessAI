@@ -2,7 +2,7 @@ import { Type, type Static } from "@sinclair/typebox";
 
 export const PROTOCOL_VERSION = 1 as const;
 /** Incrementar a cada mudança de snapshot/rotas; o cliente avisa quando o runtime está atrás. */
-export const BUILD_VERSION = 24 as const;
+export const BUILD_VERSION = 25 as const;
 
 // ---------- Identidades ----------
 export const Id = Type.String({ minLength: 8, maxLength: 64 });
@@ -807,5 +807,124 @@ export const EnvironmentsState = Type.Object({
   workspaces: Type.Record(Type.String(), Type.Array(EnvVarEntry)),
 });
 export type EnvironmentsState = Static<typeof EnvironmentsState>;
+
+// ---------- #83 Exportar/importar espaço (.messai) e duplicar ----------
+export const WORKSPACE_BUNDLE_FORMAT = "messai.workspace.v1" as const;
+export const BundleNode = Type.Object({
+  key: Type.String(),
+  kind: NodeKind,
+  title: Type.String(),
+  geometry: Geometry,
+  content: Type.Optional(Type.String()),
+  color: Type.Optional(Type.String()),
+  locked: Type.Optional(Type.Boolean()),
+  icon: Type.Optional(Type.String()),
+  termTheme: Type.Optional(Type.String()),
+  maestro: Type.Optional(Type.Boolean()),
+  memLimitMb: Type.Optional(Type.Integer()),
+  roleName: Type.Optional(Type.String()),
+  skillNames: Type.Optional(Type.Array(Type.String())),
+  groupKey: Type.Optional(Type.String()),
+  command: Type.Optional(Type.String()),
+  args: Type.Optional(Type.Array(Type.String())),
+  cwd: Type.Optional(Type.String()),
+  persistent: Type.Optional(Type.Boolean()),
+});
+export type BundleNode = Static<typeof BundleNode>;
+export const BundleConnection = Type.Object({
+  from: Type.String(),
+  to: Type.String(),
+  label: Type.Optional(Type.String()),
+  style: Type.Optional(Type.Union([Type.Literal("rope"), Type.Literal("circuit")])),
+});
+export type BundleConnection = Static<typeof BundleConnection>;
+export const BundleGroup = Type.Object({
+  key: Type.String(),
+  label: Type.String(),
+  color: Type.String(),
+});
+export type BundleGroup = Static<typeof BundleGroup>;
+export const BundleBand = Type.Object({
+  name: Type.String(),
+  color: Type.String(),
+  memberKeys: Type.Array(Type.String()),
+});
+export type BundleBand = Static<typeof BundleBand>;
+export const BundleDrawing = Type.Object({
+  kind: Drawing.properties.kind,
+  points: Type.Array(Point, { minItems: 2 }),
+  color: Type.String(),
+  width: Type.Number(),
+  groupId: Type.Optional(Type.String()),
+});
+export type BundleDrawing = Static<typeof BundleDrawing>;
+export const WorkspaceBundle = Type.Object({
+  format: Type.Literal(WORKSPACE_BUNDLE_FORMAT),
+  exportedAt: Type.String(),
+  workspace: Type.Object({
+    name: Type.String(),
+    cwd: Type.String(),
+    icon: Type.String(),
+    color: Type.String(),
+  }),
+  nodes: Type.Array(BundleNode),
+  connections: Type.Array(BundleConnection),
+  groups: Type.Array(BundleGroup),
+  bands: Type.Array(BundleBand),
+  drawings: Type.Array(BundleDrawing),
+  roles: Type.Array(CreateRole),
+  skills: Type.Array(CreateSkill),
+  envVars: Type.Array(EnvVarEntry),
+  hooks: Type.Optional(FloorHooksConfig),
+  excludeDirs: Type.Optional(Type.Array(Type.String())),
+});
+export type WorkspaceBundle = Static<typeof WorkspaceBundle>;
+export const WorkspaceBundlePreview = Type.Object({
+  valid: Type.Boolean(),
+  name: Type.String(),
+  cwd: Type.String(),
+  exportedAt: Type.String(),
+  counts: Type.Object({
+    nodes: Type.Integer(),
+    terminals: Type.Integer(),
+    notes: Type.Integer(),
+    binders: Type.Integer(),
+    connections: Type.Integer(),
+    groups: Type.Integer(),
+    bands: Type.Integer(),
+    drawings: Type.Integer(),
+    roles: Type.Integer(),
+    skills: Type.Integer(),
+    envVars: Type.Integer(),
+    secrets: Type.Integer(),
+  }),
+  nodeTitles: Type.Array(Type.String()),
+  roleNames: Type.Array(Type.String()),
+  skillNames: Type.Array(Type.String()),
+  envKeys: Type.Array(Type.String()),
+  warnings: Type.Array(Type.String()),
+});
+export type WorkspaceBundlePreview = Static<typeof WorkspaceBundlePreview>;
+export const PreviewWorkspaceImportInput = Type.Object({
+  bundle: WorkspaceBundle,
+});
+export type PreviewWorkspaceImportInput = Static<typeof PreviewWorkspaceImportInput>;
+export const ImportWorkspaceInput = Type.Object({
+  bundle: WorkspaceBundle,
+  name: Type.Optional(Type.String({ minLength: 1 })),
+  cwd: Type.Optional(Type.String({ minLength: 1 })),
+  folderId: Type.Optional(Id),
+  includeEnv: Type.Optional(Type.Boolean()),
+  startTerminals: Type.Optional(Type.Boolean()),
+});
+export type ImportWorkspaceInput = Static<typeof ImportWorkspaceInput>;
+export const DuplicateWorkspaceInput = Type.Object({
+  name: Type.Optional(Type.String({ minLength: 1 })),
+  cwd: Type.Optional(Type.String({ minLength: 1 })),
+  folderId: Type.Optional(Id),
+  startTerminals: Type.Optional(Type.Boolean()),
+});
+export type DuplicateWorkspaceInput = Static<typeof DuplicateWorkspaceInput>;
+
 
 

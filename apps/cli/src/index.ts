@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // CLI mínima para agentes e humanos dentro de um terminal REA. Fala com o runtime pelo socket Unix.
 import { request } from "node:http";
+import { readFileSync, writeFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
-import { AGENT_ENV, type Band, type BandAskResult, type AskResult, type ChatMessage, type EnvVarEntry, type FloorCopyInfo, type FloorHooksState, type FloorPrState, type GitHostEntry, type Message, type Node, type Workspace, type WorkspaceSnapshot } from "@messai/contracts";
+import { AGENT_ENV, type Band, type BandAskResult, type AskResult, type ChatMessage, type EnvVarEntry, type FloorCopyInfo, type FloorHooksState, type FloorPrState, type GitHostEntry, type Message, type Node, type Workspace, type WorkspaceBundle, type WorkspaceBundlePreview, type WorkspaceSnapshot } from "@messai/contracts";
 
 const env = (k: keyof typeof AGENT_ENV) => process.env[AGENT_ENV[k]];
 const socketPath = env("socket"), token = env("token"), workspaceId = env("workspaceId"), nodeId = env("nodeId");
@@ -357,5 +358,39 @@ try {
       await call<EnvVarEntry[]>("PUT", endpoint, { vars: next });
       console.log(`${key} removido (${isGlobal ? "global" : "espaço"})`);
     } else throw new Error("uso: mess env [list|set|unset] [--global]");
+  } else if (cmd === "workspace") {
+    const args = [sub, ...rest].filter((a): a is string => a !== undefined);
+    const flag = (f: string) => { const i = args.indexOf(f); if (i < 0) return undefined; const v = args[i + 1]; args.splice(i, 2); return v; };
+    const op = args.shift() ?? "export";
+    if (op === "export") {
+      const outPath = args[0];
+      const bundle = await call<WorkspaceBundle>("GET", `/v1/workspaces/${workspaceId}/export`);
+      const text = JSON.stringify(bundle, null, 2);
+      if (outPath) {
+        writeFileSync(resolvePath(outPath), text, "utf8");
+        console.log(`exportado para ${resolvePath(outPath)} (${bundle.nodes.length} nós)`);
+      } else {
+        console.log(text);
+      }
+    } else if (op === "preview") {
+      const inPath = args[0];
+      if (!inPath) throw new Error("uso: mess workspace preview <arquivo.messai>");
+      const bundle = JSON.parse(readFileSync(resolvePath(inPath), "utf8")) as WorkspaceBundle;
+      const prev = await call<WorkspaceBundlePreview>("POST", "/v1/workspaces/import/preview", { bundle });
+      console.log(`Espaço: ${prev.name} (${prev.cwd}) · ${prev.counts.nodes} nós (${prev.counts.terminals} terminais, ${prev.counts.notes} notas) · ${prev.counts.connections} conexões · ${prev.counts.envVars} vars`);
+    } else if (op === "import") {
+      const name = flag("--name");
+      const cwd = flag("--cwd");
+      const inPath = args[0];
+      if (!inPath) throw new Error("uso: mess workspace import <arquivo.messai> [--name n] [--cwd d]");
+      const bundle = JSON.parse(readFileSync(resolvePath(inPath), "utf8")) as WorkspaceBundle;
+      const w = await call<Workspace>("POST", "/v1/workspaces/import", { bundle, ...(name ? { name } : {}), ...(cwd ? { cwd } : {}) });
+      console.log(`importado "${w.name}" [${short(w.workspaceId)}]`);
+    } else if (op === "duplicate") {
+      const name = flag("--name");
+      const cwd = flag("--cwd");
+      const w = await call<Workspace>("POST", `/v1/workspaces/${workspaceId}/duplicate`, { ...(name ? { name } : {}), ...(cwd ? { cwd } : {}) });
+      console.log(`duplicado "${w.name}" [${short(w.workspaceId)}]`);
+    } else throw new Error("uso: mess workspace [export [arquivo] | preview <arquivo> | import <arquivo> [--name n] [--cwd d] | duplicate [--name n]]");
   } else { console.error(`comando desconhecido: ${cmd} ${sub ?? ""}`); process.exit(2); }
 } catch (e) { console.error(String(e instanceof Error ? e.message : e)); process.exit(1); }

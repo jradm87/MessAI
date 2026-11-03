@@ -5,7 +5,7 @@ import type { WebSocket } from "ws";
 import {
   BUILD_VERSION, PROTOCOL_VERSION, SendMessage, Ask, CreateConnection, CreateDrawing, CreateNode, CreateWorkspace, DeleteNode, PatchNode, PatchWorkspace, ApplyLayout, WsClientMessage,
   type Capabilities, type WsServerMessage, type ApiError,
- CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, PutFloorHooks, RunFloorHookInput, StopFloorHookInput, PutFloorExcludes, CreateFloorPrInput, PatchFloorPrInput, PutGitHostsInput, PutEnvVarsInput, FsOp, PatchRuntimeSettings, PutPresets, CreateSkill, PatchSkill, BackupInput, RestoreInput, MoveDataInput, ResetInput, CreateNodeGroup, PatchNodeGroup, SaveScore, PatchScore, PlaceScore, CreateBand, PatchBand, AskBand, MaestroRecruit, MaestroTarget, MaestroAssign, ExportAttachment, PutInstructions, SyncInstructions, KillProcInput, type PresetInput, type Preset } from "@messai/contracts";
+ CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, PutFloorHooks, RunFloorHookInput, StopFloorHookInput, PutFloorExcludes, CreateFloorPrInput, PatchFloorPrInput, PutGitHostsInput, PutEnvVarsInput, PreviewWorkspaceImportInput, ImportWorkspaceInput, DuplicateWorkspaceInput, FsOp, PatchRuntimeSettings, PutPresets, CreateSkill, PatchSkill, BackupInput, RestoreInput, MoveDataInput, ResetInput, CreateNodeGroup, PatchNodeGroup, SaveScore, PatchScore, PlaceScore, CreateBand, PatchBand, AskBand, MaestroRecruit, MaestroTarget, MaestroAssign, ExportAttachment, PutInstructions, SyncInstructions, KillProcInput, type PresetInput, type Preset } from "@messai/contracts";
 import type { Result } from "@messai/domain";
 import { newId, type Config } from "./config.js";
 import type { WorkspaceService } from "./service.js";
@@ -87,6 +87,20 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
     return send(reply, svc.patchWorkspace(req.params.id, b));
   });
   app.delete<{ Params: { id: string }; Querystring: { deleteBranch?: string } }>("/v1/workspaces/:id", async (req, reply) => send(reply, svc.deleteWorkspace(req.params.id, { deleteBranch: req.query.deleteBranch === "1" }), 204));
+  // #83 — Exportar/importar espaço (.messai) e duplicar
+  app.get<{ Params: { id: string } }>("/v1/workspaces/:id/export", async (req, reply) => send(reply, svc.exportWorkspace(req.params.id)));
+  app.post("/v1/workspaces/import/preview", async (req, reply) => {
+    const b = body<PreviewWorkspaceImportInput>(PreviewWorkspaceImportInput, req.body); if ("code" in b) return invalid(reply, b);
+    return send(reply, svc.previewWorkspaceImport(b.bundle));
+  });
+  app.post("/v1/workspaces/import", async (req, reply) => {
+    const b = body<ImportWorkspaceInput>(ImportWorkspaceInput, req.body); if ("code" in b) return invalid(reply, b);
+    return send(reply, svc.importWorkspace(b), 201);
+  });
+  app.post<{ Params: { id: string } }>("/v1/workspaces/:id/duplicate", async (req, reply) => {
+    const b = body<DuplicateWorkspaceInput>(DuplicateWorkspaceInput, req.body ?? {}); if ("code" in b) return invalid(reply, b);
+    return send(reply, svc.duplicateWorkspace(req.params.id, b), 201);
+  });
 
   // #76 — arquivos de instrução do projeto (CLAUDE.md / AGENTS.md)
   app.get<{ Params: { id: string } }>("/v1/workspaces/:id/instructions", async (req, reply) => send(reply, svc.getInstructions(req.params.id)));
