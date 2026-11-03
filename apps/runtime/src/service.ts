@@ -2,7 +2,7 @@ import { AGENT_ENV, type TreeEntry, type FileContent, type FsOp, type SearchHit,
 import type { RuntimeSettings, PatchRuntimeSettings, PresetInput, Skill, CreateSkill, PatchSkill, FindHit, FindKind, NodeGroup, CreateNodeGroup, PatchNodeGroup, AttentionItem, Score, ScoreNode, SaveScore, PatchScore, PlaceScore, PlaceScoreResult } from "@messai/contracts";
 import type { ChatAttachment, ExportAttachment, InstructionsStatus, InstructionFileInfo, PutInstructions, SyncInstructions } from "@messai/contracts";
 import type { Band, CreateBand, PatchBand, AskBand, BandAnswer, BandAskResult, MaestroRecruit } from "@messai/contracts";
-import type { FloorHookSection, FloorHooksConfig, PutFloorHooks, FloorHookStatus, FloorHooksState, RunFloorHookInput, StopFloorHookInput, FloorCopyInfo, PutFloorExcludes, ConnectedPeer, CrossNodeCandidate, GitHostEntry, PutGitHostsInput, FloorPrState, CreateFloorPrInput, PatchFloorPrInput, FloorPrReviewStatus, FloorPrChecksStatus } from "@messai/contracts";
+import type { FloorHookSection, FloorHooksConfig, PutFloorHooks, FloorHookStatus, FloorHooksState, RunFloorHookInput, StopFloorHookInput, FloorCopyInfo, PutFloorExcludes, ConnectedPeer, CrossNodeCandidate, GitHostEntry, PutGitHostsInput, FloorPrState, CreateFloorPrInput, PatchFloorPrInput, FloorPrReviewStatus, FloorPrChecksStatus, EnvVarEntry, PutEnvVarsInput, EnvironmentsState } from "@messai/contracts";
 import { readProcTree } from "./procs.js";
 import type { SessionProcs, KillProcInput } from "@messai/contracts";
 import { listProviders } from "./providers.js";
@@ -10,7 +10,7 @@ import { probeAccounts } from "./accounts.js";
 import { backupName, copyBackupFiles, dataStats, isBackupName, listBackups, validateBackup, validateMoveTarget, writeManifest, type BackupEntry } from "./data.js";
 import { BUILD_VERSION } from "@messai/contracts";
 import { defaultPresets, parsePresets, validatePresets, PRESETS_META_KEY } from "./presets.js";
-import { applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, DEFAULT_FLOOR_EXCLUDES, normalizeFloorExcludes, shouldExcludeFloorDir, parseGitRemote, buildPrCompareUrl, safeRelPath, looksBinary, canMessage, checkRevision, formatDelivery, normalizeGeometry, planLocalTerminal, resolveNodeRef, resolveCrossNodeRef, validateNewNode, agentKind, agentResume, stripAnsi, fail, succeed, type Result, applySkills, skillsText, placeGeometries, connectionsWithin } from "@messai/domain";
+import { applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, DEFAULT_FLOOR_EXCLUDES, normalizeFloorExcludes, shouldExcludeFloorDir, parseGitRemote, buildPrCompareUrl, normalizeEnvVars, mergeEnvLayers, safeRelPath, looksBinary, canMessage, checkRevision, formatDelivery, normalizeGeometry, planLocalTerminal, resolveNodeRef, resolveCrossNodeRef, validateNewNode, agentKind, agentResume, stripAnsi, fail, succeed, type Result, applySkills, skillsText, placeGeometries, connectionsWithin } from "@messai/domain";
 import { randomUUID } from "node:crypto";
 import { Companion } from "./companion.js";
 import type { Store } from "@messai/storage";
@@ -844,6 +844,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const ground = w.parentId ? this.store.getWorkspace(w.parentId) : undefined;
     return {
       ...baseEnv,
+      ...this.effectiveEnvForWorkspace(w),
       [AGENT_ENV.floorId]: w.workspaceId,
       [AGENT_ENV.floorName]: w.name,
       [AGENT_ENV.floorBranch]: w.branch ?? "",
@@ -1177,6 +1178,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       }
     }
     this.store.deleteMeta(this.hooksMetaKey(id));
+    this.store.deleteMeta(this.wsEnvMetaKey(id));
     this.hookRuns.delete(id);
     if (w.parentId && (w.floorType === "worktree" || w.floorType === "copy")) {
       const ground = this.store.getWorkspace(w.parentId);
@@ -1308,7 +1310,9 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const role = node.roleId ? this.store.getRole(node.roleId) : undefined;
     const skills = (node.skillIds ?? []).map((id) => this.store.getSkill(id)).filter((k): k is Skill => !!k); // #57
     const ground = w.parentId ? this.store.getWorkspace(w.parentId) : undefined;
+    const userEnv = this.effectiveEnvForWorkspace(w);
     const inject = {
+      ...userEnv,
       ...(role ? { [AGENT_ENV.roleName]: role.name, [AGENT_ENV.roleInstructions]: roleText(role) } : {}),
       ...(skills.length ? { [AGENT_ENV.skills]: skills.map((k) => k.name).join(", "), [AGENT_ENV.skillsText]: skillsText(skills) } : {}),
       ...(ground ? { [AGENT_ENV.floorId]: w.workspaceId, [AGENT_ENV.floorName]: w.name, [AGENT_ENV.floorBranch]: w.branch ?? "", [AGENT_ENV.branchName]: w.branch ?? "", [AGENT_ENV.floorPath]: w.cwd, [AGENT_ENV.rootPath]: ground.cwd, [AGENT_ENV.projectName]: ground.name } : { [AGENT_ENV.rootPath]: w.cwd, [AGENT_ENV.projectName]: w.name }),
@@ -1322,6 +1326,52 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     };
     const plan = planLocalTerminal({ command: s.command, args: applySkills(s.command, applyRole(s.command, s.args, role), skills), cwd: s.cwd, defaultShell: this.cfg.defaultShell, baseEnv, inject });
     return s.persistent ? wrapInTmux(plan, tmuxSessionName(s.sessionId), { ...inject, PATH: baseEnv["PATH"]! }, this.cfg.tmuxSocket) : plan;
+  }
+
+  // ---- #72 Ambientes: variáveis de ambiente por espaço e global ----
+  private wsEnvMetaKey(workspaceId: string): string { return `env.ws.${workspaceId}`; }
+  private parseStoredEnv(raw: string | undefined): EnvVarEntry[] {
+    if (!raw) return [];
+    try {
+      const j = JSON.parse(raw) as EnvVarEntry[];
+      if (!Array.isArray(j)) return [];
+      const r = normalizeEnvVars(j);
+      return r.ok ? r.value : [];
+    } catch { return []; }
+  }
+  getGlobalEnv(): EnvVarEntry[] {
+    return this.parseStoredEnv(this.store.getMeta("env.global"));
+  }
+  putGlobalEnv(input: PutEnvVarsInput): Result<EnvVarEntry[]> {
+    const r = normalizeEnvVars(input.vars);
+    if (!r.ok) return r;
+    this.store.setMeta("env.global", JSON.stringify(r.value));
+    return succeed(r.value);
+  }
+  getWorkspaceEnv(workspaceId: string): Result<EnvVarEntry[]> {
+    if (!this.store.getWorkspace(workspaceId)) return fail("NOT_FOUND", "espaço não encontrado");
+    return succeed(this.parseStoredEnv(this.store.getMeta(this.wsEnvMetaKey(workspaceId))));
+  }
+  putWorkspaceEnv(workspaceId: string, input: PutEnvVarsInput): Result<EnvVarEntry[]> {
+    if (!this.store.getWorkspace(workspaceId)) return fail("NOT_FOUND", "espaço não encontrado");
+    const r = normalizeEnvVars(input.vars);
+    if (!r.ok) return r;
+    this.store.setMeta(this.wsEnvMetaKey(workspaceId), JSON.stringify(r.value));
+    return succeed(r.value);
+  }
+  getEnvironments(): EnvironmentsState {
+    const workspaces: Record<string, EnvVarEntry[]> = {};
+    for (const w of this.store.listWorkspaces()) {
+      const list = this.parseStoredEnv(this.store.getMeta(this.wsEnvMetaKey(w.workspaceId)));
+      if (list.length > 0) workspaces[w.workspaceId] = list;
+    }
+    return { global: this.getGlobalEnv(), workspaces };
+  }
+  effectiveEnvForWorkspace(w: Workspace): Record<string, string> {
+    const globalVars = this.getGlobalEnv();
+    const groundVars = w.parentId ? this.parseStoredEnv(this.store.getMeta(this.wsEnvMetaKey(w.parentId))) : undefined;
+    const wsVars = this.parseStoredEnv(this.store.getMeta(this.wsEnvMetaKey(w.workspaceId)));
+    return mergeEnvLayers(globalVars, groundVars, wsVars);
   }
   /** Reinicia o processo de um nó terminal cuja sessão saiu ou se perdeu. Mesmo sessionId. */
   // #56 — presets de Início rápido (persistidos na meta; padrões como semente).

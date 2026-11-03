@@ -5,7 +5,7 @@ import type { WebSocket } from "ws";
 import {
   BUILD_VERSION, PROTOCOL_VERSION, SendMessage, Ask, CreateConnection, CreateDrawing, CreateNode, CreateWorkspace, DeleteNode, PatchNode, PatchWorkspace, ApplyLayout, WsClientMessage,
   type Capabilities, type WsServerMessage, type ApiError,
- CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, PutFloorHooks, RunFloorHookInput, StopFloorHookInput, PutFloorExcludes, CreateFloorPrInput, PatchFloorPrInput, PutGitHostsInput, FsOp, PatchRuntimeSettings, PutPresets, CreateSkill, PatchSkill, BackupInput, RestoreInput, MoveDataInput, ResetInput, CreateNodeGroup, PatchNodeGroup, SaveScore, PatchScore, PlaceScore, CreateBand, PatchBand, AskBand, MaestroRecruit, MaestroTarget, MaestroAssign, ExportAttachment, PutInstructions, SyncInstructions, KillProcInput, type PresetInput, type Preset } from "@messai/contracts";
+ CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, PutFloorHooks, RunFloorHookInput, StopFloorHookInput, PutFloorExcludes, CreateFloorPrInput, PatchFloorPrInput, PutGitHostsInput, PutEnvVarsInput, FsOp, PatchRuntimeSettings, PutPresets, CreateSkill, PatchSkill, BackupInput, RestoreInput, MoveDataInput, ResetInput, CreateNodeGroup, PatchNodeGroup, SaveScore, PatchScore, PlaceScore, CreateBand, PatchBand, AskBand, MaestroRecruit, MaestroTarget, MaestroAssign, ExportAttachment, PutInstructions, SyncInstructions, KillProcInput, type PresetInput, type Preset } from "@messai/contracts";
 import type { Result } from "@messai/domain";
 import { newId, type Config } from "./config.js";
 import type { WorkspaceService } from "./service.js";
@@ -168,6 +168,12 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
   // #55 — configurações do runtime (persistidas; valem para todos os clientes desta máquina)
   app.get("/v1/settings", async () => svc.settings());
   app.patch("/v1/settings", async (req, reply) => { const b = body<PatchRuntimeSettings>(PatchRuntimeSettings, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.patchSettings(b)); });
+  // #72 — Ambientes: variáveis de ambiente por espaço e global
+  app.get("/v1/environments", async () => svc.getEnvironments());
+  app.get("/v1/environments/global", async () => svc.getGlobalEnv());
+  app.put("/v1/environments/global", async (req, reply) => { const b = body<PutEnvVarsInput>(PutEnvVarsInput, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.putGlobalEnv(b)); });
+  app.get<{ Params: { id: string } }>("/v1/workspaces/:id/env", async (req, reply) => send(reply, svc.getWorkspaceEnv(req.params.id)));
+  app.put<{ Params: { id: string } }>("/v1/workspaces/:id/env", async (req, reply) => { const b = body<PutEnvVarsInput>(PutEnvVarsInput, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.putWorkspaceEnv(req.params.id, b)); });
   // #57 skills · #38 provedores · #57 contas
   app.get("/v1/skills", async () => svc.listSkills());
   app.post("/v1/skills", async (req, reply) => { const b = body<CreateSkill>(CreateSkill, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.createSkill(b), 201); });

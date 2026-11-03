@@ -2,7 +2,7 @@
 // CLI mínima para agentes e humanos dentro de um terminal REA. Fala com o runtime pelo socket Unix.
 import { request } from "node:http";
 import { resolve as resolvePath } from "node:path";
-import { AGENT_ENV, type Band, type BandAskResult, type AskResult, type ChatMessage, type FloorCopyInfo, type FloorHooksState, type FloorPrState, type GitHostEntry, type Message, type Node, type Workspace, type WorkspaceSnapshot } from "@messai/contracts";
+import { AGENT_ENV, type Band, type BandAskResult, type AskResult, type ChatMessage, type EnvVarEntry, type FloorCopyInfo, type FloorHooksState, type FloorPrState, type GitHostEntry, type Message, type Node, type Workspace, type WorkspaceSnapshot } from "@messai/contracts";
 
 const env = (k: keyof typeof AGENT_ENV) => process.env[AGENT_ENV[k]];
 const socketPath = env("socket"), token = env("token"), workspaceId = env("workspaceId"), nodeId = env("nodeId");
@@ -60,7 +60,8 @@ try {
   mess floor status <working|blocked|review|done> [texto]   status do andar atual
   mess floor land [--squash] [--keep] [--delete-branch]      pousa o andar atual no térreo
   mess floor delete <id|nome> [--delete-branch]
-  mess floor hooks [set <setup|run|teardown> <cmd> | run [seção] | stop [seção] | logs [seção]]`);
+  mess floor hooks [set <setup|run|teardown> <cmd> | run [seção] | stop [seção] | logs [seção]]
+  mess env [list [--global] [--reveal] | set <KEY=VALUE> [--global] [--secret] | unset <KEY> [--global]]`);
   } else if (cmd === "floor") {
     const s = await snapshot(); const me = s.workspace;
     const groundId = me.parentId ?? me.workspaceId;
@@ -325,5 +326,36 @@ try {
       ...(n ? { targetNodeId: n.nodeId } : { targetRef }),
     });
     console.log(`ligado a "${n ? n.title : targetRef}"`);
+  } else if (cmd === "env") {
+    const args = [sub, ...rest].filter((a): a is string => a !== undefined);
+    const has = (f: string) => { const i = args.indexOf(f); if (i < 0) return false; args.splice(i, 1); return true; };
+    const isGlobal = has("--global");
+    const reveal = has("--reveal");
+    const secret = has("--secret");
+    const op = args.shift() ?? "list";
+    const endpoint = isGlobal ? "/v1/environments/global" : `/v1/workspaces/${workspaceId}/env`;
+    const cur = await call<EnvVarEntry[]>("GET", endpoint);
+    if (op === "list") {
+      if (!cur.length) console.log(isGlobal ? "nenhuma variável global" : "nenhuma variável neste espaço");
+      for (const v of cur) {
+        const val = v.secret && !reveal ? "••••••••" : v.value;
+        console.log(`${v.key}=${val}${v.secret ? "  (secreto)" : ""}`);
+      }
+    } else if (op === "set") {
+      const pair = args.join(" ").trim();
+      const eq = pair.indexOf("=");
+      if (eq <= 0) throw new Error("uso: mess env set <KEY=VALUE> [--global] [--secret]");
+      const key = pair.slice(0, eq).trim();
+      const value = pair.slice(eq + 1);
+      const next = [...cur.filter((v) => v.key !== key), { key, value, ...(secret ? { secret: true } : {}) }];
+      await call<EnvVarEntry[]>("PUT", endpoint, { vars: next });
+      console.log(`${key} salvo (${isGlobal ? "global" : "espaço"})`);
+    } else if (op === "unset") {
+      const key = (args[0] ?? "").trim();
+      if (!key) throw new Error("uso: mess env unset <KEY> [--global]");
+      const next = cur.filter((v) => v.key !== key);
+      await call<EnvVarEntry[]>("PUT", endpoint, { vars: next });
+      console.log(`${key} removido (${isGlobal ? "global" : "espaço"})`);
+    } else throw new Error("uso: mess env [list|set|unset] [--global]");
   } else { console.error(`comando desconhecido: ${cmd} ${sub ?? ""}`); process.exit(2); }
 } catch (e) { console.error(String(e instanceof Error ? e.message : e)); process.exit(1); }

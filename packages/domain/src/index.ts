@@ -1,5 +1,5 @@
 // Regras puras. Proibido importar fs, net, pty, banco (ADR-0009).
-import type { ApiError, Connection, ErrorCode, Geometry, GitHostEntry, GitHostKind, Node, Session, Workspace } from "@messai/contracts";
+import type { ApiError, Connection, EnvVarEntry, ErrorCode, Geometry, GitHostEntry, GitHostKind, Node, Session, Workspace } from "@messai/contracts";
 
 export type Result<T> = { ok: true; value: T } | { ok: false; error: ApiError };
 
@@ -509,4 +509,59 @@ export function binderRemovePage(b: Binder, id: string): { binder: Binder; page:
 }
 /** Move a página para frente (primeira posição) e a ativa. */
 export function binderBringToFront(b: Binder, id: string): Binder { const p = b.pages.find((x) => x.id === id); return p ? { ...b, pages: [p, ...b.pages.filter((x) => x.id !== id)], active: id } : b; }
+
+// ---------- #72 Ambientes: variáveis de ambiente por espaço/global ----------
+const ENV_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const SECRET_KEY_RE = /SECRET|TOKEN|PASSWORD|PASSWD|API_KEY|PRIVATE_KEY|AUTH|CREDENTIAL|BEARER/i;
+
+export function isLikelySecretKey(key: string): boolean {
+  return SECRET_KEY_RE.test(key);
+}
+
+/** Valida e normaliza a lista de variáveis de ambiente (rejeita chaves inválidas e prefixo reservado MESS_). */
+export function normalizeEnvVars(vars: readonly EnvVarEntry[]): Result<EnvVarEntry[]> {
+  const byKey = new Map<string, EnvVarEntry>();
+  for (const item of vars) {
+    const key = item.key.trim();
+    if (!key) continue;
+    if (!ENV_KEY_RE.test(key)) return fail("INVALID", `nome de variável inválido: "${key}" (use letras, números e _)`);
+    if (/^MESS_/i.test(key)) return fail("INVALID", `variáveis iniciadas por MESS_ são reservadas pelo runtime: "${key}"`);
+    const secret = item.secret ?? isLikelySecretKey(key);
+    byKey.set(key, { key, value: item.value, ...(secret ? { secret: true } : {}) });
+  }
+  return succeed([...byKey.values()]);
+}
+
+/** Mescla camadas de variáveis de ambiente em ordem crescente de precedência (ex.: global -> térreo -> andar). */
+export function mergeEnvLayers(...layers: (readonly EnvVarEntry[] | undefined)[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const layer of layers) {
+    if (!layer) continue;
+    for (const v of layer) {
+      if (v.key && !/^MESS_/i.test(v.key)) out[v.key] = v.value;
+    }
+  }
+  return out;
+}
+
+/** Extrai pares KEY=VALUE de texto estilo `.env` (ignora comentários `#` e `export `). */
+export function parseDotEnv(raw: string): EnvVarEntry[] {
+  const out: EnvVarEntry[] = [];
+  for (const line of raw.split(/\r?\n/)) {
+    const t = line.trim();
+    if (!t || t.startsWith("#")) continue;
+    const body = t.startsWith("export ") ? t.slice(7).trim() : t;
+    const eq = body.indexOf("=");
+    if (eq <= 0) continue;
+    const key = body.slice(0, eq).trim();
+    if (!ENV_KEY_RE.test(key) || /^MESS_/i.test(key)) continue;
+    let value = body.slice(eq + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    out.push({ key, value, ...(isLikelySecretKey(key) ? { secret: true } : {}) });
+  }
+  return out;
+}
+
 

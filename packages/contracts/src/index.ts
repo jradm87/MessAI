@@ -2,7 +2,7 @@ import { Type, type Static } from "@sinclair/typebox";
 
 export const PROTOCOL_VERSION = 1 as const;
 /** Incrementar a cada mudança de snapshot/rotas; o cliente avisa quando o runtime está atrás. */
-export const BUILD_VERSION = 23 as const;
+export const BUILD_VERSION = 24 as const;
 
 // ---------- Identidades ----------
 export const Id = Type.String({ minLength: 8, maxLength: 64 });
@@ -790,4 +790,22 @@ export type PatchScore = Static<typeof PatchScore>;
 export const PlaceScore = Type.Object({ expectedRevision: Type.Integer(), at: Type.Object({ x: Type.Number(), y: Type.Number() }) });
 export type PlaceScore = Static<typeof PlaceScore>;
 export type PlaceScoreResult = { nodeIds: string[]; connectionIds: string[]; warnings: string[]; revision: number };
+
+// ---------- #72 Ambientes: variáveis de ambiente por espaço/global ----------
+export const EnvVarEntry = Type.Object({
+  key: Type.String({ minLength: 1, maxLength: 120 }),
+  value: Type.String({ maxLength: 20000 }),
+  secret: Type.Optional(Type.Boolean()),
+});
+export type EnvVarEntry = Static<typeof EnvVarEntry>;
+export const PutEnvVarsInput = Type.Object({
+  vars: Type.Array(EnvVarEntry, { maxItems: 200 }),
+});
+export type PutEnvVarsInput = Static<typeof PutEnvVarsInput>;
+export const EnvironmentsState = Type.Object({
+  global: Type.Array(EnvVarEntry),
+  workspaces: Type.Record(Type.String(), Type.Array(EnvVarEntry)),
+});
+export type EnvironmentsState = Static<typeof EnvironmentsState>;
+
 
