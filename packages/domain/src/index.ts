@@ -435,6 +435,25 @@ export function safeRelPath(rel: string): Result<string> {
   for (const p of rel.split(/[\\/]+/)) { if (p === "" || p === ".") continue; if (p === "..") { if (!parts.length) return fail("INVALID", "caminho fora do espaço"); parts.pop(); continue; } parts.push(p); }
   return succeed(parts.join("/"));
 }
+
+/**
+ * #86 [MESS-01] Verifica se `realTarget` está estritamente dentro de `realRoot` (ou é o próprio `realRoot`)
+ * comparando por componentes de caminho (evita falso-positivo de `startsWith` como `/tmp/ws` vs `/tmp/ws2`).
+ */
+export function isWithinCanonicalRoot(realRoot: string, realTarget: string): boolean {
+  const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "") || "/";
+  const r = norm(realRoot);
+  const t = norm(realTarget);
+  if (r === "/") return t.startsWith("/");
+  if (t === r) return true;
+  const rParts = r.split("/");
+  const tParts = t.split("/");
+  if (tParts.length < rParts.length) return false;
+  for (let i = 0; i < rParts.length; i++) {
+    if (rParts[i] !== tParts[i]) return false;
+  }
+  return true;
+}
 /** Conteúdo parece binário? (NUL nos primeiros bytes) */
 export const looksBinary = (head: Uint8Array): boolean => head.subarray(0, 8000).includes(0);
 

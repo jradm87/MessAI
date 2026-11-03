@@ -11,7 +11,7 @@ import { probeAccounts } from "./accounts.js";
 import { backupName, copyBackupFiles, dataStats, isBackupName, listBackups, validateBackup, validateMoveTarget, writeManifest, type BackupEntry } from "./data.js";
 import { BUILD_VERSION } from "@messai/contracts";
 import { defaultPresets, parsePresets, validatePresets, PRESETS_META_KEY } from "./presets.js";
-import { applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, DEFAULT_FLOOR_EXCLUDES, normalizeFloorExcludes, shouldExcludeFloorDir, parseGitRemote, buildPrCompareUrl, normalizeEnvVars, mergeEnvLayers, safeRelPath, looksBinary, canMessage, checkRevision, formatDelivery, normalizeGeometry, planLocalTerminal, resolveNodeRef, resolveCrossNodeRef, validateNewNode, agentKind, agentResume, stripAnsi, fail, succeed, type Result, applySkills, skillsText, placeGeometries, connectionsWithin } from "@messai/domain";
+import { applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, DEFAULT_FLOOR_EXCLUDES, normalizeFloorExcludes, shouldExcludeFloorDir, parseGitRemote, buildPrCompareUrl, normalizeEnvVars, mergeEnvLayers, safeRelPath, isWithinCanonicalRoot, looksBinary, canMessage, checkRevision, formatDelivery, normalizeGeometry, planLocalTerminal, resolveNodeRef, resolveCrossNodeRef, validateNewNode, agentKind, agentResume, stripAnsi, fail, succeed, type Result, applySkills, skillsText, placeGeometries, connectionsWithin } from "@messai/domain";
 import { randomUUID } from "node:crypto";
 import { Companion } from "./companion.js";
 import type { Store } from "@messai/storage";
@@ -683,7 +683,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const d = this.resolveIn(root.value, input.dir); if (!d.ok) return d;
     try {
       mkdirSync(d.value.abs, { recursive: true });
-      if (!realpathSync(d.value.abs).startsWith(realpathSync(root.value))) return fail("FORBIDDEN", "destino fora do espaço");
+      if (!isWithinCanonicalRoot(d.value.realRoot, realpathSync(d.value.abs))) return fail("FORBIDDEN", "destino fora do espaço");
       const base = (input.name ?? r.value.att.name).replace(/[\\/\0]+/g, "_") || "anexo";
       const ext = extname(base); const stem = ext ? base.slice(0, -ext.length) : base;
       let dest = join(d.value.abs, base);
@@ -740,14 +740,73 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     return this.putInstructions(workspaceId, { target: dst, text: src.text });
   }
 
-  // ---- árvore de arquivos (confinada ao diretório do espaço) ----
+  // ---- árvore de arquivos (confinada ao diretório do espaço, #86 [MESS-01]) ----
   private wsRoot(workspaceId: string): Result<string> {
     const w = this.store.getWorkspace(workspaceId);
     return w ? succeed(w.cwd) : fail("NOT_FOUND", "espaço não encontrado");
   }
-  private resolveIn(root: string, rel: string): Result<{ abs: string; rel: string }> {
-    const r = safeRelPath(rel); if (!r.ok) return r;
-    return succeed({ abs: r.value ? join(root, r.value) : root, rel: r.value });
+  private resolveIn(
+    root: string,
+    rel: string,
+    opts?: { rejectSymlinkLeaf?: boolean },
+  ): Result<{ abs: string; rel: string; realRoot: string }> {
+    const r = safeRelPath(rel);
+    if (!r.ok) return r;
+    let realRoot: string;
+    try {
+      realRoot = realpathSync(root);
+    } catch {
+      return fail("NOT_FOUND", "diretório do espaço não encontrado");
+    }
+    const parts = r.value ? r.value.split("/") : [];
+    let cur = realRoot;
+    for (let i = 0; i < parts.length; i++) {
+      cur = join(cur, parts[i]!);
+      const isLeaf = i === parts.length - 1;
+      let lst: import("node:fs").Stats | null = null;
+      try {
+        lst = lstatSync(cur);
+      } catch {
+        lst = null;
+      }
+      if (!lst) continue;
+      if (lst.isSymbolicLink()) {
+        if (isLeaf && opts?.rejectSymlinkLeaf) {
+          return fail("FORBIDDEN", "operação não permitida sobre symlink");
+        }
+        let targetReal: string;
+        try {
+          targetReal = realpathSync(cur);
+        } catch {
+          // Symlink quebrado: verifica para onde o link aponta
+          try {
+            const linkDest = resolve(dirname(cur), readlinkSync(cur));
+            if (!isWithinCanonicalRoot(realRoot, linkDest)) {
+              return fail("FORBIDDEN", "symlink aponta para fora do espaço");
+            }
+          } catch {
+            return fail("FORBIDDEN", "symlink inválido");
+          }
+          continue;
+        }
+        if (!isWithinCanonicalRoot(realRoot, targetReal)) {
+          return fail("FORBIDDEN", "caminho atravessa symlink para fora do espaço");
+        }
+        cur = targetReal;
+      } else {
+        let realCur: string;
+        try {
+          realCur = realpathSync(cur);
+        } catch {
+          continue;
+        }
+        if (!isWithinCanonicalRoot(realRoot, realCur)) {
+          return fail("FORBIDDEN", "caminho fora da raiz canônica do espaço");
+        }
+        cur = realCur;
+      }
+    }
+    return succeed({ abs: r.value ? join(realRoot, r.value) : realRoot, rel: r.value, realRoot });
   }
   /** Cache curto do `git status` por raiz: listagens repetidas (navegar pastas) não re-spawnam o git. */
   private gitStatusCache = new Map<string, { at: number; map: Map<string, string> }>();
@@ -770,7 +829,14 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     for (const e of entries) {
       if (e.name === ".git") continue; // metadados do git ficam fora da árvore
       const relPath = p.value.rel ? `${p.value.rel}/${e.name}` : e.name;
-      let st: import("node:fs").Stats; try { st = statSync(join(p.value.abs, e.name)); } catch { continue; }
+      const entryAbs = join(p.value.abs, e.name);
+      if (e.isSymbolicLink()) {
+        try {
+          const realEntry = realpathSync(entryAbs);
+          if (!isWithinCanonicalRoot(p.value.realRoot, realEntry)) continue;
+        } catch { continue; }
+      }
+      let st: import("node:fs").Stats; try { st = statSync(entryAbs); } catch { continue; }
       const g = git.get(relPath);
       out.push({ name: e.name, path: relPath, dir: st.isDirectory(), size: st.isDirectory() ? 0 : st.size, mtime: st.mtime.toISOString(), ...(g ? { git: g } : {}) });
     }
@@ -780,25 +846,84 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
   readFile(workspaceId: string, rel: string): Result<FileContent> {
     const root = this.wsRoot(workspaceId); if (!root.ok) return root;
     const p = this.resolveIn(root.value, rel); if (!p.ok) return p;
-    let st: import("node:fs").Stats; try { st = statSync(p.value.abs); } catch { return fail("NOT_FOUND", "arquivo não encontrado"); }
+    let realTarget: string;
+    try { realTarget = realpathSync(p.value.abs); } catch { return fail("NOT_FOUND", "arquivo não encontrado"); }
+    if (!isWithinCanonicalRoot(p.value.realRoot, realTarget)) return fail("FORBIDDEN", "arquivo fora da raiz canônica do espaço");
+    let st: import("node:fs").Stats; try { st = statSync(realTarget); } catch { return fail("NOT_FOUND", "arquivo não encontrado"); }
     if (st.isDirectory()) return fail("INVALID", "é um diretório");
     const LIMIT = 512 * 1024;
-    const fd = openSync(p.value.abs, "r"); const buf = Buffer.alloc(Math.min(st.size, LIMIT)); const n = readSync(fd, buf, 0, buf.length, 0); closeSync(fd);
+    const fd = openSync(realTarget, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+    const buf = Buffer.alloc(Math.min(st.size, LIMIT));
+    const n = readSync(fd, buf, 0, buf.length, 0);
+    closeSync(fd);
     const head = buf.subarray(0, n);
     if (looksBinary(head)) return succeed({ path: p.value.rel, size: st.size, binary: true, truncated: false });
     return succeed({ path: p.value.rel, size: st.size, binary: false, text: head.toString("utf8"), truncated: st.size > LIMIT });
   }
   fsOp(workspaceId: string, input: FsOp): Result<{ path: string }> {
     const root = this.wsRoot(workspaceId); if (!root.ok) return root;
-    const p = this.resolveIn(root.value, input.path); if (!p.ok) return p;
+    const rejectSymlinkLeaf = input.op !== "delete";
+    const p = this.resolveIn(root.value, input.path, { rejectSymlinkLeaf }); if (!p.ok) return p;
     if (!p.value.rel && input.op !== "mkdir") return fail("INVALID", "operação na raiz não permitida");
+    const ensureSafeParent = (targetAbs: string): Result<string> => {
+      const parentDir = dirname(targetAbs);
+      mkdirSync(parentDir, { recursive: true });
+      let realParent: string;
+      try { realParent = realpathSync(parentDir); } catch { return fail("NOT_FOUND", "diretório pai não encontrado"); }
+      if (!isWithinCanonicalRoot(p.value.realRoot, realParent)) return fail("FORBIDDEN", "diretório pai fora da raiz canônica do espaço");
+      return succeed(join(realParent, basename(targetAbs)));
+    };
     try {
-      if (input.op === "mkdir") mkdirSync(p.value.abs, { recursive: true });
-      else if (input.op === "touch") { if (existsSync(p.value.abs)) return fail("CONFLICT", "já existe"); mkdirSync(dirname(p.value.abs), { recursive: true }); writeFileSync(p.value.abs, ""); }
-      else if (input.op === "write") { mkdirSync(dirname(p.value.abs), { recursive: true }); writeFileSync(p.value.abs, input.text ?? ""); }
-      else if (input.op === "rename") { if (!input.to) return fail("INVALID", "destino obrigatório"); const t = this.resolveIn(root.value, input.to); if (!t.ok) return t; if (existsSync(t.value.abs)) return fail("CONFLICT", "destino já existe"); mkdirSync(dirname(t.value.abs), { recursive: true }); renameSync(p.value.abs, t.value.abs); return succeed({ path: t.value.rel }); }
-      else if (input.op === "delete") rmSync(p.value.abs, { recursive: true, force: true });
-    } catch (e) { return fail("INTERNAL", String((e as Error).message ?? e)); }
+      if (input.op === "mkdir") {
+        mkdirSync(p.value.abs, { recursive: true });
+        const realCreated = realpathSync(p.value.abs);
+        if (!isWithinCanonicalRoot(p.value.realRoot, realCreated)) return fail("FORBIDDEN", "diretório criado fora do espaço");
+      } else if (input.op === "touch") {
+        if (existsSync(p.value.abs)) return fail("CONFLICT", "já existe");
+        const safeTarget = ensureSafeParent(p.value.abs);
+        if (!safeTarget.ok) return safeTarget;
+        const fd = openSync(safeTarget.value, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW, 0o644);
+        closeSync(fd);
+      } else if (input.op === "write") {
+        const safeTarget = ensureSafeParent(p.value.abs);
+        if (!safeTarget.ok) return safeTarget;
+        const fd = openSync(safeTarget.value, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | fsConstants.O_NOFOLLOW, 0o644);
+        try {
+          const data = Buffer.from(input.text ?? "", "utf8");
+          writeFileSync(fd, data);
+        } finally {
+          closeSync(fd);
+        }
+      } else if (input.op === "rename") {
+        if (!input.to) return fail("INVALID", "destino obrigatório");
+        const t = this.resolveIn(root.value, input.to, { rejectSymlinkLeaf: true });
+        if (!t.ok) return t;
+        if (existsSync(t.value.abs)) return fail("CONFLICT", "destino já existe");
+        const safeSrc = ensureSafeParent(p.value.abs);
+        if (!safeSrc.ok) return safeSrc;
+        const safeDst = ensureSafeParent(t.value.abs);
+        if (!safeDst.ok) return safeDst;
+        renameSync(safeSrc.value, safeDst.value);
+        return succeed({ path: t.value.rel });
+      } else if (input.op === "delete") {
+        const parentDir = dirname(p.value.abs);
+        if (existsSync(parentDir)) {
+          const realParent = realpathSync(parentDir);
+          if (!isWithinCanonicalRoot(p.value.realRoot, realParent)) return fail("FORBIDDEN", "diretório pai fora do espaço");
+        }
+        let lst: import("node:fs").Stats | null = null;
+        try { lst = lstatSync(p.value.abs); } catch { lst = null; }
+        if (lst?.isSymbolicLink()) {
+          unlinkSync(p.value.abs);
+        } else {
+          rmSync(p.value.abs, { recursive: true, force: true });
+        }
+      }
+    } catch (e) {
+      const code = (e as { code?: string }).code;
+      if (code === "ELOOP") return fail("FORBIDDEN", "operação bloqueada em symlink (ELOOP)");
+      return fail("INTERNAL", String((e as Error).message ?? e));
+    }
     return succeed({ path: p.value.rel });
   }
   /** Busca por nome (substring) ou, com `content`, por conteúdo (grep -rnI, até 200 linhas). */
@@ -811,7 +936,15 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       const walk = (dir: string, rel: string, depth: number) => {
         if (out.length >= 200 || visited > 20000 || depth > 8) return;
         let es: import("node:fs").Dirent[] = []; try { es = readdirSync(dir, { withFileTypes: true }); } catch { return; }
-        for (const e of es) { visited++; const r = rel ? `${rel}/${e.name}` : e.name; if (e.isDirectory() && SKIP.has(e.name)) continue; if (e.name.toLowerCase().includes(needle)) out.push({ path: r }); if (e.isDirectory()) walk(join(dir, e.name), r, depth + 1); if (out.length >= 200) return; }
+        for (const e of es) {
+          visited++;
+          if (e.isSymbolicLink()) continue;
+          const r = rel ? `${rel}/${e.name}` : e.name;
+          if (e.isDirectory() && SKIP.has(e.name)) continue;
+          if (e.name.toLowerCase().includes(needle)) out.push({ path: r });
+          if (e.isDirectory()) walk(join(dir, e.name), r, depth + 1);
+          if (out.length >= 200) return;
+        }
       };
       walk(root.value, "", 0);
       return succeed(out);
@@ -819,7 +952,18 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     // grep async com timeout: um repositório grande não trava o event loop nem as outras rotas.
     const r = await runCmd("grep", ["-rnI", "--exclude-dir=.git", "--exclude-dir=node_modules", "--exclude-dir=dist", "--exclude-dir=build", "-m", "20", "--", q, "."], { cwd: root.value, timeoutMs: 8000 });
     const hits: SearchHit[] = [];
-    for (const line of r.stdout.split("\n")) { const m = /^\.\/(.+?):(\d+):(.*)$/.exec(line); if (m) hits.push({ path: m[1]!, line: Number(m[2]), text: m[3]!.slice(0, 200) }); if (hits.length >= 200) break; }
+    for (const line of r.stdout.split("\n")) {
+      const m = /^\.\/(.+?):(\d+):(.*)$/.exec(line);
+      if (m) {
+        const check = this.resolveIn(root.value, m[1]!);
+        if (!check.ok) continue;
+        try {
+          if (!isWithinCanonicalRoot(check.value.realRoot, realpathSync(check.value.abs))) continue;
+        } catch { continue; }
+        hits.push({ path: m[1]!, line: Number(m[2]), text: m[3]!.slice(0, 200) });
+      }
+      if (hits.length >= 200) break;
+    }
     return succeed(hits);
   }
 
