@@ -1,4 +1,4 @@
-import type { WorkspaceBundle, WorkspaceBundlePreview, ImportWorkspaceInput, DuplicateWorkspaceInput, EnvVarEntry, EnvironmentsState, GitHostEntry, FloorPrState, CreateFloorPrInput, PatchFloorPrInput, ConnectedPeer, CrossNodeCandidate, FloorCopyInfo, PutFloorExcludes, FloorHooksState, PutFloorHooks, RunFloorHookInput, StopFloorHookInput, SessionProcs, KillProcInput, InstructionsStatus, PutInstructions, SyncInstructions, ChatAttachment, ExportAttachment, Band, CreateBand, PatchBand, AskBand, BandAskResult, ApiError, Score, SaveScore, PatchScore, PlaceScore, PlaceScoreResult, AttentionItem, FindHit, FindKind, CompanionConfig, NodeGroup, CreateNodeGroup, PatchNodeGroup, RuntimeSettings, PatchRuntimeSettings, PresetInput, Skill, CreateSkill, PatchSkill, TaskSummary, TreeEntry, FileContent, FsOp, SearchHit, CreateFloor, LandFloor, LandResult, PatchConnection, Role, CreateRole, PatchRole, ChatMessage, SendChat, Attachment, CreateAttachment, FileEntry, Connection as WsConnection, CreateDrawing, PatchDrawing, GroupDrawings, CreateFolder, CreateNode, CreateWorkspace, Drawing, Folder, Geometry, PatchFolder, PatchWorkspace, Preset, Node, PatchNode, Session, Sidebar, Workspace, WorkspaceSnapshot, WsClientMessage, WsServerMessage } from "@messai/contracts";
+import type { NotificationItem, SendNotifyInput, WorkspaceBundle, WorkspaceBundlePreview, ImportWorkspaceInput, DuplicateWorkspaceInput, EnvVarEntry, EnvironmentsState, GitHostEntry, FloorPrState, CreateFloorPrInput, PatchFloorPrInput, ConnectedPeer, CrossNodeCandidate, FloorCopyInfo, PutFloorExcludes, FloorHooksState, PutFloorHooks, RunFloorHookInput, StopFloorHookInput, SessionProcs, KillProcInput, InstructionsStatus, PutInstructions, SyncInstructions, ChatAttachment, ExportAttachment, Band, CreateBand, PatchBand, AskBand, BandAskResult, ApiError, Score, SaveScore, PatchScore, PlaceScore, PlaceScoreResult, AttentionItem, FindHit, FindKind, CompanionConfig, NodeGroup, CreateNodeGroup, PatchNodeGroup, RuntimeSettings, PatchRuntimeSettings, PresetInput, Skill, CreateSkill, PatchSkill, TaskSummary, TreeEntry, FileContent, FsOp, SearchHit, CreateFloor, LandFloor, LandResult, PatchConnection, Role, CreateRole, PatchRole, ChatMessage, SendChat, Attachment, CreateAttachment, FileEntry, Connection as WsConnection, CreateDrawing, PatchDrawing, GroupDrawings, CreateFolder, CreateNode, CreateWorkspace, Drawing, Folder, Geometry, PatchFolder, PatchWorkspace, Preset, Node, PatchNode, Session, Sidebar, Workspace, WorkspaceSnapshot, WsClientMessage, WsServerMessage } from "@messai/contracts";
 
 export type Connection = { baseUrl: string; wsUrl: string; token: string; homeDir?: string };
 export type RunningEntry = { title: string; agentType: string; isAgent: boolean; workspace: string };
@@ -20,6 +20,9 @@ declare global { interface Window { messai: {
   appInfo?: () => Promise<import("./diagnostics.js").AppInfo>;
   // #62 — sobe o runtime de novo (depois de restaurar/mover/apagar) e devolve se ficou saudável
   runtimeRestart?: () => Promise<boolean>; openExternal?: (url: string) => Promise<boolean>; runtimeLogTail?: (lines: number) => Promise<string>; saveText?: (suggestedName: string, text: string) => Promise<string | null>;
+  // #85 — notificações do SO
+  notifyOs?: (p: { title: string; body: string; workspaceId?: string; nodeId?: string; silent?: boolean }) => Promise<unknown>;
+  notifyHistory?: () => Promise<{ title: string; body: string; workspaceId?: string; nodeId?: string; silent?: boolean; at: string }[]>;
 } } }
 export type BackupEntry = { name: string; path: string; bytes: number; manifest: { createdAt: string; buildVersion: number; counts: { workspaces: number; nodes: number; notes: number }; source: string } | null };
 export type DataInfo = { dir: string; source: "env" | "pointer" | "default"; bytes: number; dbBytes: number; notesBytes: number; backupsBytes: number; backupsDir: string; counts: { workspaces: number; nodes: number; notes: number; sessions: number }; backups: BackupEntry[] };
@@ -185,6 +188,9 @@ export class Api {
   reloadWorkspace(wsId: string) { return this.req<{ workspace: Workspace; reloadedCount: number }>("POST", `/v1/workspaces/${wsId}/reload`); }
   unloadNode(nodeId: string) { return this.req<Session>("POST", `/v1/nodes/${nodeId}/unload`); }
   reloadNode(nodeId: string) { return this.req<Session>("POST", `/v1/nodes/${nodeId}/reload`); }
+  // #85 Notificações do SO + mess notify
+  notifications() { return this.req<NotificationItem[]>("GET", "/v1/notifications"); }
+  notify(input: SendNotifyInput) { return this.req<NotificationItem>("POST", "/v1/notify", input); }
 }
 
 type Listener = (m: WsServerMessage) => void;

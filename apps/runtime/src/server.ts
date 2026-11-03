@@ -5,7 +5,7 @@ import type { WebSocket } from "ws";
 import {
   BUILD_VERSION, PROTOCOL_VERSION, SendMessage, Ask, CreateConnection, CreateDrawing, CreateNode, CreateWorkspace, DeleteNode, PatchNode, PatchWorkspace, ApplyLayout, WsClientMessage,
   type Capabilities, type WsServerMessage, type ApiError,
- CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, PutFloorHooks, RunFloorHookInput, StopFloorHookInput, PutFloorExcludes, CreateFloorPrInput, PatchFloorPrInput, PutGitHostsInput, PutEnvVarsInput, PreviewWorkspaceImportInput, ImportWorkspaceInput, DuplicateWorkspaceInput, FsOp, PatchRuntimeSettings, PutPresets, CreateSkill, PatchSkill, BackupInput, RestoreInput, MoveDataInput, ResetInput, CreateNodeGroup, PatchNodeGroup, SaveScore, PatchScore, PlaceScore, CreateBand, PatchBand, AskBand, MaestroRecruit, MaestroTarget, MaestroAssign, ExportAttachment, PutInstructions, SyncInstructions, KillProcInput, type PresetInput, type Preset } from "@messai/contracts";
+ CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, PutFloorHooks, RunFloorHookInput, StopFloorHookInput, PutFloorExcludes, CreateFloorPrInput, PatchFloorPrInput, PutGitHostsInput, PutEnvVarsInput, PreviewWorkspaceImportInput, ImportWorkspaceInput, DuplicateWorkspaceInput, SendNotifyInput, FsOp, PatchRuntimeSettings, PutPresets, CreateSkill, PatchSkill, BackupInput, RestoreInput, MoveDataInput, ResetInput, CreateNodeGroup, PatchNodeGroup, SaveScore, PatchScore, PlaceScore, CreateBand, PatchBand, AskBand, MaestroRecruit, MaestroTarget, MaestroAssign, ExportAttachment, PutInstructions, SyncInstructions, KillProcInput, type PresetInput, type Preset } from "@messai/contracts";
 import type { Result } from "@messai/domain";
 import { newId, type Config } from "./config.js";
 import type { WorkspaceService } from "./service.js";
@@ -170,6 +170,12 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
   // #69 — atenção global (quem espera você) e "já vi"
   app.get("/v1/attention", async () => svc.attention());
   app.post<{ Params: { id: string } }>("/v1/nodes/:id/seen", async (req, reply) => send(reply, svc.markSeen(req.params.id)));
+  // #85 — notificações do SO + mess notify
+  app.get("/v1/notifications", async () => svc.listNotifications());
+  app.post("/v1/notify", async (req, reply) => {
+    const b = body<SendNotifyInput>(SendNotifyInput, req.body); if ("code" in b) return invalid(reply, b);
+    return send(reply, svc.sendNotify(b), 201);
+  });
   // #62 — dados: estatísticas, backups, restauração/reset/mover (estas três respondem 202 e o runtime sai; o app sobe outro)
   app.get("/v1/data", async () => svc.dataInfo());
   app.post("/v1/data/backup", async (req, reply) => { const b = body<BackupInput>(BackupInput, req.body ?? {}); if ("code" in b) return invalid(reply, b); return send(reply, svc.createBackup(b.dir), 201); });
@@ -376,6 +382,8 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
         svc.on("taskSummary", onTaskSummary);
         const onFloorHook = (workspaceId: string, status: import("@messai/contracts").FloorHookStatus) => push({ type: "floorHook", workspaceId, status });
         svc.on("floorHook", onFloorHook);
+        const onNotification = (notification: import("@messai/contracts").NotificationItem) => push({ type: "notification", notification });
+        svc.on("notification", onNotification);
         svc.sessions.on("output", onOutput);
         svc.sessions.on("session", onSession);
         svc.on("workspace", onWorkspace);
@@ -418,7 +426,7 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
         });
         socket.on("close", () => {
           for (const id of attached) svc.sessions.releaseLease(id, clientId);
-          svc.sessions.off("output", onOutput); svc.sessions.off("session", onSession); svc.off("workspace", onWorkspace); svc.off("message", onMessage); svc.sessions.off("taskFinished", onTaskFinished); svc.off("taskSummary", onTaskSummary); svc.off("floorHook", onFloorHook); svc.off("sidebar", onSidebar); svc.off("chat", onChat);
+          svc.sessions.off("output", onOutput); svc.sessions.off("session", onSession); svc.off("workspace", onWorkspace); svc.off("message", onMessage); svc.sessions.off("taskFinished", onTaskFinished); svc.off("taskSummary", onTaskSummary); svc.off("floorHook", onFloorHook); svc.off("notification", onNotification); svc.off("sidebar", onSidebar); svc.off("chat", onChat);
         });
       });
     });

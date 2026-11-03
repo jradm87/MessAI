@@ -32,7 +32,7 @@ import { DrawingLayer, type CreateRect } from "./DrawingLayer.js";
 import { NewTerminalDialog, type NewTerminalInput } from "./NewTerminalDialog.js";
 import { ShutdownOverlay } from "./ShutdownOverlay.js";
 import { Preferences } from "./Preferences.js";
-import { setPref, usePref } from "./prefs.js";
+import { getPrefs, setPref, usePref } from "./prefs.js";
 import { ACTION_BY_ID, comboFromEvent, effectiveCombo, sameCombo, type Keymap } from "./keymap.js";
 import { History, plural, type ConnSpec, type DrawingSpec, type NodeSpec, type Op } from "./undo.js";
 import { GroupLayer, type Guides } from "./GroupLayer.js";
@@ -184,7 +184,25 @@ function Canvas({ conn }: { conn: Connection }) {
   }, []);
   const refreshList = useCallback(async () => { applySide(await api.sidebar()); }, [api, applySide]);
   useEffect(() => { void refreshList(); void api.presets().then(setPresets).catch(() => {}); void api.health().then((h) => setStale((h.buildVersion ?? 0) < BUILD_VERSION)).catch(() => {}); const t = setInterval(() => void refreshList().catch(() => {}), 4000); return () => clearInterval(t); }, [refreshList, api]);
-  useEffect(() => stream.on((m) => { if (m.type === "sidebar") applySide(m.sidebar); }), [stream, applySide]);
+  useEffect(() => stream.on((m) => {
+    if (m.type === "sidebar") applySide(m.sidebar);
+    if (m.type === "notification") {
+      const p = getPrefs();
+      const n = m.notification;
+      if (!p.notifyEnabled) return;
+      if (n.kind === "agent" && !p.notifyAgent) return;
+      if (n.kind === "floor" && !p.notifyFloor) return;
+      if (n.kind === "notify" && !p.notifyCli) return;
+      void window.messai.notifyOs?.({
+        title: n.title,
+        body: n.body,
+        ...(n.workspaceId ? { workspaceId: n.workspaceId } : {}),
+        ...(n.nodeId ? { nodeId: n.nodeId } : {}),
+        silent: !p.notifySound,
+      });
+      toast(`${n.title}: ${n.body}`, "info");
+    }
+  }), [stream, applySide]);
   useEffect(() => { if (current) { try { localStorage.setItem(LAST, current); } catch { /* sem storage */ } } }, [current]);
 
   useEffect(() => {

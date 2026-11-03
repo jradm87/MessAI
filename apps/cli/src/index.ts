@@ -3,7 +3,7 @@
 import { request } from "node:http";
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
-import { AGENT_ENV, type Band, type BandAskResult, type AskResult, type ChatMessage, type EnvVarEntry, type FloorCopyInfo, type FloorHooksState, type FloorPrState, type GitHostEntry, type Message, type Node, type Session, type Workspace, type WorkspaceBundle, type WorkspaceBundlePreview, type WorkspaceSnapshot } from "@messai/contracts";
+import { AGENT_ENV, type Band, type BandAskResult, type AskResult, type ChatMessage, type EnvVarEntry, type FloorCopyInfo, type FloorHooksState, type FloorPrState, type GitHostEntry, type Message, type Node, type NotificationItem, type Session, type Workspace, type WorkspaceBundle, type WorkspaceBundlePreview, type WorkspaceSnapshot } from "@messai/contracts";
 
 const env = (k: keyof typeof AGENT_ENV) => process.env[AGENT_ENV[k]];
 const socketPath = env("socket"), token = env("token"), workspaceId = env("workspaceId"), nodeId = env("nodeId");
@@ -416,5 +416,18 @@ try {
       const sess = await call<Session>("POST", `/v1/nodes/${targetId}/${cmd}`);
       console.log(`terminal [${short(targetId)}] ${cmd === "unload" ? "descarregado" : "recarregado"} (${sess.state})`);
     }
+  } else if (cmd === "notify") {
+    const args = [sub, ...rest].filter((a): a is string => a !== undefined);
+    const flag = (f: string) => { const i = args.indexOf(f); if (i < 0) return undefined; const v = args[i + 1]; args.splice(i, 2); return v; };
+    const title = flag("--title");
+    const text = args.join(" ").trim();
+    if (!text) throw new Error("uso: mess notify <texto> [--title <título>]");
+    const n = await call<NotificationItem>("POST", "/v1/notify", {
+      text,
+      ...(title ? { title } : {}),
+      ...(workspaceId ? { workspaceId } : {}),
+      ...(nodeId ? { nodeId } : {}),
+    });
+    console.log(`notificação enviada [${short(n.notificationId)}]`);
   } else { console.error(`comando desconhecido: ${cmd} ${sub ?? ""}`); process.exit(2); }
 } catch (e) { console.error(String(e instanceof Error ? e.message : e)); process.exit(1); }

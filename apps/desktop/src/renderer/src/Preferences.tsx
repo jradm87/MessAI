@@ -236,6 +236,8 @@ function EnvironmentsEditor({ api, workspaceId }: { api: Api; workspaceId?: stri
 /** #55 — Geral: sistema, energia, ambientes (#72) e saída do app. */
 function GeneralTab({ api, workspaceId }: { api: Api; workspaceId?: string | undefined }) {
   const webCursor = usePref("webCursor"); const powerMode = usePref("powerMode"); const confirmExit = usePref("confirmExit"); const closeToTray = usePref("closeToTray");
+  const notifyEnabled = usePref("notifyEnabled"); const notifySound = usePref("notifySound");
+  const notifyAgent = usePref("notifyAgent"); const notifyFloor = usePref("notifyFloor"); const notifyCli = usePref("notifyCli");
   const [main, setMain] = useState<UiPrefsState | null>(null); // estado real no processo principal (inibidor ativo?)
   const [restore, setRestore] = useState<boolean | null | "erro">(null); // config do runtime
   const [reloadOnSelect, setReloadOnSelectState] = useState<boolean>(true);
@@ -277,6 +279,23 @@ function GeneralTab({ api, workspaceId }: { api: Api; workspaceId?: string | und
       </Field>
     </Section>
     <EnvironmentsEditor api={api} workspaceId={workspaceId} />
+    <Section title="Notificações">
+      <Field label="Notificações do sistema operacional" hint="Exibe notificações nativas quando um agente pede atenção, um andar muda de status ou alguém usa mess notify.">
+        <Toggle on={notifyEnabled} onChange={(v) => setPref("notifyEnabled", v)} testId="pref-notify-enabled" />
+      </Field>
+      <Field label="Som ao notificar" hint="Toca o som padrão do sistema operacional ao exibir uma notificação.">
+        <Toggle on={notifySound} disabled={!notifyEnabled} onChange={(v) => setPref("notifySound", v)} testId="pref-notify-sound" />
+      </Field>
+      <Field label="Agente concluiu / pediu atenção" hint="Notifica quando um agente encerra um turno e aguarda você.">
+        <Toggle on={notifyAgent} disabled={!notifyEnabled} onChange={(v) => setPref("notifyAgent", v)} testId="pref-notify-agent" />
+      </Field>
+      <Field label="Mudança de status de andar" hint="Notifica quando um andar muda para review, blocked, done ou working.">
+        <Toggle on={notifyFloor} disabled={!notifyEnabled} onChange={(v) => setPref("notifyFloor", v)} testId="pref-notify-floor" />
+      </Field>
+      <Field label="Avisos via mess notify" hint="Notifica mensagens enviadas explicitamente pelo comando mess notify.">
+        <Toggle on={notifyCli} disabled={!notifyEnabled} onChange={(v) => setPref("notifyCli", v)} testId="pref-notify-cli" />
+      </Field>
+    </Section>
     <Section title="Saída do app">
       <Field label="Pedir confirmação ao sair" hint="Mostra a tela de encerramento ao fechar a janela (evita parar agentes sem querer). Desligado: fecha e deixa tudo rodando."><Toggle on={confirmExit} onChange={(v) => setPref("confirmExit", v)} testId="pref-confirm-exit" /></Field>
       <Field label="Tentar restaurar sessões de agentes" hint={restore === "erro" ? "Runtime indisponível — não foi possível ler a configuração." : "Após reboot, re-abre os terminais persistentes e retoma a conversa do agente (ADR-0010). Configuração do runtime."}>

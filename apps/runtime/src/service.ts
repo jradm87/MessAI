@@ -2,7 +2,7 @@ import { AGENT_ENV, type TreeEntry, type FileContent, type FsOp, type SearchHit,
 import type { RuntimeSettings, PatchRuntimeSettings, PresetInput, Skill, CreateSkill, PatchSkill, FindHit, FindKind, NodeGroup, CreateNodeGroup, PatchNodeGroup, AttentionItem, Score, ScoreNode, SaveScore, PatchScore, PlaceScore, PlaceScoreResult } from "@messai/contracts";
 import type { ChatAttachment, ExportAttachment, InstructionsStatus, InstructionFileInfo, PutInstructions, SyncInstructions } from "@messai/contracts";
 import type { Band, CreateBand, PatchBand, AskBand, BandAnswer, BandAskResult, MaestroRecruit } from "@messai/contracts";
-import type { FloorHookSection, FloorHooksConfig, PutFloorHooks, FloorHookStatus, FloorHooksState, RunFloorHookInput, StopFloorHookInput, FloorCopyInfo, PutFloorExcludes, ConnectedPeer, CrossNodeCandidate, GitHostEntry, PutGitHostsInput, FloorPrState, CreateFloorPrInput, PatchFloorPrInput, FloorPrReviewStatus, FloorPrChecksStatus, EnvVarEntry, PutEnvVarsInput, EnvironmentsState, WorkspaceBundle, WorkspaceBundlePreview, ImportWorkspaceInput, DuplicateWorkspaceInput, BundleNode, BundleConnection, BundleGroup, BundleBand, BundleDrawing } from "@messai/contracts";
+import type { FloorHookSection, FloorHooksConfig, PutFloorHooks, FloorHookStatus, FloorHooksState, RunFloorHookInput, StopFloorHookInput, FloorCopyInfo, PutFloorExcludes, ConnectedPeer, CrossNodeCandidate, GitHostEntry, PutGitHostsInput, FloorPrState, CreateFloorPrInput, PatchFloorPrInput, FloorPrReviewStatus, FloorPrChecksStatus, EnvVarEntry, PutEnvVarsInput, EnvironmentsState, WorkspaceBundle, WorkspaceBundlePreview, ImportWorkspaceInput, DuplicateWorkspaceInput, BundleNode, BundleConnection, BundleGroup, BundleBand, BundleDrawing, NotificationItem, NotificationKind, SendNotifyInput } from "@messai/contracts";
 import { WORKSPACE_BUNDLE_FORMAT } from "@messai/contracts";
 import { readProcTree } from "./procs.js";
 import type { SessionProcs, KillProcInput } from "@messai/contracts";
@@ -31,7 +31,7 @@ import { watch, type FSWatcher } from "chokidar";
 const MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", svg: "image/svg+xml", pdf: "application/pdf", md: "text/markdown", markdown: "text/markdown", txt: "text/plain", json: "application/json", csv: "text/csv", html: "text/html", log: "text/plain", ts: "text/plain", js: "text/plain", py: "text/plain", sh: "text/plain", yml: "text/plain", yaml: "text/plain" };
 export const mimeOf = (name: string): string => MIME[extname(name).slice(1).toLowerCase()] ?? "application/octet-stream";
 
-export type ServiceEvents = { workspace: [snapshot: WorkspaceSnapshot]; message: [message: Message]; sidebar: [sidebar: Sidebar]; chat: [message: ChatMessage]; taskSummary: [summary: TaskSummary]; floorHook: [workspaceId: string, status: FloorHookStatus] };
+export type ServiceEvents = { workspace: [snapshot: WorkspaceSnapshot]; message: [message: Message]; sidebar: [sidebar: Sidebar]; chat: [message: ChatMessage]; taskSummary: [summary: TaskSummary]; floorHook: [workspaceId: string, status: FloorHookStatus]; notification: [notification: NotificationItem] };
 
 export type AgentUsageLimit = { label: string; pct: number; resets: string };
 export type AgentUsageItem = { id: string; label: string; available: boolean; note?: string; plan?: string; limits?: AgentUsageLimit[]; metrics: { label: string; value: string }[]; models: { name: string; input: number; output: number }[] };
@@ -97,11 +97,63 @@ const GIT_SYNC_TIMEOUT_MS = 15_000;
 export class WorkspaceService extends EventEmitter<ServiceEvents> {
   /** Companheiro (#66): resume turnos concluídos com modelo local; sem Ollama, fica quieto. */
   readonly companion: Companion;
+  /** #85 histórico recente de notificações em memória (para inspeção e testes). */
+  private recentNotifications: NotificationItem[] = [];
   constructor(private readonly cfg: Config, private readonly store: Store, readonly sessions: SessionManager) {
     super();
     this.companion = new Companion({ enabled: cfg.companionEnabled, ollamaUrl: cfg.ollamaUrl, ollamaModel: cfg.ollamaModel });
     // #65 → #66: cada turno concluído de agente vira (quando há modelo) um resumo + próximo passo, fora do caminho de requisição.
-    this.sessions.on("taskFinished", (ev) => { void this.companion.summarize(ev).then((s) => { if (s) this.emit("taskSummary", s); }); });
+    this.sessions.on("taskFinished", (ev) => {
+      const node = this.store.getNode(ev.nodeId);
+      const ws = this.store.getWorkspace(ev.workspaceId);
+      this.emitNotification({
+        kind: "agent",
+        title: node ? `${node.title}${ws ? ` (${ws.name})` : ""}` : "Agente concluiu",
+        body: "Turno concluído — aguardando sua atenção.",
+        workspaceId: ev.workspaceId,
+        ...(ws ? { workspaceName: ws.name } : {}),
+        nodeId: ev.nodeId,
+        ...(node ? { nodeTitle: node.title } : {}),
+      });
+      void this.companion.summarize(ev).then((s) => { if (s) this.emit("taskSummary", s); });
+    });
+  }
+
+  // ---- #85 Notificações do SO + mess notify ----
+  emitNotification(input: Omit<NotificationItem, "notificationId" | "createdAt">): NotificationItem {
+    const item: NotificationItem = {
+      notificationId: newId(),
+      createdAt: nowIso(),
+      ...input,
+    };
+    this.recentNotifications.unshift(item);
+    if (this.recentNotifications.length > 100) this.recentNotifications.length = 100;
+    this.emit("notification", item);
+    return item;
+  }
+
+  listNotifications(): NotificationItem[] {
+    return [...this.recentNotifications];
+  }
+
+  sendNotify(input: SendNotifyInput): Result<NotificationItem> {
+    const text = input.text.trim();
+    if (!text) return fail("INVALID", "texto da notificação obrigatório");
+    const node = input.nodeId ? this.store.getNode(input.nodeId) : undefined;
+    const wsId = input.workspaceId ?? node?.workspaceId ?? this.store.listWorkspaces()[0]?.workspaceId;
+    if (!wsId) return fail("NOT_FOUND", "nenhum espaço encontrado para a notificação");
+    const ws = this.store.getWorkspace(wsId);
+    const defaultTitle = node ? `${node.title}${ws ? ` (${ws.name})` : ""}` : ws ? ws.name : "MessAI";
+    const title = input.title?.trim() || defaultTitle;
+    const item = this.emitNotification({
+      kind: "notify",
+      title,
+      body: text,
+      workspaceId: wsId,
+      ...(ws ? { workspaceName: ws.name } : {}),
+      ...(node ? { nodeId: node.nodeId, nodeTitle: node.title } : input.nodeId ? { nodeId: input.nodeId } : {}),
+    });
+    return succeed(item);
   }
 
   /** Resumo sob demanda do estado atual de um nó-terminal (mesmo caminho do automático). */
@@ -212,6 +264,15 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     if (input.folderId && !this.store.getFolder(input.folderId)) return fail("NOT_FOUND", "pasta não encontrada");
     this.store.updateWorkspace(id, { name: input.name, cwd: input.cwd, icon: input.icon, color: input.color, folderId: input.folderId, sortOrder: input.sortOrder, status: input.status, statusText: input.statusText }, rev.value);
     const out = this.publish(id).workspace;
+    if (input.status !== undefined && input.status !== w.status) {
+      this.emitNotification({
+        kind: "floor",
+        title: `Andar "${out.name}" → ${out.status}`,
+        body: out.statusText ? `${out.status}: ${out.statusText}` : `Status do andar alterado para ${out.status}`,
+        workspaceId: out.workspaceId,
+        workspaceName: out.name,
+      });
+    }
     this.publishSidebar();
     return succeed(out);
   }

@@ -33,6 +33,12 @@ export const DEFAULTS = {
   updateAuto: true,
   // #78 encaixe magnético ao arrastar (botão ímã / tecla M); Alt segurado também vale quando o WM não captura
   snapMagnetic: false,
+  // #85 Notificações do sistema operacional
+  notifyEnabled: true,
+  notifySound: true,
+  notifyAgent: true,
+  notifyFloor: true,
+  notifyCli: true,
 } as const;
 export type Prefs = { -readonly [K in keyof typeof DEFAULTS]: (typeof DEFAULTS)[K] extends string ? string : (typeof DEFAULTS)[K] extends number ? number : boolean };
 export type PrefKey = keyof Prefs;

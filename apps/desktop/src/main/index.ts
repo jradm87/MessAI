@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, powerSaveBlocker, screen, shell, Tray } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, powerSaveBlocker, screen, shell, Tray } from "electron";
 import electronUpdater from "electron-updater";
 import { spawn, execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, openSync, readFileSync, readdirSync, readlinkSync, writeFileSync } from "node:fs";
@@ -261,6 +261,38 @@ function syncUpdateTimer(): void {
 ipcMain.handle("mess:update-state", () => upd);
 ipcMain.handle("mess:update-check", () => checkUpdates());
 ipcMain.handle("mess:update-install", () => { if (app.isPackaged && upd.status === "downloaded") { allowClose = true; electronUpdater.autoUpdater.quitAndInstall(); } });
+
+// #85 — Notificações do SO (atenção de agente, mudança de andar e mess notify) + histórico em memória para inspeção/E2E.
+type OsNotifyRecord = { title: string; body: string; workspaceId?: string; nodeId?: string; silent?: boolean; at: string };
+const osNotifyHistory: OsNotifyRecord[] = [];
+ipcMain.handle("mess:notify", (_e, payload: { title?: string; body?: string; workspaceId?: string; nodeId?: string; silent?: boolean }) => {
+  const title = String(payload?.title ?? "MessAI");
+  const body = String(payload?.body ?? "");
+  const rec: OsNotifyRecord = {
+    title,
+    body,
+    ...(payload?.workspaceId ? { workspaceId: payload.workspaceId } : {}),
+    ...(payload?.nodeId ? { nodeId: payload.nodeId } : {}),
+    ...(payload?.silent !== undefined ? { silent: !!payload.silent } : {}),
+    at: new Date().toISOString(),
+  };
+  osNotifyHistory.unshift(rec);
+  if (osNotifyHistory.length > 50) osNotifyHistory.length = 50;
+  try {
+    if (Notification.isSupported()) {
+      const n = new Notification({ title, body, silent: !!payload?.silent });
+      n.on("click", () => {
+        showMain();
+        if (payload?.workspaceId && payload?.nodeId) {
+          mainWin?.webContents.send("mess:focus-node", { workspaceId: payload.workspaceId, nodeId: payload.nodeId });
+        }
+      });
+      n.show();
+    }
+  } catch { /* ambiente headless sem daemon de notificação */ }
+  return rec;
+});
+ipcMain.handle("mess:notify-history", () => [...osNotifyHistory]);
 
 // #63 — Sobre: info do app, abrir link externo (web ou mailto), cauda do runtime.log, salvar texto.
 ipcMain.handle("mess:app-info", () => ({ name: "MessAI", version: app.getVersion(), buildVersion: BUILD_VERSION, electron: process.versions.electron, node: process.versions.node, chrome: process.versions.chrome, platform: process.platform, arch: process.arch, dataDir: DATA_DIR, packaged: app.isPackaged }));

@@ -33,4 +33,7 @@ contextBridge.exposeInMainWorld("messai", {
   saveText: (suggestedName: string, text: string): Promise<string | null> => ipcRenderer.invoke("mess:save-text", suggestedName, text),
   // #62 — reinicia o runtime (após restaurar/mover/apagar dados)
   runtimeRestart: (): Promise<boolean> => ipcRenderer.invoke("mess:runtime-restart"),
+  // #85 — notificações do SO
+  notifyOs: (p: { title: string; body: string; workspaceId?: string; nodeId?: string; silent?: boolean }): Promise<unknown> => ipcRenderer.invoke("mess:notify", p),
+  notifyHistory: (): Promise<{ title: string; body: string; workspaceId?: string; nodeId?: string; silent?: boolean; at: string }[]> => ipcRenderer.invoke("mess:notify-history"),
 });

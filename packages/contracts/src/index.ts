@@ -2,7 +2,7 @@ import { Type, type Static } from "@sinclair/typebox";
 
 export const PROTOCOL_VERSION = 1 as const;
 /** Incrementar a cada mudança de snapshot/rotas; o cliente avisa quando o runtime está atrás. */
-export const BUILD_VERSION = 26 as const;
+export const BUILD_VERSION = 27 as const;
 
 // ---------- Identidades ----------
 export const Id = Type.String({ minLength: 8, maxLength: 64 });
@@ -679,6 +679,35 @@ export const WsClientMessage = Type.Union([
 ]);
 export type WsClientMessage = Static<typeof WsClientMessage>;
 
+// ---------- #85 Notificações do SO + mess notify ----------
+export const NotificationKind = Type.Union([
+  Type.Literal("agent"),
+  Type.Literal("floor"),
+  Type.Literal("notify"),
+]);
+export type NotificationKind = Static<typeof NotificationKind>;
+
+export const NotificationItem = Type.Object({
+  notificationId: Id,
+  kind: NotificationKind,
+  title: Type.String(),
+  body: Type.String(),
+  workspaceId: Id,
+  workspaceName: Type.Optional(Type.String()),
+  nodeId: Type.Optional(Id),
+  nodeTitle: Type.Optional(Type.String()),
+  createdAt: Type.String(),
+});
+export type NotificationItem = Static<typeof NotificationItem>;
+
+export const SendNotifyInput = Type.Object({
+  text: Type.String({ minLength: 1, maxLength: 1000 }),
+  title: Type.Optional(Type.String({ maxLength: 120 })),
+  workspaceId: Type.Optional(Id),
+  nodeId: Type.Optional(Id),
+});
+export type SendNotifyInput = Static<typeof SendNotifyInput>;
+
 // runtime -> cliente
 export const WsServerMessage = Type.Union([
   Type.Object({ type: Type.Literal("hello"), clientId: Id, protocolVersion: Type.Integer() }),
@@ -692,6 +721,7 @@ export const WsServerMessage = Type.Union([
   Type.Object({ type: Type.Literal("taskFinished"), event: TaskFinished }),
   Type.Object({ type: Type.Literal("taskSummary"), summary: TaskSummary }),
   Type.Object({ type: Type.Literal("floorHook"), workspaceId: Id, status: FloorHookStatus }),
+  Type.Object({ type: Type.Literal("notification"), notification: NotificationItem }),
   Type.Object({ type: Type.Literal("error"), error: ApiError, sessionId: Type.Optional(Id) }),
 ]);
 export type WsServerMessage = Static<typeof WsServerMessage>;
@@ -930,6 +960,8 @@ export const DuplicateWorkspaceInput = Type.Object({
   startTerminals: Type.Optional(Type.Boolean()),
 });
 export type DuplicateWorkspaceInput = Static<typeof DuplicateWorkspaceInput>;
+
+
 
 
 
