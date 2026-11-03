@@ -4,6 +4,7 @@ import type { ChatAttachment, ExportAttachment, InstructionsStatus, InstructionF
 import type { Band, CreateBand, PatchBand, AskBand, BandAnswer, BandAskResult, MaestroRecruit } from "@messai/contracts";
 import type { FloorHookSection, FloorHooksConfig, PutFloorHooks, FloorHookStatus, FloorHooksState, RunFloorHookInput, StopFloorHookInput, FloorCopyInfo, PutFloorExcludes, ConnectedPeer, CrossNodeCandidate, GitHostEntry, PutGitHostsInput, FloorPrState, CreateFloorPrInput, PatchFloorPrInput, FloorPrReviewStatus, FloorPrChecksStatus, EnvVarEntry, PutEnvVarsInput, EnvironmentsState, WorkspaceBundle, WorkspaceBundlePreview, ImportWorkspaceInput, DuplicateWorkspaceInput, BundleNode, BundleConnection, BundleGroup, BundleBand, BundleDrawing, NotificationItem, NotificationKind, SendNotifyInput, Routine, CreateRoutineInput, PatchRoutineInput, RoutineRunResult } from "@messai/contracts";
 import { WORKSPACE_BUNDLE_FORMAT } from "@messai/contracts";
+import type { AgentCapability, IssueAgentTokenInput, AgentTokenInfo } from "@messai/contracts";
 import { readProcTree } from "./procs.js";
 import type { SessionProcs, KillProcInput } from "@messai/contracts";
 import { listProviders } from "./providers.js";
@@ -12,7 +13,7 @@ import { backupName, copyBackupFiles, dataStats, isBackupName, listBackups, vali
 import { BUILD_VERSION } from "@messai/contracts";
 import { defaultPresets, parsePresets, validatePresets, PRESETS_META_KEY } from "./presets.js";
 import { applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, DEFAULT_FLOOR_EXCLUDES, normalizeFloorExcludes, shouldExcludeFloorDir, parseGitRemote, buildPrCompareUrl, normalizeEnvVars, mergeEnvLayers, safeRelPath, isWithinCanonicalRoot, looksBinary, canMessage, checkRevision, formatDelivery, normalizeGeometry, planLocalTerminal, resolveNodeRef, resolveCrossNodeRef, validateNewNode, agentKind, agentResume, stripAnsi, fail, succeed, type Result, applySkills, skillsText, placeGeometries, connectionsWithin } from "@messai/domain";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID, randomBytes, timingSafeEqual } from "node:crypto";
 import { Companion } from "./companion.js";
 import type { Store } from "@messai/storage";
 import { EventEmitter } from "node:events";
@@ -122,6 +123,104 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     });
     this.routineTimer = setInterval(() => void this.tickRoutines(), 1000);
     this.routineTimer.unref();
+    // #87 credencial do agente morre junto com a sessão dele
+    this.sessions.on("session", (s) => {
+      if (s.state === "exited" || s.state === "lost" || s.state === "unloaded") this.revokeAgentTokensForNode(s.nodeId);
+    });
+  }
+
+  // ---- #87 [MESS-02] Credencial por agente + autorização por capacidade ----
+  // Guardamos só o SHA-256 do token (persistido na meta para sobreviver ao reinício do runtime: o tmux mantém o env antigo).
+  private agentTokensCache: Map<string, { nodeId: string; workspaceId: string; sessionId?: string; hook?: string; capabilities: AgentCapability[]; expiresAt: number }> | null = null;
+  private static readonly AGENT_TOKENS_META = "agent.tokens";
+  private static readonly AGENT_CAPS_META = "agent.caps";
+  private hashToken(t: string): string { return createHash("sha256").update(t).digest("hex"); }
+  private get agentTokens() {
+    if (!this.agentTokensCache) {
+      this.agentTokensCache = new Map();
+      try { const j = JSON.parse(this.store.getMeta(WorkspaceService.AGENT_TOKENS_META) ?? "{}") as Record<string, { nodeId: string; workspaceId: string; sessionId?: string; hook?: string; capabilities: AgentCapability[]; expiresAt: number }>; for (const [k, v] of Object.entries(j)) this.agentTokensCache.set(k, v); } catch { /* meta corrompida: começa vazio */ }
+    }
+    return this.agentTokensCache;
+  }
+  private saveAgentTokens(): void { this.store.setMeta(WorkspaceService.AGENT_TOKENS_META, JSON.stringify(Object.fromEntries(this.agentTokens))); }
+  private readNodeCaps(): Record<string, AgentCapability[]> { try { return JSON.parse(this.store.getMeta(WorkspaceService.AGENT_CAPS_META) ?? "{}") as Record<string, AgentCapability[]>; } catch { return {}; } }
+  private writeNodeCaps(nodeId: string, caps: AgentCapability[] | null): void { const all = this.readNodeCaps(); if (caps) all[nodeId] = caps; else delete all[nodeId]; this.store.setMeta(WorkspaceService.AGENT_CAPS_META, JSON.stringify(all)); }
+  /** Capacidades do agente de um terminal: as configuradas para o nó ou o padrão (maestro só para condutor). */
+  agentCapsFor(node: Node): AgentCapability[] {
+    const custom = this.readNodeCaps()[node.nodeId];
+    if (custom) return [...custom];
+    return ["files:read", "files:write", "chat:post", "nodes:read", "nodes:write", "messages:send", "workspace:manage", "terminal:control", ...(node.maestro ? ["maestro:conduct" as const] : [])];
+  }
+  /** Emite (rotaciona) a credencial do agente de um terminal; as anteriores do nó são revogadas. */
+  issueAgentToken(nodeId: string, input?: IssueAgentTokenInput, sessionId?: string, ttlDefaultSeconds = 86400): Result<AgentTokenInfo> {
+    const node = this.store.getNode(nodeId);
+    if (!node || node.kind !== "terminal") return fail("NOT_FOUND", "terminal não encontrado");
+    if (input?.capabilities) this.writeNodeCaps(nodeId, [...new Set(input.capabilities)]);
+    this.revokeAgentTokensForNode(nodeId);
+    const sid = sessionId ?? node.sessionId;
+    const caps = this.agentCapsFor(node);
+    const expiresAt = Date.now() + (input?.ttlSeconds ?? ttlDefaultSeconds) * 1000;
+    const token = `agt_${randomBytes(32).toString("base64url")}`;
+    this.agentTokens.set(this.hashToken(token), { nodeId, workspaceId: node.workspaceId, ...(sid ? { sessionId: sid } : {}), capabilities: caps, expiresAt });
+    this.saveAgentTokens();
+    return succeed({ token, nodeId, workspaceId: node.workspaceId, ...(sid ? { sessionId: sid } : {}), capabilities: caps, expiresAt: new Date(expiresAt).toISOString() });
+  }
+  revokeAgentTokensForNode(nodeId: string): Result<{ revoked: number }> {
+    let revoked = 0;
+    for (const [k, v] of this.agentTokens) if (v.nodeId === nodeId) { this.agentTokens.delete(k); revoked++; }
+    if (revoked) this.saveAgentTokens();
+    return succeed({ revoked });
+  }
+  /** Identifica quem chama: o desktop (token mestre) ou um agente (credencial própria, com capacidades). */
+  authenticateToken(raw: string | undefined): { kind: "desktop" } | { kind: "agent"; nodeId: string; workspaceId: string; sessionId?: string; capabilities: Set<AgentCapability> } | null {
+    if (!raw) return null;
+    const a = Buffer.from(raw); const b = Buffer.from(this.cfg.token);
+    if (a.length === b.length && timingSafeEqual(a, b)) return { kind: "desktop" };
+    if (!raw.startsWith("agt_")) return null;
+    const key = this.hashToken(raw);
+    const t = this.agentTokens.get(key);
+    if (!t) return null;
+    const drop = () => { this.agentTokens.delete(key); this.saveAgentTokens(); return null; };
+    if (t.expiresAt <= Date.now()) return drop();
+    if (t.hook) { if (!this.store.getWorkspace(t.workspaceId)) return drop(); }
+    else if (!this.store.getNode(t.nodeId)) return drop();
+    if (t.sessionId) {
+      const s = this.store.getSession(t.sessionId);
+      if (!s || s.state === "exited" || s.state === "lost" || s.state === "unloaded") return drop();
+    }
+    return { kind: "agent", nodeId: t.nodeId, workspaceId: t.workspaceId, ...(t.sessionId ? { sessionId: t.sessionId } : {}), capabilities: new Set(t.capabilities) };
+  }
+  /** Térreo do espaço (ele mesmo ou o pai do andar) — unidade de escopo das credenciais de agente. */
+  groundOf(workspaceId: string): string | undefined { const w = this.store.getWorkspace(workspaceId); return w ? (w.parentId ?? w.workspaceId) : undefined; }
+  isFloor(workspaceId: string): boolean { return !!this.store.getWorkspace(workspaceId)?.parentId; }
+  nodeWorkspaceId(nodeId: string): string | undefined { return this.store.getNode(nodeId)?.workspaceId; }
+  sessionWorkspaceId(sessionId: string): string | undefined { return this.store.getSession(sessionId)?.workspaceId; }
+  /** Credencial de um hook de andar: escopo do espaço, sem Maestro, revogada quando o hook termina. */
+  private issueHookToken(w: Workspace, section: string): string {
+    const hook = `${w.workspaceId}:${section}`;
+    this.revokeHookToken(hook);
+    const token = `agt_${randomBytes(32).toString("base64url")}`;
+    this.agentTokens.set(this.hashToken(token), { nodeId: w.workspaceId, workspaceId: w.workspaceId, hook, capabilities: ["files:read", "files:write", "chat:post", "nodes:read", "nodes:write", "messages:send", "workspace:manage"], expiresAt: Date.now() + 7 * 86400 * 1000 });
+    this.saveAgentTokens();
+    return token;
+  }
+  private revokeHookToken(hook: string): void {
+    let n = 0; for (const [k, v] of this.agentTokens) if (v.hook === hook) { this.agentTokens.delete(k); n++; }
+    if (n) this.saveAgentTokens();
+  }
+  /**
+   * Reanexação de tmux vivo: o processo já tem o MESS_TOKEN no env (o `new-session -A` ignora o -e novo),
+   * então mantemos a credencial persistida dessa sessão. Se não houver (sessão de versão anterior), emite uma.
+   */
+  private reattachToken(node: Node, s: Session): string {
+    const now = Date.now();
+    for (const v of this.agentTokens.values()) if (v.nodeId === node.nodeId && v.sessionId === s.sessionId && v.expiresAt > now) return "";
+    return this.agentTokenForSpawn(node, s);
+  }
+  /** Credencial nova (rotacionada) para cada processo de terminal que sobe; vive enquanto a sessão viver. */
+  private agentTokenForSpawn(node: Node, s: Session): string {
+    const issued = this.issueAgentToken(node.nodeId, undefined, s.sessionId, 365 * 86400);
+    return issued.ok ? issued.value.token : "";
   }
 
   // ---- #85 Notificações do SO + mess notify ----
@@ -1224,7 +1323,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       [AGENT_ENV.workspaceName]: w.name,
       [AGENT_ENV.workspaceDir]: w.cwd,
       [AGENT_ENV.socket]: this.cfg.socketPath,
-      [AGENT_ENV.token]: this.cfg.token,
+      [AGENT_ENV.token]: this.issueHookToken(w, section), // #87 nunca o token mestre
       [AGENT_ENV.hookSection]: section,
       SHELL: this.cfg.defaultShell,
       ...(process.env["MESS_RESOURCES"] ? { MESS_ELECTRON: process.execPath } : {}),
@@ -1280,6 +1379,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
         if (status.state === "running") status.state = code === 0 ? "succeeded" : "failed";
         if (typeof code === "number") status.exitCode = code;
         status.finishedAt = nowIso();
+        this.revokeHookToken(`${w.workspaceId}:${section}`); // #87
         this.emit("floorHook", w.workspaceId, { ...status });
         resolveP({ ...status });
       };
@@ -1301,6 +1401,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     }
     delete entry.proc;
     delete entry.status.pid;
+    this.revokeHookToken(`${workspaceId}:${section}`); // #87
     this.emit("floorHook", workspaceId, { ...entry.status });
   }
   async runFloorHooks(workspaceId: string, input: RunFloorHookInput): Promise<Result<FloorHooksState>> {
@@ -1543,6 +1644,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       const hk = this.readHooksConfig(id);
       if (hk.teardown.trim() && existsSync(w.cwd)) {
         spawnSync(this.cfg.defaultShell || "/bin/sh", ["-c", hk.teardown], { cwd: w.cwd, env: this.hookEnv(w, "teardown"), stdio: "ignore", timeout: GIT_SYNC_TIMEOUT_MS });
+        this.revokeHookToken(`${id}:teardown`); // #87
       }
     }
     this.store.deleteMeta(this.hooksMetaKey(id));
@@ -1670,7 +1772,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     return succeed({ revision: rev.value });
   }
 
-  private plan(w: Workspace, node: Node, s: Session) {
+  private plan(w: Workspace, node: Node, s: Session, opts: { reattach?: boolean } = {}) {
     const baseEnv: Record<string, string> = {};
     // Não herdar marcadores de sessão de agentes que possam ter lançado o runtime.
     for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !/^(CLAUDECODE|CLAUDE_CODE_|CODEX_)/.test(k)) baseEnv[k] = v;
@@ -1679,12 +1781,14 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const skills = (node.skillIds ?? []).map((id) => this.store.getSkill(id)).filter((k): k is Skill => !!k); // #57
     const ground = w.parentId ? this.store.getWorkspace(w.parentId) : undefined;
     const userEnv = this.effectiveEnvForWorkspace(w);
+    // #87 cada terminal recebe credencial própria (escopo: nó/sessão/capacidades), nunca o token mestre
+    const agentToken = opts.reattach ? this.reattachToken(node, s) : this.agentTokenForSpawn(node, s);
     const inject = {
       ...userEnv,
       ...(role ? { [AGENT_ENV.roleName]: role.name, [AGENT_ENV.roleInstructions]: roleText(role) } : {}),
       ...(skills.length ? { [AGENT_ENV.skills]: skills.map((k) => k.name).join(", "), [AGENT_ENV.skillsText]: skillsText(skills) } : {}),
       ...(ground ? { [AGENT_ENV.floorId]: w.workspaceId, [AGENT_ENV.floorName]: w.name, [AGENT_ENV.floorBranch]: w.branch ?? "", [AGENT_ENV.branchName]: w.branch ?? "", [AGENT_ENV.floorPath]: w.cwd, [AGENT_ENV.rootPath]: ground.cwd, [AGENT_ENV.projectName]: ground.name } : { [AGENT_ENV.rootPath]: w.cwd, [AGENT_ENV.projectName]: w.name }),
-      [AGENT_ENV.socket]: this.cfg.socketPath, [AGENT_ENV.token]: this.cfg.token,
+      [AGENT_ENV.socket]: this.cfg.socketPath, [AGENT_ENV.token]: agentToken,
       [AGENT_ENV.workspaceId]: w.workspaceId, [AGENT_ENV.workspaceName]: w.name, [AGENT_ENV.workspaceDir]: w.cwd,
       [AGENT_ENV.nodeId]: node.nodeId, [AGENT_ENV.sessionId]: s.sessionId,
       ...(node.maestro ? { [AGENT_ENV.maestro]: "1" } : {}), // #29
@@ -2080,7 +2184,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       if (!s.persistent || (s.state !== "running" && s.state !== "starting")) continue;
       const node = this.store.getNode(s.nodeId); const w = node && this.store.getWorkspace(node.workspaceId);
       if (!node || !w) { this.store.updateSession(s.sessionId, { state: "lost", pid: null }); lost++; continue; }
-      if (this.sessions.tmuxAlive(s.sessionId)) { this.sessions.start({ ...s, state: "starting" }, this.plan(w, node, s)); reattached++; }
+      if (this.sessions.tmuxAlive(s.sessionId)) { this.sessions.start({ ...s, state: "starting" }, this.plan(w, node, s, { reattach: true })); reattached++; }
       else if (!restore) { this.store.updateSession(s.sessionId, { state: "lost", pid: null }); skipped++; }
       else { const r = this.resumeSession(s); this.sessions.start({ ...r, state: "starting" }, this.plan(w, node, r)); respawned++; }
     }
@@ -2118,6 +2222,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const s = this.store.getSession(node.sessionId);
     if (!s) return fail("NOT_FOUND", "sessão não encontrada");
     this.sessions.dispose(s.sessionId, false);
+    this.revokeAgentTokensForNode(nodeId); // #87
     this.store.updateSession(s.sessionId, { state: "unloaded", pid: null, exitCode: null });
     const updated = this.store.getSession(s.sessionId)!;
     this.sessions.emit("session", updated);
@@ -2621,6 +2726,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const rev = checkRevision(w, expectedRevision);
     if (!rev.ok) return rev;
     if (node.sessionId) this.sessions.dispose(node.sessionId);
+    this.revokeAgentTokensForNode(nodeId); this.writeNodeCaps(nodeId, null); // #87
     if (node.kind === "note" && node.filePath) this.unwatchNote(node.filePath);
     if (node.kind === "note" && node.filePath && node.filePath.startsWith(this.notesDir(node.workspaceId))) { try { unlinkSync(node.filePath); } catch { /* já removido */ } }
     this.noteMtime.delete(nodeId);

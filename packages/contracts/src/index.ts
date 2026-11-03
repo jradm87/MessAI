@@ -2,7 +2,7 @@ import { Type, type Static } from "@sinclair/typebox";
 
 export const PROTOCOL_VERSION = 1 as const;
 /** Incrementar a cada mudança de snapshot/rotas; o cliente avisa quando o runtime está atrás. */
-export const BUILD_VERSION = 28 as const;
+export const BUILD_VERSION = 29 as const;
 
 // ---------- Identidades ----------
 export const Id = Type.String({ minLength: 8, maxLength: 64 });
@@ -1023,6 +1023,37 @@ export const RoutineRunResult = Type.Object({
   output: Type.String(),
 });
 export type RoutineRunResult = Static<typeof RoutineRunResult>;
+
+// ---------- #87 [MESS-02] Credencial por agente + autorização por capacidade ----------
+export const AgentCapability = Type.Union([
+  Type.Literal("files:read"),
+  Type.Literal("files:write"),
+  Type.Literal("chat:post"),
+  Type.Literal("nodes:read"),
+  Type.Literal("nodes:write"),
+  Type.Literal("messages:send"),
+  Type.Literal("workspace:manage"),
+  Type.Literal("terminal:control"),
+  Type.Literal("maestro:conduct"),
+]);
+export type AgentCapability = Static<typeof AgentCapability>;
+
+export const IssueAgentTokenInput = Type.Object({
+  capabilities: Type.Optional(Type.Array(AgentCapability)),
+  ttlSeconds: Type.Optional(Type.Integer({ minimum: 1, maximum: 604800 })),
+});
+export type IssueAgentTokenInput = Static<typeof IssueAgentTokenInput>;
+
+export const AgentTokenInfo = Type.Object({
+  token: Type.String(),
+  nodeId: Id,
+  workspaceId: Id,
+  sessionId: Type.Optional(Id),
+  capabilities: Type.Array(AgentCapability),
+  expiresAt: Type.String(),
+});
+export type AgentTokenInfo = Static<typeof AgentTokenInfo>;
+
 
 
 

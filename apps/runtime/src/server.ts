@@ -5,7 +5,7 @@ import type { WebSocket } from "ws";
 import {
   BUILD_VERSION, PROTOCOL_VERSION, SendMessage, Ask, CreateConnection, CreateDrawing, CreateNode, CreateWorkspace, DeleteNode, PatchNode, PatchWorkspace, ApplyLayout, WsClientMessage,
   type Capabilities, type WsServerMessage, type ApiError,
- CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, PutFloorHooks, RunFloorHookInput, StopFloorHookInput, PutFloorExcludes, CreateFloorPrInput, PatchFloorPrInput, PutGitHostsInput, PutEnvVarsInput, PreviewWorkspaceImportInput, ImportWorkspaceInput, DuplicateWorkspaceInput, SendNotifyInput, CreateRoutineInput, PatchRoutineInput, FsOp, PatchRuntimeSettings, PutPresets, CreateSkill, PatchSkill, BackupInput, RestoreInput, MoveDataInput, ResetInput, CreateNodeGroup, PatchNodeGroup, SaveScore, PatchScore, PlaceScore, CreateBand, PatchBand, AskBand, MaestroRecruit, MaestroTarget, MaestroAssign, ExportAttachment, PutInstructions, SyncInstructions, KillProcInput, type PresetInput, type Preset } from "@messai/contracts";
+ CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, PutFloorHooks, RunFloorHookInput, StopFloorHookInput, PutFloorExcludes, CreateFloorPrInput, PatchFloorPrInput, PutGitHostsInput, PutEnvVarsInput, PreviewWorkspaceImportInput, ImportWorkspaceInput, DuplicateWorkspaceInput, SendNotifyInput, CreateRoutineInput, PatchRoutineInput, FsOp, PatchRuntimeSettings, PutPresets, CreateSkill, PatchSkill, BackupInput, RestoreInput, MoveDataInput, ResetInput, CreateNodeGroup, PatchNodeGroup, SaveScore, PatchScore, PlaceScore, CreateBand, PatchBand, AskBand, MaestroRecruit, MaestroTarget, MaestroAssign, ExportAttachment, PutInstructions, SyncInstructions, KillProcInput, IssueAgentTokenInput, type PresetInput, type Preset } from "@messai/contracts";
 import type { Result } from "@messai/domain";
 import { newId, type Config } from "./config.js";
 import type { WorkspaceService } from "./service.js";
@@ -13,6 +13,10 @@ import { SessionManager } from "./sessions.js";
 import { DEFAULT_PRESET_IDS } from "./presets.js";
 import { whichOnPath } from "./providers.js";
 import { createReadStream } from "node:fs";
+import { routeAccess } from "./authz.js";
+
+type Caller = NonNullable<ReturnType<WorkspaceService["authenticateToken"]>>;
+const isAgent = (req: unknown): boolean => (req as { auth?: Caller | null }).auth?.kind === "agent";
 
 const STATUS: Record<ApiError["code"], number> = {
   UNAUTHORIZED: 401, FORBIDDEN: 403, NOT_FOUND: 404, CONFLICT: 409, INVALID: 400,
@@ -29,6 +33,8 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
   const app = Fastify({ logger: false, bodyLimit: 40 * 1024 * 1024 });
 
   // Autenticação: token Bearer (ou ?token= para o WS do navegador). Origem só loopback/file.
+  // #87 [MESS-02]: o token mestre é do desktop; cada terminal tem credencial própria com capacidades e escopo.
+  app.decorateRequest("auth", null);
   app.addHook("onRequest", async (req, reply) => {
     const origin = req.headers.origin;
     if (origin && !/^(https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?|file:\/\/|null)$/.test(origin) && !origin.startsWith("app://")) {
@@ -37,7 +43,35 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
     const auth = req.headers.authorization;
     const q = (req.query as Record<string, string | undefined>)["token"];
     const token = auth?.startsWith("Bearer ") ? auth.slice(7) : q;
-    if (token !== cfg.token) return reply.status(401).send({ error: { code: "UNAUTHORIZED", message: "token inválido" } });
+    const who = svc.authenticateToken(token);
+    if (!who) return reply.status(401).send({ error: { code: "UNAUTHORIZED", message: "token inválido" } });
+    (req as unknown as { auth: Caller }).auth = who;
+    if (who.kind === "desktop") return;
+    const forbid = (message: string) => reply.status(403).send({ error: { code: "FORBIDDEN", message } });
+    const access = routeAccess(req.method, req.routeOptions.url);
+    if (access.desktopOnly) return forbid("rota reservada ao app (credencial de agente não autorizada)");
+    if (!who.capabilities.has(access.cap)) return forbid(`credencial de agente sem a capacidade "${access.cap}"`);
+    if (!access.scope) return;
+    const id = (req.params as Record<string, string | undefined>)["id"] ?? "";
+    const myGround = svc.groundOf(who.workspaceId);
+    const inFamily = (wsId: string | undefined) => !!wsId && !!myGround && svc.groundOf(wsId) === myGround;
+    switch (access.scope) {
+      case "self": if (id !== who.nodeId) return forbid("um agente só age em nome do próprio nó"); return;
+      case "ws": if (!inFamily(id)) return forbid("espaço fora do escopo da credencial"); return;
+      case "floor": if (!inFamily(id) || !svc.isFloor(id)) return forbid("só andares do seu térreo; o térreo é gerido pelo app"); return;
+      case "node": if (!inFamily(svc.nodeWorkspaceId(id))) return forbid("nó fora do escopo da credencial"); return;
+      case "session": if (!inFamily(svc.sessionWorkspaceId(id))) return forbid("sessão fora do escopo da credencial"); return;
+    }
+  });
+  // #87 bandas: agente pergunta/transmite só em nome de si mesmo (o corpo não existe no onRequest)
+  app.addHook("preHandler", async (req, reply) => {
+    const who = (req as unknown as { auth: Caller | null }).auth;
+    if (!who || who.kind !== "agent") return;
+    const url = req.routeOptions.url;
+    if (req.method === "POST" && (url === "/v1/bands/:id/ask" || url === "/v1/bands/:id/broadcast")) {
+      const from = (req.body as { fromNodeId?: string } | undefined)?.fromNodeId;
+      if (from !== who.nodeId) return reply.status(403).send({ error: { code: "FORBIDDEN", message: "um agente só pergunta à banda em nome do próprio nó" } });
+    }
   });
 
   app.get("/v1/health", async () => ({ ok: true, protocolVersion: PROTOCOL_VERSION, buildVersion: BUILD_VERSION, machineId: cfg.machineId }));
@@ -235,7 +269,7 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
     send(reply, svc.listChat(req.params.id, req.query.thread ? Number(req.query.thread) : undefined, Math.min(500, Number(req.query.limit ?? 100) || 100), req.query.since)));
   app.post<{ Params: { id: string } }>("/v1/nodes/:id/chat", async (req, reply) => {
     const b = body<SendChat>(SendChat, req.body); if ("code" in b) return invalid(reply, b);
-    return send(reply, svc.postChat(req.params.id, b, opts.unix ? "agent" : "user"), 201);
+    return send(reply, svc.postChat(req.params.id, b, opts.unix || isAgent(req) ? "agent" : "user"), 201);
   });
   app.delete<{ Params: { id: string }; Querystring: { thread?: string } }>("/v1/nodes/:id/chat", async (req, reply) =>
     send(reply, svc.clearChat(req.params.id, req.query.thread ? Number(req.query.thread) : undefined)));
@@ -273,7 +307,7 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
   });
   app.patch<{ Params: { id: string } }>("/v1/nodes/:id", async (req, reply) => {
     const b = body<PatchNode>(PatchNode, req.body); if ("code" in b) return invalid(reply, b);
-    return send(reply, svc.patchNode(req.params.id, b, !!opts.unix));
+    return send(reply, svc.patchNode(req.params.id, b, !!opts.unix || isAgent(req)));
   });
   app.delete<{ Params: { id: string } }>("/v1/nodes/:id", async (req, reply) => {
     const b = body<DeleteNode>(DeleteNode, req.body ?? {}); if ("code" in b) return invalid(reply, b);
@@ -355,6 +389,9 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
   app.get<{ Params: { id: string } }>("/v1/workspaces/:id/unread", async (req) => svc.unreadCounts(req.params.id));
   app.get<{ Params: { id: string } }>("/v1/nodes/:id/connected", async (req, reply) => send(reply, svc.connectedNodes(req.params.id)));
   app.get<{ Params: { id: string } }>("/v1/nodes/:id/cross-candidates", async (req, reply) => send(reply, svc.listCrossCandidates(req.params.id)));
+  // #87 — credencial do agente de um terminal: emitir/rotacionar (com capacidades) e revogar. Só o app.
+  app.post<{ Params: { id: string } }>("/v1/nodes/:id/token", async (req, reply) => { const b = body<IssueAgentTokenInput>(IssueAgentTokenInput, req.body ?? {}); if ("code" in b) return invalid(reply, b); return send(reply, svc.issueAgentToken(req.params.id, b), 201); });
+  app.delete<{ Params: { id: string } }>("/v1/nodes/:id/token", async (req, reply) => send(reply, svc.revokeAgentTokensForNode(req.params.id)));
   app.post<{ Params: { id: string } }>("/v1/nodes/:id/restart", async (req, reply) => send(reply, svc.restartTerminal(req.params.id)));
   app.post<{ Params: { id: string } }>("/v1/nodes/:id/unload", async (req, reply) => send(reply, svc.unloadNode(req.params.id)));
   app.post<{ Params: { id: string } }>("/v1/nodes/:id/reload", async (req, reply) => send(reply, svc.reloadNode(req.params.id)));
