@@ -29,6 +29,7 @@ const shutdown = async (killAgents = false) => {
   // pid file sobrevivente faria o version-check do app mandar SIGTERM num pid reciclado depois.
   try { if (existsSync(pidPath)) unlinkSync(pidPath); } catch { /* já foi */ }
   try { if (existsSync(cfg.socketPath)) unlinkSync(cfg.socketPath); } catch { /* já foi */ }
+  svc.shutdownPortals(); // #26 navegadores dos portais
   if (killAgents) sessions.disposeAllHard(); else sessions.shutdownAll();
   for (const s of [http, agent]) { try { for (const c of s.websocketServer?.clients ?? []) c.terminate(); } catch { /* sem WS neste servidor */ } }
   await Promise.all([http.close(), agent.close()]);

@@ -691,3 +691,18 @@ button.danger:hover { border-color: var(--danger); color: var(--danger-fg); }
 .git-file input[type="checkbox"] { width: auto; flex: none; }
 .git-file .gp { min-width: 0; }
 .git-files textarea, [data-testid="iso-panel"] textarea { flex: none; resize: vertical; background: var(--input); color: var(--fg); border: 1px solid var(--line); border-radius: 5px; padding: 6px 8px; font: 12px/1.45 ui-monospace, monospace; }
+
+/* #26 portal */
+.node.portal { background: var(--surface); }
+.portal-nav { display: flex; align-items: center; gap: 4px; padding: 3px 6px; border-bottom: 1px solid var(--line); }
+.portal-url { flex: 1; width: auto; padding: 3px 8px; font-size: 12px; }
+.portal-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--mut); flex: none; } .portal-dot.running { background: #43a047; } .portal-dot.starting { background: #e5a23a; } .portal-dot.error { background: #e53935; }
+.portal-err { background: rgba(229, 57, 53, .15); color: var(--fg); font-size: 11px; padding: 3px 8px; cursor: pointer; }
+.portal-view { position: relative; flex: 1; min-height: 0; background: #fff; overflow: hidden; outline: none; cursor: default; }
+.portal-view.design { cursor: crosshair; outline: 2px solid #4fc3f7; outline-offset: -2px; }
+.portal-view img { width: 100%; height: 100%; object-fit: fill; display: block; user-select: none; -webkit-user-drag: none; }
+.portal-idle { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 8px; align-items: center; justify-content: center; background: var(--surface); color: var(--fg); text-align: center; padding: 12px; }
+.portal-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, .35); color: #fff; font-size: 12px; pointer-events: none; }
+.portal-pick { padding: 6px 8px; border-top: 1px solid var(--line); font-size: 12px; display: flex; flex-direction: column; gap: 4px; max-height: 40%; overflow: auto; }
+.portal-pick .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.spin { animation: portal-spin 1s linear infinite; } @keyframes portal-spin { to { transform: rotate(360deg); } }

@@ -26,6 +26,7 @@ import { TextNode } from "./TextNode.js";
 import { TreeNode } from "./TreeNode.js";
 import { FilePreview } from "./FilePreview.js";
 import { GitPanel } from "./GitPanel.js";
+import { PortalNode } from "./PortalNode.js";
 import { RopeEdge, CircuitEdge, type EdgeData } from "./RopeEdge.js";
 import { AddMenu, type AddChoice } from "./AddMenu.js";
 import { Toolbar, type Tool, type DrawStyle } from "./Toolbar.js";
@@ -49,9 +50,9 @@ import { binderAddPage, binderRemovePage, emptyBinder, parseBinder, serializeBin
 import type { PaletteItem } from "./palette.js";
 import { useHint, useKeymap } from "./shortcuts.js";
 
-const nodeTypes: NodeTypes = { terminal: TerminalNode as never, note: NoteNode as never, text: TextNode as never, tree: TreeNode as never, binder: BinderNode as never };
+const nodeTypes: NodeTypes = { terminal: TerminalNode as never, note: NoteNode as never, text: TextNode as never, tree: TreeNode as never, binder: BinderNode as never, portal: PortalNode as never };
 const edgeTypes: EdgeTypes = { rope: RopeEdge as never, circuit: CircuitEdge as never };
-const SIZE = { terminal: { w: 640, h: 380 }, note: { w: 260, h: 160 }, text: { w: 220, h: 48 }, tree: { w: 300, h: 420 }, binder: { w: 420, h: 280 } } as const;
+const SIZE = { terminal: { w: 640, h: 380 }, note: { w: 260, h: 160 }, text: { w: 220, h: 48 }, tree: { w: 300, h: 420 }, binder: { w: 420, h: 280 }, portal: { w: 620, h: 440 } } as const;
 
 function freeSpot(nodes: { geometry: Geometry }[], size: { w: number; h: number }, at?: { x: number; y: number }): Geometry {
   if (at) return { x: at.x, y: at.y, ...size };
@@ -60,7 +61,7 @@ function freeSpot(nodes: { geometry: Geometry }[], size: { w: number; h: number 
   const top = Math.min(...nodes.map((n) => n.geometry.y));
   return { x: right + 40, y: top, ...size };
 }
-const isTyping = () => { const el = document.activeElement as HTMLElement | null; return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable || el.classList.contains("xterm-helper-textarea")); };
+const isTyping = () => { const el = document.activeElement as HTMLElement | null; return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable || el.classList.contains("xterm-helper-textarea") || !!el.closest?.(".portal-view")); }; // portal (#26): as teclas vão para a página, não para os atalhos
 
 type UndoProps = { canUndo: boolean; canRedo: boolean; undoLabel: string | null; redoLabel: string | null; onUndo: () => void; onRedo: () => void };
 function ZoomBar({ minimap, setMinimap, onUsage, onRoutines, agents, wsName, inFloors, onFloors, hud, onHud, history }: { minimap: boolean; setMinimap: (v: boolean) => void; onUsage: () => void; onRoutines: () => void; agents: AgentPresence[]; wsName?: string; inFloors: boolean; onFloors: () => void; hud: boolean; onHud: () => void; history: UndoProps }) {
@@ -464,6 +465,8 @@ function Canvas({ conn }: { conn: Connection }) {
               onMove: () => void window.messai.pickDirectory?.().then((d) => { if (d) void mutate((r) => api.patchNode(n.nodeId, { expectedRevision: r, filePath: `${d}/${n.title.replace(/[\\/:*?"<>|]+/g, " ").trim() || "nota"}.md` })); }) }
           : n.kind === "binder" ? { title: n.title, content: n.content ?? "", editSignal: renameSig.id === n.nodeId ? renameSig.n : 0, ...(n.groupId ? { groupId: n.groupId } : {}), onChange: change, onRename: rename, onDelete: del,
               onSpill: (pageId: string) => void spillPage(n, pageId), onUnstack: () => void unstackBinder(n), onPull: () => void pullIntoBinder(n.nodeId) }
+          : n.kind === "portal" ? { title: n.title, content: n.content ?? "", editSignal: renameSig.id === n.nodeId ? renameSig.n : 0, workspaceId: snap.workspace.workspaceId, api, stream, ...(n.groupId ? { groupId: n.groupId } : {}), onDelete: del, onRename: rename, ...extras, toast,
+              peers: snap.nodes.filter((o) => o.kind === "terminal" && (snap.connections ?? []).some((c) => (c.sourceNodeId === n.nodeId && c.targetNodeId === o.nodeId) || (c.targetNodeId === n.nodeId && c.sourceNodeId === o.nodeId))).map((o) => ({ id: o.nodeId, title: o.title })) }
           : n.kind === "tree" ? { title: n.title, content: n.content ?? "", editSignal: renameSig.id === n.nodeId ? renameSig.n : 0, workspaceId: snap.workspace.workspaceId, api, ...(n.groupId ? { groupId: n.groupId } : {}), onChange: change, onDelete: del, onRename: rename, ...extras,
               onOpenNote: (rel: string) => void mutate((r) => api.createNode(snap.workspace.workspaceId, { expectedRevision: r, kind: "note", geometry: { x: n.geometry.x + n.geometry.w + 40, y: n.geometry.y, w: 360, h: 260 }, filePath: `${snap.workspace.cwd}/${rel}` })),
               onPreview: (rel: string) => setPreview(rel), onGit: () => setGitOpen(true), toast }
@@ -512,6 +515,7 @@ function Canvas({ conn }: { conn: Connection }) {
     { id: "theme", label: "Alternar tema", keywords: "claro escuro sistema" },
     { id: "minimap", label: "Alternar minimapa", detail: "Ctrl+Shift+M" },
     { id: "hud", label: "Janela flutuante do companheiro", keywords: "hud resumo" },
+    { id: "portal.new", label: "Novo portal (navegador no canvas)", keywords: "portal navegador web browser site" },
     { id: "git", label: "Git do espaço (commit, branch, merge, pull/push)…", keywords: "git commit branch merge pull push historico diff" },
     { id: "approvals", label: "Pedidos de permissão dos agentes isolados…", keywords: "aprovar isolado sandbox permissão capacidade" },
     { id: "attention.next", label: "Ir ao próximo terminal esperando você", detail: "Ctrl+Shift+A", keywords: "atenção" },
@@ -534,6 +538,7 @@ function Canvas({ conn }: { conn: Connection }) {
       case "routines": if (current) setRoutinesOpen(true); return;
       case "approvals": setApprovalsOpen(true); return;
       case "git": if (current) setGitOpen(true); return;
+      case "portal.new": if (current) { const c = viewCenter(); createSimple("portal", { x: c.x - SIZE.portal.w / 2, y: c.y - SIZE.portal.h / 2, ...SIZE.portal }); } return;
       case "instructions": setPref("agentsSub", "instructions"); setPref("prefsTab", "agents"); setPrefsOpen(true); return;
       case "theme": setThemePref(nextTheme(getThemePref())); return;
       case "minimap": setMinimap((v) => !v); return;
@@ -683,9 +688,9 @@ function Canvas({ conn }: { conn: Connection }) {
     void mutate(async (r) => { const input = { expectedRevision: r, kind: "terminal", geometry, title: i.title, ...look, ...(usePreset ? { command: preset.command, args: preset.args } : cmdParts ? { command: cmdParts[0]!, args: cmdParts.slice(1) } : {}), ...(i.cwd ? { cwd: i.cwd } : {}), ...(i.roleId ? { roleId: i.roleId } : {}), ...(i.persistent ? { persistent: true } : {}), ...(i.isolation ? { isolation: i.isolation } : {}), ...(usePreset && preset.maestro ? { maestro: true } : {}) }; const made = await api.createNode(current, input); const { expectedRevision: _er, ...sp } = input; rec({ label: "criar terminal", forward: [{ type: "createNode", ref: made.node.nodeId, spec: sp as NodeSpec }], inverse: [{ type: "deleteNode", id: made.node.nodeId }] }); ensureVisible(geometry); if (target === "chat") setTimeout(() => openChat(made.node.nodeId), 300); });
     setTool("select");
   };
-  const createSimple = (kind: "note" | "text" | "tree" | "binder", geometry: Geometry) => {
+  const createSimple = (kind: "note" | "text" | "tree" | "binder" | "portal", geometry: Geometry) => {
     if (!current) return;
-    void mutate(async (r) => { const made = await api.createNode(current, { expectedRevision: r, kind, geometry, ...(kind === "binder" ? {} : { content: "" }) }); rec({ label: kind === "note" ? "criar nota" : kind === "text" ? "criar texto" : kind === "binder" ? "criar fichário" : "criar árvore", forward: [{ type: "createNode", ref: made.node.nodeId, spec: { kind, title: made.node.title, geometry, content: made.node.content ?? "" } }], inverse: [{ type: "deleteNode", id: made.node.nodeId }] }); ensureVisible(geometry); });
+    void mutate(async (r) => { const made = await api.createNode(current, { expectedRevision: r, kind, geometry, ...(kind === "binder" ? {} : { content: "" }) }); rec({ label: kind === "note" ? "criar nota" : kind === "text" ? "criar texto" : kind === "binder" ? "criar fichário" : kind === "portal" ? "criar portal" : "criar árvore", forward: [{ type: "createNode", ref: made.node.nodeId, spec: { kind, title: made.node.title, geometry, content: made.node.content ?? "" } }], inverse: [{ type: "deleteNode", id: made.node.nodeId }] }); ensureVisible(geometry); });
     setTool("select");
   };
   const onCreateRect = (kind: "terminal" | "note" | "text" | "tree", rect: CreateRect) => {
@@ -698,6 +703,7 @@ function Canvas({ conn }: { conn: Connection }) {
     if (choice.kind === "note") return createSimple("note", freeSpot(nodes, SIZE.note, at));
     if (choice.kind === "tree") return createSimple("tree", freeSpot(nodes, SIZE.tree, at));
     if (choice.kind === "binder") return createSimple("binder", freeSpot(nodes, SIZE.binder, at));
+    if (choice.kind === "portal") return createSimple("portal", freeSpot(nodes, SIZE.portal, at));
     const g = freeSpot(nodes, SIZE.terminal, at);
     const persistent = features.includes("terminal.tmux");
     if (choice.preset) createTerminal(g, { title: choice.preset.label, presetId: choice.preset.id, persistent });
@@ -903,7 +909,7 @@ function Canvas({ conn }: { conn: Connection }) {
             else toast(`${f.name}: só .md/.txt viram nota (outros arquivos: em breve)`);
           });
         }} onContextMenu={(e) => { e.preventDefault(); if (!current || tool !== "select") return; const r = e.currentTarget.getBoundingClientRect(); setMenu({ x: e.clientX - r.left, y: e.clientY - r.top, at: rf.screenToFlowPosition({ x: e.clientX, y: e.clientY }) }); }}>
-        <Toolbar tool={tool} setTool={setTool} style={style} setStyle={setStyle} onFileTree={() => {}} onPortal={() => toast("Portais: em breve")} />
+        <Toolbar tool={tool} setTool={setTool} style={style} setStyle={setStyle} onFileTree={() => {}} onPortal={() => add({ kind: "portal" })} />
         {(() => {
           const selNodes = flow.filter((n) => n.selected);
           if (selNodes.length !== 1) return null;

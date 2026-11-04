@@ -675,3 +675,56 @@ export const ISOLATED_DEFAULT_CAPS = ["files:read", "files:write", "chat:post", 
 /** O que o usuário pode conceder a um agente isolado por pedido de aprovação — nunca o que viabiliza execução fora do sandbox. */
 export const ISOLATED_APPROVABLE_CAPS = ["nodes:write", "messages:send", "nodes:read", "chat:post", "files:read", "files:write"] as const;
 
+
+// ---------- #26 Portais (navegador embutido) ----------
+export type PortalUrlResult = { ok: true; url: string } | { ok: false; reason: string };
+const HOSTISH = /^(localhost|\d{1,3}(\.\d{1,3}){3}|\[[0-9a-fA-F:]+\]|[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+)(:\d{1,5})?([/?#].*)?$/;
+/**
+ * Normaliza o que o usuário/agente digitou numa URL navegável. SÓ http/https (e `about:blank`): `file:`, `javascript:`, `data:`, `chrome:`,
+ * `view-source:`, `devtools:` etc. são recusados — o portal não pode ler arquivos locais nem executar script por URL.
+ */
+export function normalizePortalUrl(input: string): PortalUrlResult {
+  const raw = input.trim();
+  if (!raw) return { ok: false, reason: "URL vazia" };
+  if (raw === "about:blank") return { ok: true, url: raw };
+  if (/[\s\u0000-\u001f]/.test(raw)) return { ok: false, reason: "URL inválida" };
+  const scheme = /^([A-Za-z][A-Za-z0-9+.-]*):/.exec(raw)?.[1]?.toLowerCase();
+  let candidate = raw;
+  if (scheme && scheme !== "http" && scheme !== "https" && !/^[A-Za-z0-9.-]+:\d{1,5}([/?#].*)?$/.test(raw)) return { ok: false, reason: `esquema não permitido: ${scheme}: (só http e https)` };
+  if (!/^https?:\/\//i.test(raw)) {
+    if (!HOSTISH.test(raw)) return { ok: false, reason: "URL inválida" };
+    candidate = `${/^(localhost|127\.|\[::1\]|10\.|192\.168\.)/.test(raw) ? "http" : "https"}://${raw}`;
+  }
+  try {
+    const u = new URL(candidate);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return { ok: false, reason: "só http e https" };
+    if (!u.hostname) return { ok: false, reason: "URL sem host" };
+    if (u.username || u.password) return { ok: false, reason: "URL com usuário/senha embutidos não é permitida" };
+    return { ok: true, url: u.toString() };
+  } catch { return { ok: false, reason: "URL inválida" }; }
+}
+/** Conteúdo do nó portal: JSON {url}. Tolerante a lixo (volta ao em branco). */
+export function parsePortal(content: string | undefined): { url: string } {
+  try { const j = JSON.parse(content ?? "") as { url?: unknown }; return { url: typeof j.url === "string" ? j.url : "" }; } catch { return { url: "" }; }
+}
+export const serializePortal = (p: { url: string }): string => JSON.stringify({ url: p.url });
+
+export type PortalKeyInfo = { key: string; code: string; vk: number; text?: string };
+const NAMED_KEYS: Record<string, PortalKeyInfo> = {
+  enter: { key: "Enter", code: "Enter", vk: 13, text: "\r" }, tab: { key: "Tab", code: "Tab", vk: 9 }, escape: { key: "Escape", code: "Escape", vk: 27 }, esc: { key: "Escape", code: "Escape", vk: 27 },
+  backspace: { key: "Backspace", code: "Backspace", vk: 8 }, delete: { key: "Delete", code: "Delete", vk: 46 }, space: { key: " ", code: "Space", vk: 32, text: " " },
+  arrowup: { key: "ArrowUp", code: "ArrowUp", vk: 38 }, up: { key: "ArrowUp", code: "ArrowUp", vk: 38 }, arrowdown: { key: "ArrowDown", code: "ArrowDown", vk: 40 }, down: { key: "ArrowDown", code: "ArrowDown", vk: 40 },
+  arrowleft: { key: "ArrowLeft", code: "ArrowLeft", vk: 37 }, left: { key: "ArrowLeft", code: "ArrowLeft", vk: 37 }, arrowright: { key: "ArrowRight", code: "ArrowRight", vk: 39 }, right: { key: "ArrowRight", code: "ArrowRight", vk: 39 },
+  home: { key: "Home", code: "Home", vk: 36 }, end: { key: "End", code: "End", vk: 35 }, pageup: { key: "PageUp", code: "PageUp", vk: 33 }, pagedown: { key: "PageDown", code: "PageDown", vk: 34 },
+};
+/** Tecla pelo nome (Enter, Tab, ArrowDown…) ou um caractere imprimível → parâmetros do CDP `Input.dispatchKeyEvent`. null = desconhecida. */
+export function portalKey(name: string): PortalKeyInfo | null {
+  const n = NAMED_KEYS[name.toLowerCase()]; if (n) return n;
+  const f = /^f([1-9]|1[0-2])$/i.exec(name); if (f) return { key: `F${f[1]}`, code: `F${f[1]}`, vk: 111 + Number(f[1]) };
+  if ([...name].length === 1) {
+    const ch = name; const up = ch.toUpperCase();
+    const vk = /[A-Za-z]/.test(ch) ? up.charCodeAt(0) : /[0-9]/.test(ch) ? ch.charCodeAt(0) : 0;
+    return { key: ch, code: /[A-Za-z]/.test(ch) ? `Key${up}` : /[0-9]/.test(ch) ? `Digit${ch}` : "", vk, text: ch };
+  }
+  return null;
+}

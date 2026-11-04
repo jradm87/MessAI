@@ -17,7 +17,7 @@ export function Toolbar({ tool, setTool, style, setStyle, onFileTree, onPortal }
         <B t="note" title="Nota (N)"><StickyNote size={16} /></B>
         <button className="tb off" title="Anexo (em breve)"><Paperclip size={16} /></button>
         <button className={`tb ${tool === "tree" ? "on" : ""}`} title="Árvore de arquivos (F): clique ou arraste no canvas" data-testid="tool-tree" onClick={() => { onFileTree(); setTool("tree"); }}><Folder size={16} /></button>
-        <button className="tb off" title="Portal (P) — em breve" onClick={onPortal}><Globe size={16} /></button>
+        <button className="tb" title="Portal: navegador no canvas (dirigível por agentes)" data-testid="tool-portal" onClick={onPortal}><Globe size={16} /></button>
         <B t="text" title="Texto (L)"><Type size={16} /></B>
         <B t="draw" title="Desenhar (B)"><Pencil size={16} /></B>
         <B t="pan" title="Mover (H)"><Hand size={16} /></B>

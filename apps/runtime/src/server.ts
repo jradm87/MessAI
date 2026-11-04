@@ -3,7 +3,7 @@ import websocket from "@fastify/websocket";
 import { Value } from "@sinclair/typebox/value";
 import type { WebSocket } from "ws";
 import {
-  BUILD_VERSION, PROTOCOL_VERSION, GitCommitInput, GitBranchInput, GitCheckoutInput, GitMergeInput, GitPushInput, SendMessage, Ask, CreateConnection, CreateDrawing, CreateNode, CreateWorkspace, DeleteNode, PatchNode, PatchWorkspace, ApplyLayout, WsClientMessage,
+  BUILD_VERSION, PROTOCOL_VERSION, PortalAct, GitCommitInput, GitBranchInput, GitCheckoutInput, GitMergeInput, GitPushInput, SendMessage, Ask, CreateConnection, CreateDrawing, CreateNode, CreateWorkspace, DeleteNode, PatchNode, PatchWorkspace, ApplyLayout, WsClientMessage,
   type Capabilities, type WsServerMessage, type ApiError,
  CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, PutFloorHooks, RunFloorHookInput, StopFloorHookInput, PutFloorExcludes, CreateFloorPrInput, PatchFloorPrInput, PutGitHostsInput, PutEnvVarsInput, PreviewWorkspaceImportInput, ImportWorkspaceInput, DuplicateWorkspaceInput, SendNotifyInput, CreateRoutineInput, PatchRoutineInput, FsOp, PatchRuntimeSettings, PutPresets, CreateSkill, PatchSkill, CreateApproval, DecideApproval, BackupInput, RestoreInput, MoveDataInput, ResetInput, CreateNodeGroup, PatchNodeGroup, SaveScore, PatchScore, PlaceScore, CreateBand, PatchBand, AskBand, MaestroRecruit, MaestroTarget, MaestroAssign, ExportAttachment, PutInstructions, SyncInstructions, KillProcInput, IssueAgentTokenInput, type PresetInput, type Preset } from "@messai/contracts";
 import type { Result } from "@messai/domain";
@@ -171,6 +171,11 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
   app.get<{ Params: { id: string }; Querystring: { path?: string } }>("/v1/workspaces/:id/tree", async (req, reply) => send(reply, await svc.listTree(req.params.id, req.query.path ?? "")));
   app.get<{ Params: { id: string }; Querystring: { path?: string } }>("/v1/workspaces/:id/file", async (req, reply) => send(reply, svc.readFile(req.params.id, req.query.path ?? "")));
   app.post<{ Params: { id: string } }>("/v1/workspaces/:id/fs", async (req, reply) => { const b = body<FsOp>(FsOp, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.fsOp(req.params.id, b)); });
+  // #26 portais (navegador embutido): estado, ações, snapshot e captura
+  app.get<{ Params: { id: string } }>("/v1/portals/:id", async (req, reply) => send(reply, svc.portalState(req.params.id)));
+  app.post<{ Params: { id: string } }>("/v1/portals/:id/act", async (req, reply) => { const b = body<PortalAct>(PortalAct, req.body); if ("code" in b) return invalid(reply, b); return send(reply, await svc.portalAct(req.params.id, b)); });
+  app.get<{ Params: { id: string } }>("/v1/portals/:id/snapshot", async (req, reply) => send(reply, await svc.portalSnapshot(req.params.id)));
+  app.get<{ Params: { id: string } }>("/v1/portals/:id/screenshot", async (req, reply) => send(reply, await svc.portalScreenshot(req.params.id)));
   // #30 git do espaço
   app.get<{ Params: { id: string } }>("/v1/workspaces/:id/git", async (req, reply) => send(reply, await svc.gitInfo(req.params.id)));
   app.get<{ Params: { id: string }; Querystring: { limit?: string; path?: string } }>("/v1/workspaces/:id/git/log", async (req, reply) => send(reply, await svc.gitLog(req.params.id, Number(req.query.limit ?? 50) || 50, req.query.path)));
@@ -470,6 +475,10 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
         svc.on("notification", onNotification);
         const onApproval = (approval: import("@messai/contracts").Approval) => { if (workspaces.has(approval.workspaceId)) push({ type: "approval", approval }); };
         svc.on("approval", onApproval); // #93
+        const watchedPortals = new Set<string>(); // #26 só o app assiste (quadros do screencast)
+        const onPortalFrame = (nodeId: string, f: { data: string; width: number; height: number }) => { if (watchedPortals.has(nodeId)) push({ type: "portalFrame", nodeId, data: f.data, width: f.width, height: f.height }); };
+        const onPortalState = (state: import("@messai/contracts").PortalState) => { if (watchedPortals.has(state.nodeId)) push({ type: "portalState", state }); };
+        svc.on("portalFrame", onPortalFrame); svc.on("portalState", onPortalState);
         svc.sessions.on("output", onOutput);
         svc.sessions.on("session", onSession);
         svc.on("workspace", onWorkspace);
@@ -500,6 +509,12 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
               if (!r.ok) push({ type: "error", error: r.error, sessionId: m.sessionId }); return;
             }
             case "releaseLease": svc.sessions.releaseLease(m.sessionId, clientId); return;
+            case "portalWatch": {
+              watchedPortals.add(m.nodeId);
+              void svc.portalWatch(m.nodeId, clientId).then((r) => { if (!r.ok) { watchedPortals.delete(m.nodeId); push({ type: "error", error: r.error }); } else push({ type: "portalState", state: r.value }); });
+              return;
+            }
+            case "portalUnwatch": watchedPortals.delete(m.nodeId); svc.portalUnwatch(m.nodeId, clientId); return;
             case "input": {
               const r = svc.sessions.write(m.sessionId, clientId, m.data);
               if (!r.ok) push({ type: "error", error: r.error, sessionId: m.sessionId }); return;
@@ -512,6 +527,7 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
         });
         socket.on("close", () => {
           for (const id of attached) svc.sessions.releaseLease(id, clientId);
+          for (const id of watchedPortals) svc.portalUnwatch(id, clientId); svc.off("portalFrame", onPortalFrame); svc.off("portalState", onPortalState);
           svc.sessions.off("output", onOutput); svc.sessions.off("session", onSession); svc.off("workspace", onWorkspace); svc.off("message", onMessage); svc.sessions.off("taskFinished", onTaskFinished); svc.off("taskSummary", onTaskSummary); svc.off("floorHook", onFloorHook); svc.off("notification", onNotification); svc.off("approval", onApproval); svc.off("sidebar", onSidebar); svc.off("chat", onChat);
         });
       });

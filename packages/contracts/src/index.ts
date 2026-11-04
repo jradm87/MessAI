@@ -2,7 +2,7 @@ import { Type, type Static } from "@sinclair/typebox";
 
 export const PROTOCOL_VERSION = 1 as const;
 /** Incrementar a cada mudança de snapshot/rotas; o cliente avisa quando o runtime está atrás. */
-export const BUILD_VERSION = 31 as const;
+export const BUILD_VERSION = 32 as const;
 
 // ---------- Identidades ----------
 export const Id = Type.String({ minLength: 8, maxLength: 64 });
@@ -54,7 +54,7 @@ export const Geometry = Type.Object({
 });
 export type Geometry = Static<typeof Geometry>;
 
-export const NodeKind = Type.Union([Type.Literal("terminal"), Type.Literal("note"), Type.Literal("text"), Type.Literal("tree"), Type.Literal("binder")]); // binder = fichário (#74)
+export const NodeKind = Type.Union([Type.Literal("terminal"), Type.Literal("note"), Type.Literal("text"), Type.Literal("tree"), Type.Literal("binder"), Type.Literal("portal")]); // binder = fichário (#74); portal = navegador embutido (#26)
 export type NodeKind = Static<typeof NodeKind>;
 
 // #93 [MESS-09] Modo isolado: worktree separa código, não processos/rede/filesystem. Um terminal "isolado" roda sob bubblewrap:
@@ -686,6 +686,40 @@ export const CreateConnection = Type.Object({
 export type CreateConnection = Static<typeof CreateConnection>;
 // ---------- WebSocket ----------
 // cliente -> runtime
+// ---------- #26 Portais: navegador embutido no canvas (sessão de browser NO RUNTIME, dirigível por agentes) ----------
+export const PortalStatus = Type.Union([Type.Literal("stopped"), Type.Literal("starting"), Type.Literal("running"), Type.Literal("error")]);
+export type PortalStatus = Static<typeof PortalStatus>;
+export const PortalState = Type.Object({
+  nodeId: Id, status: PortalStatus, url: Type.String(), title: Type.String(), loading: Type.Boolean(), canGoBack: Type.Boolean(), canGoForward: Type.Boolean(),
+  width: Type.Integer(), height: Type.Integer(), watchers: Type.Integer(), error: Type.Optional(Type.String()),
+});
+export type PortalState = Static<typeof PortalState>;
+export const PortalAct = Type.Union([
+  Type.Object({ action: Type.Literal("navigate"), url: Type.String({ minLength: 1, maxLength: 2048 }) }),
+  Type.Object({ action: Type.Literal("back") }), Type.Object({ action: Type.Literal("forward") }), Type.Object({ action: Type.Literal("reload") }),
+  Type.Object({ action: Type.Literal("click"), ref: Type.Optional(Type.Integer({ minimum: 0 })), x: Type.Optional(Type.Number()), y: Type.Optional(Type.Number()), button: Type.Optional(Type.Union([Type.Literal("left"), Type.Literal("right")])), double: Type.Optional(Type.Boolean()) }),
+  Type.Object({ action: Type.Literal("mouse"), type: Type.Union([Type.Literal("move"), Type.Literal("down"), Type.Literal("up")]), x: Type.Number(), y: Type.Number(), button: Type.Optional(Type.Union([Type.Literal("left"), Type.Literal("right")])), clickCount: Type.Optional(Type.Integer({ minimum: 1, maximum: 3 })) }), // entrada crua do usuário (arrastar/pairar)
+  Type.Object({ action: Type.Literal("type"), text: Type.String({ maxLength: 20000 }), ref: Type.Optional(Type.Integer({ minimum: 0 })), submit: Type.Optional(Type.Boolean()), clear: Type.Optional(Type.Boolean()) }),
+  Type.Object({ action: Type.Literal("key"), key: Type.String({ minLength: 1, maxLength: 40 }) }),
+  Type.Object({ action: Type.Literal("scroll"), dy: Type.Number(), dx: Type.Optional(Type.Number()), x: Type.Optional(Type.Number()), y: Type.Optional(Type.Number()) }),
+  Type.Object({ action: Type.Literal("eval"), expression: Type.String({ minLength: 1, maxLength: 20000 }) }),
+  Type.Object({ action: Type.Literal("waitForText"), text: Type.String({ minLength: 1, maxLength: 500 }), timeoutMs: Type.Optional(Type.Integer({ minimum: 100, maximum: 30000 })) }),
+  Type.Object({ action: Type.Literal("inspect"), x: Type.Number(), y: Type.Number() }), // modo design: o que há sob o ponto
+  Type.Object({ action: Type.Literal("viewport"), width: Type.Integer({ minimum: 200, maximum: 3840 }), height: Type.Integer({ minimum: 150, maximum: 2160 }) }),
+  Type.Object({ action: Type.Literal("close") }),
+]);
+export type PortalAct = Static<typeof PortalAct>;
+export const PortalActResult = Type.Object({ ok: Type.Boolean(), state: PortalState, value: Type.Optional(Type.Unknown()), message: Type.Optional(Type.String()) });
+export type PortalActResult = Static<typeof PortalActResult>;
+export const PortalElement = Type.Object({ ref: Type.Integer(), tag: Type.String(), role: Type.Optional(Type.String()), name: Type.String(), type: Type.Optional(Type.String()), href: Type.Optional(Type.String()), value: Type.Optional(Type.String()), rect: Type.Object({ x: Type.Number(), y: Type.Number(), w: Type.Number(), h: Type.Number() }) });
+export type PortalElement = Static<typeof PortalElement>;
+export const PortalSnapshot = Type.Object({ url: Type.String(), title: Type.String(), text: Type.String(), elements: Type.Array(PortalElement), truncated: Type.Boolean() });
+export type PortalSnapshot = Static<typeof PortalSnapshot>;
+export const PortalScreenshot = Type.Object({ mime: Type.Literal("image/png"), data: Type.String(), width: Type.Integer(), height: Type.Integer() });
+export type PortalScreenshot = Static<typeof PortalScreenshot>;
+export const PortalInspect = Type.Object({ tag: Type.String(), selector: Type.String(), text: Type.String(), html: Type.String(), rect: Type.Object({ x: Type.Number(), y: Type.Number(), w: Type.Number(), h: Type.Number() }) });
+export type PortalInspect = Static<typeof PortalInspect>;
+
 export const WsClientMessage = Type.Union([
   Type.Object({ type: Type.Literal("subscribe"), workspaceId: Id }),
   Type.Object({ type: Type.Literal("attach"), sessionId: Id }),
@@ -694,6 +728,8 @@ export const WsClientMessage = Type.Union([
   Type.Object({ type: Type.Literal("resize"), sessionId: Id, cols: Type.Integer(), rows: Type.Integer() }),
   Type.Object({ type: Type.Literal("acquireLease"), sessionId: Id }),
   Type.Object({ type: Type.Literal("releaseLease"), sessionId: Id }),
+  Type.Object({ type: Type.Literal("portalWatch"), nodeId: Id }), // #26 só o app: recebe os quadros do portal
+  Type.Object({ type: Type.Literal("portalUnwatch"), nodeId: Id }),
 ]);
 export type WsClientMessage = Static<typeof WsClientMessage>;
 
@@ -738,6 +774,7 @@ export const AgentCapability = Type.Union([
   Type.Literal("workspace:manage"),
   Type.Literal("terminal:control"),
   Type.Literal("maestro:conduct"),
+  Type.Literal("portals:control"), // #26: dirigir um navegador (portal) — sai do sandbox pela rede, então nunca é aprovável para agente isolado
 ]);
 export type AgentCapability = Static<typeof AgentCapability>;
 
@@ -756,6 +793,8 @@ export const DecideApproval = Type.Object({ approve: Type.Boolean() });
 export type DecideApproval = Static<typeof DecideApproval>;
 
 export const WsServerMessage = Type.Union([
+  Type.Object({ type: Type.Literal("portalFrame"), nodeId: Id, data: Type.String(), width: Type.Integer(), height: Type.Integer() }), // data: JPEG em base64
+  Type.Object({ type: Type.Literal("portalState"), state: PortalState }),
   Type.Object({ type: Type.Literal("hello"), clientId: Id, protocolVersion: Type.Integer() }),
   Type.Object({ type: Type.Literal("snapshot"), sessionId: Id, sequence: Type.Integer(), data: Type.String(), session: Session }),
   Type.Object({ type: Type.Literal("output"), sessionId: Id, sequence: Type.Integer(), data: Type.String() }),

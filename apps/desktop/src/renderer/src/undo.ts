@@ -5,7 +5,7 @@
  */
 import type { Geometry, NodeIsolation, TermTheme } from "@messai/contracts";
 
-export type NodeSpec = { kind: "terminal" | "note" | "text" | "tree"; title: string; geometry: Geometry; content?: string; color?: string; icon?: string; termTheme?: TermTheme; roleId?: string; skillIds?: string[]; command?: string; args?: string[]; cwd?: string; persistent?: boolean; maestro?: boolean; isolation?: NodeIsolation };
+export type NodeSpec = { kind: "terminal" | "note" | "text" | "tree" | "binder" | "portal"; title: string; geometry: Geometry; content?: string; color?: string; icon?: string; termTheme?: TermTheme; roleId?: string; skillIds?: string[]; command?: string; args?: string[]; cwd?: string; persistent?: boolean; maestro?: boolean; isolation?: NodeIsolation };
 export type ConnSpec = { sourceNodeId: string; targetNodeId: string; style?: string };
 export type DrawingSpec = { kind: string; points: [number, number][]; color: string; width: number; text?: string; groupId?: string };
 export type Op =

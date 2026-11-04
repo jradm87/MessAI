@@ -39,18 +39,19 @@
 - [x] #86 (MESS-01) symlink `c43363e` · [x] #87 (MESS-02) authz por agente `e45b2ed`
 
 ### Fase 8 — Gigantes
-- [x] #93 (MESS-09) modo isolado `a06891f`
-- [ ] #30 Editor+git → #26 Portais web → #73 Portais Android (adb/scrcpy) — ordem escolhida pelo usuário
+- [x] #93 (MESS-09) modo isolado `a06891f` · [x] #30 Editor+git `be9a863` · [x] #26 Portais web (este commit)
+- [ ] #73 Portais Android (adb/scrcpy) — último da Fase 8 pela ordem escolhida pelo usuário
 - [ ] **#28 Hub e #59 Controle remoto: PULADOS por decisão do usuário (seguem abertos)**
 
 ## Estado atual
-- **Fase atual:** 8 (Gigantes). Fases 0–7 completas (#86, #87 e #93 fechados). Próximo: **#30 editor+git → #26 portais web → #73 portais Android**. #28/#59 pulados pelo usuário.
-- **Branch de trabalho:** `auto/fase6` (rastreia `origin/auto/fase6`), a frente de `main` (`fa21501` tem fase5/fase6 até o #87 mesclados). Commits recentes: `e45b2ed` #87 · `a06891f` #93. Todos assinados (GPG), **sem** `Co-Authored-By` (preferência do usuário).
-- **#93 modo isolado (resumo para quem continuar):** `apps/runtime/src/isolation.ts` (sonda + plano bwrap, falha fechada), `packages/domain` (`bwrapPlan`, `validateIsolation`, `scrubEnv`, caps padrão de isolado), `service.ts` (aprovações, guardas), `authz.ts`/`server.ts`, CLI `mess request`, UI (`ApprovalsDialog`, caixa no novo terminal, selo/botão no nó, Preferências → Agentes → Isolamento). Limites documentados no comentário de fechamento do issue (rede host, `--new-session` não usado, canal isolado↔confiável, só Linux). Cgroup: `MemoryMax` verificado (exit 137); sem systemd de usuário os limites duros não se aplicam.
-- **BUILD_VERSION = 30** (o app troca o runtime antigo sozinho ao abrir).
-- **Testes:** suíte determinística `npx vitest run packages apps tests/integration` = **260/260** (68 arquivos). e2e Electron real (fora do CI): `isolation.test.ts` 3/3 + os das fases anteriores. **IMPORTANTE:** o e2e usa o bundle de `apps/desktop/out`; rode `npm run build -w apps/desktop` (electron-vite) além do `npm run build` (só `tsc -b`) ou o e2e testa uma UI velha.
-- **Pegadinhas aprendidas no #93:** `bwrap` não monta sobre symlink (`/bin`, `/lib64`, `/etc/resolv.conf` → use o alvo do link/`systemLayout()`); testes de bwrap precisam dos links usr-merged; `pkill -f` casa com o próprio shell — mate runtimes por PID.
-- **Não validado visualmente por mim:** a interface do modo isolado só tem e2e automatizado; peça ao usuário para conferir (diálogo, selo verde, toast de pedido, painel de Isolamento).
+- **Fase atual:** 8 (Gigantes). Fechados: #93, #30, #26. Falta **#73 portais Android** (adb/scrcpy disponíveis). #28 hub e #59 controle remoto: **pulados por decisão do usuário** (seguem abertos).
+- **Branch de trabalho:** `auto/fase6` (rastreia `origin/auto/fase6`). Commits recentes assinados (GPG), **sem** `Co-Authored-By` (preferência do usuário): `e45b2ed` #87 · `a06891f` #93 · `be9a863` #30 · #26 (último).
+- **#26 portais (resumo):** nó `portal` = **Chromium por portal dirigido pelo RUNTIME via CDP sobre PIPE** (`--remote-debugging-pipe`, NUNCA porta TCP: uma porta 127.0.0.1 seria alcançável por agente isolado com rede host). `apps/runtime/src/portal.ts` (CdpPipe, PortalSession, PortalManager; perfil efêmero em `$TMPDIR/mess-portal-*`; processo em grupo próprio, kill do grupo; limite 6 sessões; ocioso 10 min fecha), `packages/domain` (`normalizePortalUrl` só http/https, `portalKey`, `parsePortal`), rotas `GET /v1/portals/:id[/snapshot|/screenshot]` + `POST /v1/portals/:id/act`, WS `portalWatch/portalUnwatch` → `portalFrame`/`portalState` (só app), capacidade nova `portals:control` (padrão do agente confiável; **nunca** aprovável para isolado), CLI `mess portal …`, UI `PortalNode.tsx` (barra de endereço, quadros, mouse/teclado/roda, modo design com "Enviar ao agente", fechar navegador). Navegador: `MESS_BROWSER` ou google-chrome/chromium/brave no PATH (não vai no AppImage). URL atual gravada no nó SEM bump de revisão. Atalhos globais ignoram teclas dentro do portal (`isTyping` inclui `.portal-view`).
+- **#30 editor+git (resumo):** `apps/runtime/src/git.ts` (execFile sem shell, sem prompt, refs validadas), rotas `/v1/workspaces/:id/git*` (leitura = `files:read`; escrita só app), `expectedMtimeMs` no write (409), CodeMirror 6 (`CodeEditor.tsx`, `FilePreview.tsx`), `GitPanel.tsx`.
+- **BUILD_VERSION = 32** (o app troca o runtime antigo sozinho ao abrir).
+- **Testes:** determinística `npx vitest run packages apps tests/integration` = **280/280** (70 arquivos; portal e git usam Chrome/git reais). e2e Electron real (fora do CI): `portal.test.ts` 5/5, `editor-git.test.ts` 4/4, `isolation.test.ts` 3/3, `pilot.test.ts` 18/18 e os das fases anteriores. **IMPORTANTE:** e2e usa `apps/desktop/out`: rode `npm run build -w apps/desktop` além de `npm run build` (só `tsc -b`).
+- **Pegadinhas:** bwrap não monta sobre symlink; `pkill -f` casa com o próprio shell (mate por PID); `pgrep` precisa de `--` antes de padrão que começa com `--`; teste que usa Chrome deve limpar portais abertos (`afterEach`) senão o limite de 6 vaza para o seguinte; `exactOptionalPropertyTypes` pede `| undefined` explícito.
+- **Visual:** conferi por screenshot o painel Git, o painel de Isolamento e o portal (página real + modo design). Isolamento e editor só por e2e/capturas parciais; peça ao usuário para conferir no dia a dia.
 
 ## Log de execução
 - Setup: branch `auto/roadmap`, assinatura GPG local configurada (Good signature verificada), baseline 78 verdes.
@@ -88,3 +89,4 @@
 - Há trabalho do #87 **não commitado** na `auto/fase6`; não faça `git stash`/`checkout` que o perca. Para checar se algo falha sem ele: `git stash -u`, testar, `git stash pop`.
 - Hub (#28) depende do #87 (credencial/autorização por agente) — não começar antes.
 - Fase 7/8: #87 authz por agente (`e45b2ed`); #93 modo isolado com bubblewrap (`a06891f`) — testes com bwrap real acharam 3 bugs (sonda sem /lib64, resolv.conf como link, /bin/sh isolado). #28/#59 pulados a pedido.
+- Fase 8: #30 editor CodeMirror + git (`be9a863`); #26 portais web com Chromium via CDP/pipe, `mess portal`, capacidade `portals:control`, modo design (este ciclo) — testes com Chrome real acharam: URL inicial sobrescrita pelo onState, popup com URL vazia, filhos do Chrome escrevendo no perfil, regressão de estado por resposta HTTP tardia, atalhos globais capturando teclas do portal.

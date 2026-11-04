@@ -32,6 +32,10 @@ const RULES: Rule[] = [
   ["POST", "/v1/workspaces/import/preview", { cap: "nodes:read" }],
   ["POST", "/v1/roles/discover", D], ["POST", "/v1/roles/:id/export", D], // leem/escrevem pastas arbitrárias
 
+  // ---- #26 portais: dirigir um navegador é sair do sandbox pela rede ----
+  ["GET", "/v1/portals/:id", r("portals:control", "node")], ["POST", "/v1/portals/:id/act", r("portals:control", "node")],
+  ["GET", "/v1/portals/:id/snapshot", r("portals:control", "node")], ["GET", "/v1/portals/:id/screenshot", r("portals:control", "node")],
+
   // ---- arquivos ----
   ["GET", "/v1/workspaces/:id/tree", r("files:read", "ws")],
   ["GET", "/v1/workspaces/:id/file", r("files:read", "ws")],

@@ -5,7 +5,9 @@ import type { Band, CreateBand, PatchBand, AskBand, BandAnswer, BandAskResult, M
 import type { FloorHookSection, FloorHooksConfig, PutFloorHooks, FloorHookStatus, FloorHooksState, RunFloorHookInput, StopFloorHookInput, FloorCopyInfo, PutFloorExcludes, ConnectedPeer, CrossNodeCandidate, GitHostEntry, PutGitHostsInput, FloorPrState, CreateFloorPrInput, PatchFloorPrInput, FloorPrReviewStatus, FloorPrChecksStatus, EnvVarEntry, PutEnvVarsInput, EnvironmentsState, WorkspaceBundle, WorkspaceBundlePreview, ImportWorkspaceInput, DuplicateWorkspaceInput, BundleNode, BundleConnection, BundleGroup, BundleBand, BundleDrawing, NotificationItem, NotificationKind, SendNotifyInput, Routine, CreateRoutineInput, PatchRoutineInput, RoutineRunResult } from "@messai/contracts";
 import { WORKSPACE_BUNDLE_FORMAT } from "@messai/contracts";
 import type { AgentCapability, IssueAgentTokenInput, AgentTokenInfo, Approval, CreateApproval, NodeIsolation } from "@messai/contracts";
-import { ISOLATED_APPROVABLE_CAPS, ISOLATED_DEFAULT_CAPS, validateIsolation } from "@messai/domain";
+import { ISOLATED_APPROVABLE_CAPS, ISOLATED_DEFAULT_CAPS, validateIsolation, normalizePortalUrl, parsePortal, serializePortal } from "@messai/domain";
+import { PortalManager, type PortalFrame } from "./portal.js";
+import type { PortalState, PortalAct, PortalActResult, PortalSnapshot, PortalScreenshot } from "@messai/contracts";
 import { buildIsolatedPlan, probeIsolation } from "./isolation.js";
 import { readProcTree } from "./procs.js";
 import * as gitops from "./git.js";
@@ -37,7 +39,7 @@ import { watch, type FSWatcher } from "chokidar";
 const MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", svg: "image/svg+xml", pdf: "application/pdf", md: "text/markdown", markdown: "text/markdown", txt: "text/plain", json: "application/json", csv: "text/csv", html: "text/html", log: "text/plain", ts: "text/plain", js: "text/plain", py: "text/plain", sh: "text/plain", yml: "text/plain", yaml: "text/plain" };
 export const mimeOf = (name: string): string => MIME[extname(name).slice(1).toLowerCase()] ?? "application/octet-stream";
 
-export type ServiceEvents = { workspace: [snapshot: WorkspaceSnapshot]; message: [message: Message]; sidebar: [sidebar: Sidebar]; chat: [message: ChatMessage]; taskSummary: [summary: TaskSummary]; floorHook: [workspaceId: string, status: FloorHookStatus]; notification: [notification: NotificationItem]; approval: [approval: Approval] };
+export type ServiceEvents = { workspace: [snapshot: WorkspaceSnapshot]; message: [message: Message]; sidebar: [sidebar: Sidebar]; chat: [message: ChatMessage]; taskSummary: [summary: TaskSummary]; floorHook: [workspaceId: string, status: FloorHookStatus]; notification: [notification: NotificationItem]; approval: [approval: Approval]; portalFrame: [nodeId: string, frame: PortalFrame]; portalState: [state: PortalState] };
 
 export type AgentUsageLimit = { label: string; pct: number; resets: string };
 export type AgentUsageItem = { id: string; label: string; available: boolean; note?: string; plan?: string; limits?: AgentUsageLimit[]; metrics: { label: string; value: string }[]; models: { name: string; input: number; output: number }[] };
@@ -103,6 +105,12 @@ const GIT_SYNC_TIMEOUT_MS = 15_000;
 export class WorkspaceService extends EventEmitter<ServiceEvents> {
   /** Companheiro (#66): resume turnos concluídos com modelo local; sem Ollama, fica quieto. */
   readonly companion: Companion;
+  /** #26 portais: um navegador por nó `portal`, criado sob demanda. A URL atual é gravada no conteúdo do nó SEM mexer na revisão do espaço. */
+  readonly portals = new PortalManager({
+    onState: (_id, st) => this.emit("portalState", st),
+    onFrame: (id, f) => this.emit("portalFrame", id, f),
+    onUrl: (id, url) => { const n = this.store.getNode(id); if (n?.kind === "portal" && parsePortal(n.content).url !== url) this.store.updateNode(id, { content: serializePortal({ url }) }); },
+  });
   /** #85 histórico recente de notificações em memória (para inspeção e testes). */
   private recentNotifications: NotificationItem[] = [];
   /** #27 timer de execução de rotinas agendadas. */
@@ -155,7 +163,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const custom = this.readNodeCaps()[node.nodeId];
     if (custom) return [...custom];
     if (node.isolation) return [...ISOLATED_DEFAULT_CAPS]; // #93 isolado: nada que execute código fora do sandbox
-    return ["files:read", "files:write", "chat:post", "nodes:read", "nodes:write", "messages:send", "workspace:manage", "terminal:control", ...(node.maestro ? ["maestro:conduct" as const] : [])];
+    return ["files:read", "files:write", "chat:post", "nodes:read", "nodes:write", "messages:send", "workspace:manage", "terminal:control", "portals:control", ...(node.maestro ? ["maestro:conduct" as const] : [])];
   }
   /** Emite (rotaciona) a credencial do agente de um terminal; as anteriores do nó são revogadas. */
   issueAgentToken(nodeId: string, input?: IssueAgentTokenInput, sessionId?: string, ttlDefaultSeconds = 86400): Result<AgentTokenInfo> {
@@ -1082,6 +1090,47 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     }
     return succeed({ path: p.value.rel });
   }
+  // ---- #26 portais ----
+  private portalNode(nodeId: string): Result<Node> { const n = this.store.getNode(nodeId); if (!n || n.kind !== "portal") return fail("NOT_FOUND", "portal não encontrado"); return succeed(n); }
+  portalState(nodeId: string): Result<PortalState> { const n = this.portalNode(nodeId); if (!n.ok) return n; return succeed(this.portals.state(nodeId, parsePortal(n.value.content).url)); }
+  /** Garante a sessão do portal (abre o navegador na URL salva). Erros de ambiente (sem navegador, limite) viram UNSUPPORTED. */
+  private async portalSession(nodeId: string): Promise<Result<import("./portal.js").PortalSession>> {
+    const n = this.portalNode(nodeId); if (!n.ok) return n;
+    try { return succeed(await this.portals.ensure(nodeId, parsePortal(n.value.content).url)); } catch (e) { return fail("UNSUPPORTED", (e as Error).message); }
+  }
+  async portalWatch(nodeId: string, key: string): Promise<Result<PortalState>> {
+    const n = this.portalNode(nodeId); if (!n.ok) return n;
+    try { await this.portals.watch(nodeId, key, parsePortal(n.value.content).url); } catch (e) { return fail("UNSUPPORTED", (e as Error).message); }
+    return succeed(this.portals.state(nodeId));
+  }
+  portalUnwatch(nodeId: string, key: string): void { this.portals.unwatch(nodeId, key); }
+  async portalAct(nodeId: string, act: PortalAct): Promise<Result<PortalActResult>> {
+    if (act.action === "close") { const n = this.portalNode(nodeId); if (!n.ok) return n; await this.portals.close(nodeId); return succeed({ ok: true, state: this.portals.state(nodeId, parsePortal(n.value.content).url) }); }
+    const s = await this.portalSession(nodeId); if (!s.ok) return s;
+    const p = s.value; let value: unknown; let message: string | undefined; let ok = true;
+    try {
+      switch (act.action) {
+        case "navigate": await p.navigate(act.url); break;
+        case "back": await p.history(-1); break;
+        case "forward": await p.history(1); break;
+        case "reload": await p.reload(); break;
+        case "click": await p.click(act); break;
+        case "mouse": await p.mouse(act.type, act.x, act.y, act.button ?? "left", act.clickCount ?? 1); break;
+        case "type": await p.type(act); break;
+        case "key": await p.key(act.key); break;
+        case "scroll": await p.scroll(act.dx ?? 0, act.dy, act.x, act.y); break;
+        case "eval": value = await p.evaluate(act.expression); break;
+        case "waitForText": ok = await p.waitForText(act.text, act.timeoutMs); if (!ok) message = `texto não apareceu: ${act.text}`; break;
+        case "inspect": value = await p.inspect(act.x, act.y); break;
+        case "viewport": await p.setViewport(act.width, act.height); break;
+      }
+    } catch (e) { return fail("INVALID", (e as Error).message); }
+    return succeed({ ok, state: this.portals.state(nodeId), ...(value !== undefined ? { value } : {}), ...(message ? { message } : {}) });
+  }
+  async portalSnapshot(nodeId: string): Promise<Result<PortalSnapshot>> { const s = await this.portalSession(nodeId); if (!s.ok) return s; try { return succeed(await s.value.snapshot()); } catch (e) { return fail("INVALID", (e as Error).message); } }
+  async portalScreenshot(nodeId: string): Promise<Result<PortalScreenshot>> { const s = await this.portalSession(nodeId); if (!s.ok) return s; try { const r = await s.value.screenshot(); return succeed({ mime: "image/png", ...r }); } catch (e) { return fail("INVALID", (e as Error).message); } }
+  shutdownPortals(): void { this.portals.killAllSync(); }
+
   // ---- #30 git do espaço (raiz do espaço; andar = worktree) ----
   private gitRoot(workspaceId: string): Result<string> { const r = this.wsRoot(workspaceId); return r.ok ? succeed(r.value) : r; }
   private gitPath(root: string, p: string): Result<string> { const r = this.resolveIn(root, p); if (!r.ok) return r; if (!r.value.rel) return fail("INVALID", "caminho inválido"); return succeed(r.value.rel); }
@@ -1740,6 +1789,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     // andares primeiro: um térreo não some com andares órfãos
     for (const f of this.store.listFloors(id)) { const r = this.deleteWorkspace(f.workspaceId, opts); if (!r.ok) return r; }
     for (const s of ["setup", "run", "teardown"] as FloorHookSection[]) this.stopHookSection(id, s);
+    for (const n of this.store.listNodes(id)) if (n.kind === "portal") void this.portals.close(n.nodeId); // #26
     if (w.parentId) {
       const hk = this.readHooksConfig(id);
       if (hk.teardown.trim() && existsSync(w.cwd)) {
@@ -1776,12 +1826,18 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const valid = validateNewNode({ kind: input.kind, command: input.command });
     if (!valid.ok) return valid;
 
+    let portalContent = "";
+    if (input.kind === "portal") { // #26 só http/https; a URL do conteúdo é normalizada aqui (nunca file:, javascript: etc.)
+      const raw = parsePortal(input.content).url;
+      if (raw) { const u = normalizePortalUrl(raw); if (!u.ok) return fail("INVALID", u.reason); portalContent = serializePortal({ url: u.url }); } else portalContent = serializePortal({ url: "" });
+    }
     const node: Node = {
       nodeId: newId(), workspaceId, kind: input.kind,
-      title: input.title ?? (input.kind === "terminal" ? "Terminal" : input.kind === "text" ? "Texto" : input.kind === "tree" ? "Arquivos" : input.kind === "binder" ? "Fichário" : "Nota"),
+      title: input.title ?? (input.kind === "terminal" ? "Terminal" : input.kind === "text" ? "Texto" : input.kind === "tree" ? "Arquivos" : input.kind === "binder" ? "Fichário" : input.kind === "portal" ? "Portal" : "Nota"),
       geometry: normalizeGeometry(input.geometry), createdAt: nowIso(),
       ...(input.kind === "note" || input.kind === "text" ? { content: input.content ?? "" } : {}),
       ...(input.kind === "tree" ? { content: input.content ?? JSON.stringify({ root: "", mode: "list" }) } : {}),
+      ...(input.kind === "portal" ? { content: portalContent } : {}),
       ...(input.kind === "binder" ? { content: input.content ?? JSON.stringify({ pages: [{ id: "p1", title: "Página 1", content: "" }], active: "p1", color: "" }) } : {}),
       ...(input.kind === "terminal" && input.roleId ? { roleId: input.roleId } : {}),
       // #56 aparência do terminal (vinda do preset)
@@ -2831,6 +2887,10 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
         const v = validateIsolation(input.isolation, homedir()); if (!v.ok) return v; newIso = v.value as NodeIsolation;
       }
     }
+    if (node.kind === "portal" && input.content !== undefined) { // #26 só uma URL http/https válida (ou vazia) entra no conteúdo
+      const raw = parsePortal(input.content).url;
+      if (raw) { const u = normalizePortalUrl(raw); if (!u.ok) return fail("INVALID", u.reason); input = { ...input, content: serializePortal({ url: u.url }) }; } else input = { ...input, content: serializePortal({ url: "" }) };
+    }
     let title = input.title; let titleAuto: boolean | undefined;
     let filePath: string | undefined;
     if (node.kind === "note") {
@@ -2867,6 +2927,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const rev = checkRevision(w, expectedRevision);
     if (!rev.ok) return rev;
     if (node.sessionId) this.sessions.dispose(node.sessionId);
+    if (node.kind === "portal") void this.portals.close(nodeId); // #26 mata o navegador do portal
     this.revokeAgentTokensForNode(nodeId); this.writeNodeCaps(nodeId, null); // #87
     if (node.kind === "note" && node.filePath) this.unwatchNote(node.filePath);
     if (node.kind === "note" && node.filePath && node.filePath.startsWith(this.notesDir(node.workspaceId))) { try { unlinkSync(node.filePath); } catch { /* já removido */ } }

@@ -5,6 +5,8 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import { AGENT_ENV, type Band, type BandAskResult, type AskResult, type ChatMessage, type EnvVarEntry, type FloorCopyInfo, type FloorHooksState, type FloorPrState, type GitHostEntry, type Message, type Node, type NotificationItem, type Routine, type RoutineRunResult, type Session, type Workspace, type WorkspaceBundle, type WorkspaceBundlePreview, type WorkspaceSnapshot } from "@messai/contracts";
 
+import type { PortalActResult, PortalSnapshot, PortalScreenshot } from "@messai/contracts";
+
 const env = (k: keyof typeof AGENT_ENV) => process.env[AGENT_ENV[k]];
 const socketPath = env("socket"), token = env("token"), workspaceId = env("workspaceId"), nodeId = env("nodeId");
 if (!socketPath || !token) { console.error("Fora de um terminal MessAI: MESS_SOCKET/MESS_TOKEN ausentes."); process.exit(2); }
@@ -57,6 +59,12 @@ try {
                                     (só condutor) recruta um terminal ligado a você
   mess maestro dismiss <nó>         (só condutor) encerra e remove um terminal ligado a você
   mess maestro assign <nó> <papel|->  (só condutor) reatribui o papel (- remove)
+  mess portal list|new [url] [--name n]   portais (navegador no canvas) do espaço · cria um
+  mess portal <portal> open <url>   navega · back|forward|reload|state|close
+  mess portal <portal> snapshot [--full]   página como texto + elementos com ref [N] (clicáveis)
+  mess portal <portal> click <ref|x,y> [--right] [--double]  · type <ref> <texto> [--submit] [--clear]
+  mess portal <portal> key <Enter|Tab|ArrowDown|…> · scroll <dy> [dx] · eval <js> · wait-text <texto> [--timeout seg]
+  mess portal <portal> screenshot [arquivo.png]   (exige a capacidade portals:control)
   mess floor list                   andares do térreo deste espaço
   mess floor create <nome> [--branch b] [--base ref] [--no-git]
   mess floor status <working|blocked|review|done> [texto]   status do andar atual
@@ -312,6 +320,55 @@ try {
         else console.log(`--- ${a.title}${a.timedOut ? " (tempo limite; resposta pode estar incompleta)" : ""}\n${a.response || "(sem saída)"}`);
       }
     } else throw new Error("uso: mess band list|create|add|remove|delete|ask|say");
+  } else if (cmd === "portal") {
+    const args = [sub, ...rest].filter((a): a is string => a !== undefined);
+    const flag = (f: string) => { const i = args.indexOf(f); if (i >= 0) { args.splice(i, 1); return true; } return false; };
+    const flagVal = (f: string) => { const i = args.indexOf(f); if (i < 0) return undefined; const v = args[i + 1]; args.splice(i, 2); return v; };
+    const first = args[0];
+    if (!first || first === "list") {
+      const s = await snapshot(); const ps = s.nodes.filter((n) => n.kind === "portal");
+      if (!ps.length) console.log("Nenhum portal neste espaço. Crie com `mess portal new [url]`.");
+      for (const n of ps) { let u = ""; try { u = (JSON.parse(n.content ?? "{}") as { url?: string }).url ?? ""; } catch { /* sem url */ } console.log(`${short(n.nodeId)}  ${n.title.padEnd(24)} ${u || "(em branco)"}`); }
+    } else if (first === "new") {
+      args.shift(); const name = flagVal("--name"); const url = args[0] ?? "";
+      const s = await snapshot(); const me = s.nodes.find((n) => n.nodeId === nodeId);
+      const g = me ? { x: me.geometry.x + me.geometry.w + 40, y: me.geometry.y, w: 560, h: 400 } : { x: 40, y: 40, w: 560, h: 400 };
+      const r = await call<{ node: Node }>("POST", `/v1/workspaces/${workspaceId}/nodes`, { expectedRevision: s.workspace.revision, kind: "portal", ...(name ? { title: name } : {}), geometry: g, content: JSON.stringify({ url }) });
+      console.log(`portal criado [${short(r.node.nodeId)}] "${r.node.title}"${url ? ` → ${url}` : ""}`);
+    } else {
+      const ref = args.shift()!; const op = args.shift();
+      const s = await snapshot(); const n = findNode(s.nodes.filter((x) => x.kind === "portal"), ref);
+      if (!n) throw new Error("portal não encontrado (veja `mess portal list`)");
+      const act = (a: Record<string, unknown>) => call<PortalActResult>("POST", `/v1/portals/${n.nodeId}/act`, a);
+      const line = (r: PortalActResult) => console.log(`${r.state.title ? `${r.state.title} — ` : ""}${r.state.url || "(em branco)"}${r.state.loading ? " (carregando)" : ""}`);
+      if (op === "open" || op === "navigate") { const url = args[0]; if (!url) throw new Error("uso: mess portal <portal> open <url>"); line(await act({ action: "navigate", url })); }
+      else if (op === "back" || op === "forward" || op === "reload") line(await act({ action: op }));
+      else if (op === "state") { const st = await call<{ status: string; url: string; title: string; loading: boolean; width: number; height: number }>("GET", `/v1/portals/${n.nodeId}`); console.log(`${st.status}  ${st.url || "(em branco)"}  "${st.title}"  ${st.width}x${st.height}${st.loading ? "  carregando" : ""}`); }
+      else if (op === "close") { await act({ action: "close" }); console.log("portal fechado (o navegador é reaberto na URL salva ao próximo uso)"); }
+      else if (op === "snapshot") {
+        const full = flag("--full"); const sn = await call<PortalSnapshot>("GET", `/v1/portals/${n.nodeId}/snapshot`);
+        console.log(`# ${sn.title || "(sem título)"} — ${sn.url}`);
+        console.log(`\nElementos (use o número em click/type):`);
+        for (const e of sn.elements) console.log(`[${e.ref}] ${e.tag}${e.type ? `:${e.type}` : ""}${e.role ? ` role=${e.role}` : ""} "${e.name}"${e.value ? ` value="${e.value}"` : ""}${e.href ? ` → ${e.href}` : ""}`);
+        console.log(`\nTexto da página:\n${full ? sn.text : sn.text.slice(0, 4000)}${!full && sn.text.length > 4000 ? "\n… (use --full)" : ""}${sn.truncated ? "\n… (página maior que 30 mil caracteres)" : ""}`);
+      }
+      else if (op === "click") {
+        const right = flag("--right"), dbl = flag("--double"); const t = args[0] ?? ""; const xy = /^(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$/.exec(t);
+        if (!xy && !/^\d+$/.test(t)) throw new Error("uso: mess portal <portal> click <ref|x,y> [--right] [--double]");
+        line(await act({ action: "click", ...(xy ? { x: Number(xy[1]), y: Number(xy[2]) } : { ref: Number(t) }), ...(right ? { button: "right" } : {}), ...(dbl ? { double: true } : {}) }));
+      }
+      else if (op === "type") {
+        const submit = flag("--submit"), clear = flag("--clear"); const [r0, ...txt] = args;
+        if (r0 === undefined || !/^\d+$/.test(r0)) throw new Error("uso: mess portal <portal> type <ref> <texto> [--submit] [--clear]");
+        line(await act({ action: "type", ref: Number(r0), text: txt.join(" "), ...(submit ? { submit: true } : {}), ...(clear ? { clear: true } : {}) }));
+      }
+      else if (op === "key") { if (!args[0]) throw new Error("uso: mess portal <portal> key <Enter|Tab|ArrowDown|…>"); line(await act({ action: "key", key: args[0] })); }
+      else if (op === "scroll") { const dy = Number(args[0]); if (!Number.isFinite(dy)) throw new Error("uso: mess portal <portal> scroll <dy> [dx]"); line(await act({ action: "scroll", dy, dx: Number(args[1] ?? 0) || 0 })); }
+      else if (op === "eval") { if (!args.length) throw new Error("uso: mess portal <portal> eval <js>"); const r = await act({ action: "eval", expression: args.join(" ") }); console.log(typeof r.value === "string" ? r.value : JSON.stringify(r.value, null, 2)); }
+      else if (op === "wait-text") { const to = flagVal("--timeout"); if (!args.length) throw new Error("uso: mess portal <portal> wait-text <texto> [--timeout seg]"); const r = await act({ action: "waitForText", text: args.join(" "), ...(to ? { timeoutMs: Math.round(Number(to) * 1000) } : {}) }); console.log(r.ok ? "encontrado" : (r.message ?? "não apareceu")); if (!r.ok) process.exitCode = 1; }
+      else if (op === "screenshot") { const sh = await call<PortalScreenshot>("GET", `/v1/portals/${n.nodeId}/screenshot`); const f = resolvePath(args[0] ?? `portal-${short(n.nodeId)}.png`); writeFileSync(f, Buffer.from(sh.data, "base64")); console.log(`${f} (${sh.width}x${sh.height})`); }
+      else throw new Error("uso: mess portal <portal> open|back|forward|reload|state|snapshot|click|type|key|scroll|eval|wait-text|screenshot|close");
+    }
   } else if (cmd === "maestro") {
     if (!nodeId) throw new Error("sem MESS_NODE_ID");
     const args = [sub, ...rest].filter((a): a is string => a !== undefined);

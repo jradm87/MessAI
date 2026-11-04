@@ -1,5 +1,5 @@
 import {  describe, expect, it } from "vitest";
-import { canMessage, formatDelivery, resolveNodeRef, parseCrossRef, resolveCrossNodeRef, parseGitRemote, buildPrCompareUrl, canWrite, checkRevision, decideLease, normalizeGeometry, trimBuffer, MAX_BUFFER_BYTES, applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxAttachPlan, shellQuote, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, alignGeometries, gridLayout, agentKind, agentResume, stripAnsi } from "./index.js";
+import { canMessage, formatDelivery, resolveNodeRef, parseCrossRef, resolveCrossNodeRef, parseGitRemote, buildPrCompareUrl, canWrite, checkRevision, decideLease, normalizeGeometry, trimBuffer, MAX_BUFFER_BYTES, applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxAttachPlan, shellQuote, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, alignGeometries, gridLayout, agentKind, agentResume, stripAnsi, normalizePortalUrl, parsePortal, portalKey, serializePortal } from "./index.js";
 
 describe("revisão", () => {
   it("aceita revisão igual e devolve próxima", () => {
@@ -317,3 +317,25 @@ describe("validateIsolation (#93)", () => {
   });
 });
 
+
+describe("portais (#26)", () => {
+  it("normalizePortalUrl: aceita http/https/host; completa o esquema; recusa file:, javascript:, data:, chrome:, view-source:, credenciais, espaços", () => {
+    const ok = (i: string) => { const r = normalizePortalUrl(i); return r.ok ? r.url : `ERRO:${r.reason}`; };
+    expect(ok("https://exemplo.com/a?b=1#c")).toBe("https://exemplo.com/a?b=1#c");
+    expect(ok("exemplo.com")).toBe("https://exemplo.com/");
+    expect(ok("localhost:3000/app")).toBe("http://localhost:3000/app"); // dev local: http
+    expect(ok("127.0.0.1:8080")).toBe("http://127.0.0.1:8080/");
+    expect(ok("  http://a.b  ")).toBe("http://a.b/");
+    expect(ok("about:blank")).toBe("about:blank");
+    for (const bad of ["file:///etc/passwd", "FILE:///etc/passwd", "javascript:alert(1)", "javascript:1", "data:text/html,<script>1</script>", "chrome://settings", "view-source:https://a.b", "devtools://x", "ftp://a.b", "blob:https://a.b/x", "https://user:pw@a.b", "http://", "", "   ", "a b.com", "semponto", "https://a.b/x y", "\u0000http://a.b"]) expect(ok(bad), bad).toMatch(/^ERRO:/);
+  });
+  it("portalKey: nomes (Enter/Tab/setas/F5), caractere imprimível, desconhecida → null", () => {
+    expect(portalKey("Enter")).toMatchObject({ key: "Enter", vk: 13, text: "\r" }); expect(portalKey("arrowdown")).toMatchObject({ key: "ArrowDown", vk: 40 });
+    expect(portalKey("F5")).toMatchObject({ key: "F5", vk: 116 }); expect(portalKey("a")).toMatchObject({ key: "a", code: "KeyA", vk: 65, text: "a" }); expect(portalKey("7")).toMatchObject({ code: "Digit7", vk: 55 });
+    expect(portalKey("NaoExiste")).toBeNull();
+  });
+  it("conteúdo do nó portal: round trip e tolerância a lixo", () => {
+    expect(parsePortal(serializePortal({ url: "https://a.b/" }))).toEqual({ url: "https://a.b/" });
+    for (const junk of ["", "x", "{", "[]", "{\"url\":3}", undefined]) expect(parsePortal(junk as string | undefined)).toEqual({ url: "" });
+  });
+});
