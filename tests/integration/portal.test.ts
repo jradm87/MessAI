@@ -189,7 +189,13 @@ describe.skipIf(!hasBrowser)("portais com Chromium real", () => {
     const ws = new WebSocket(`ws://127.0.0.1:${PORT}/v1/ws?token=${token}`);
     await new Promise<void>((res, rej) => { ws.onopen = () => res(); ws.onerror = () => rej(new Error("ws")); });
     ws.onmessage = (e) => msgs.push(JSON.parse(String(e.data)));
+    // assistir NÃO lança o navegador (senão todo portal do canvas subiria um Chrome ao carregar): sem sessão, nenhum quadro ainda
     ws.send(JSON.stringify({ type: "portalWatch", nodeId: id }));
+    await waitFor(() => msgs.some((m) => m.type === "portalState" && m.state!.nodeId === id)); // estado chega
+    expect(((await api("GET", `/v1/portals/${id}`)).json as St).status).toBe("stopped"); // continua parado
+    await sleep(800); expect(msgs.some((m) => m.type === "portalFrame")).toBe(false); // nada de quadros sem navegador
+    // #4b: um AGENTE abre o portal (navigate); o observador JÁ conectado passa a receber os quadros, sem reabrir nada
+    await act(id, { action: "navigate", url: `http://127.0.0.1:${PAGES}/` });
     const frame = await waitFor(() => msgs.find((m) => m.type === "portalFrame"), 20_000);
     expect(frame.data!.startsWith("/9j/")).toBe(true); expect(frame.width).toBeGreaterThan(0); // JPEG em base64
     expect(msgs.some((m) => m.type === "portalState" && m.state!.status === "running")).toBe(true);
@@ -210,7 +216,7 @@ describe.skipIf(!hasBrowser)("portais com Chromium real", () => {
     const script = join(dir, "cli.sh");
     writeFileSync(script, `#!/bin/bash
 cd ${cwd}
-mess portal new http://127.0.0.1:${PAGES}/ --name clip > new.txt 2>&1
+mess portal create http://127.0.0.1:${PAGES}/ --name clip > new.txt 2>&1
 mess portal list > list.txt 2>&1
 mess portal clip wait-text "Olá portal" --timeout 10 > wait.txt 2>&1
 mess portal clip snapshot > snap.txt 2>&1

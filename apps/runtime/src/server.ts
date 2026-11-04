@@ -522,7 +522,7 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
             case "releaseLease": svc.sessions.releaseLease(m.sessionId, clientId); return;
             case "portalWatch": {
               watchedPortals.add(m.nodeId);
-              void svc.portalWatch(m.nodeId, clientId).then((r) => { if (!r.ok) { watchedPortals.delete(m.nodeId); push({ type: "error", error: r.error }); } else push({ type: "portalState", state: r.value }); });
+              { const r = svc.portalWatch(m.nodeId, clientId); if (!r.ok) { watchedPortals.delete(m.nodeId); push({ type: "error", error: r.error }); } else push({ type: "portalState", state: r.value }); }
               return;
             }
             case "portalUnwatch": watchedPortals.delete(m.nodeId); svc.portalUnwatch(m.nodeId, clientId); return;

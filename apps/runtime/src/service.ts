@@ -801,7 +801,12 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
         const a0 = agents[agents.length - 1]!;
         if (lim) { if (lim.plan) a0.plan = lim.plan; a0.limits = lim.limits; if (lim.limits.length) delete a0.note; }
       } catch { agents.push({ id: "claude", label: "Claude Code", available: false, note: "stats-cache.json ilegível.", metrics: [], models: [] }); }
-    } else agents.push({ id: "claude", label: "Claude Code", available: false, note: "Sem ~/.claude/stats-cache.json.", metrics: [], models: [] });
+    } else {
+      // PC novo sem stats-cache.json: ainda mostra plano + limites do plano (vêm da API via credencial OAuth), que é o mais útil
+      const lim = await fetchClaudeLimits();
+      if (lim && (lim.plan || lim.limits.length)) agents.push({ id: "claude", label: "Claude Code", available: true, ...(lim.plan ? { plan: lim.plan } : {}), limits: lim.limits, ...(lim.limits.length ? {} : { note: "Logado; limites do plano indisponíveis agora." }), metrics: [], models: [] });
+      else agents.push({ id: "claude", label: "Claude Code", available: false, note: "Sem uso local (~/.claude/stats-cache.json) nem login do Claude detectado.", metrics: [], models: [] });
+    }
     for (const p of this.providers().providers.filter((x) => x.id !== "claude"))
       agents.push({ id: p.id, label: p.label, available: false, note: p.path ? "Uso não exposto localmente por esta CLI." : "CLI não encontrada no PATH.", metrics: [], models: [] });
     return { agents };
@@ -1112,10 +1117,10 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const n = this.portalNode(nodeId); if (!n.ok) return n;
     try { return succeed(await this.portals.ensure(nodeId, parsePortal(n.value.content).url)); } catch (e) { return fail("UNSUPPORTED", (e as Error).message); }
   }
-  async portalWatch(nodeId: string, key: string): Promise<Result<PortalState>> {
+  portalWatch(nodeId: string, key: string): Result<PortalState> {
     const n = this.portalNode(nodeId); if (!n.ok) return n;
-    try { await this.portals.watch(nodeId, key, parsePortal(n.value.content).url); } catch (e) { return fail("UNSUPPORTED", (e as Error).message); }
-    return succeed(this.portals.state(nodeId));
+    this.portals.watch(nodeId, key); // não lança o navegador; só assiste se já estiver rodando
+    return succeed(this.portals.state(nodeId, parsePortal(n.value.content).url));
   }
   portalUnwatch(nodeId: string, key: string): void { this.portals.unwatch(nodeId, key); }
   async portalAct(nodeId: string, act: PortalAct): Promise<Result<PortalActResult>> {
@@ -2995,6 +3000,11 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     if (node.kind === "note" && input.content !== undefined) this.writeNoteFile(this.store.getNode(nodeId)!, input.content);
     else if (filePath) { try { this.noteMtime.set(nodeId, statSync(filePath).mtimeMs); } catch { /* ignorar */ } }
     if (newIso !== undefined) { this.writeNodeCaps(nodeId, null); this.respawnTerminal(nodeId); } // #93 trocar o modo zera concessões e reinicia SÓ o processo
+    if (input.maestro !== undefined && input.maestro !== node.maestro) { // #29 ligar/desligar Maestro reflete JÁ no token do agente (ganha/perde maestro:conduct), sem reiniciar
+      const caps = this.agentCapsFor(this.store.getNode(nodeId)!);
+      for (const v of this.agentTokens.values()) if (v.nodeId === nodeId) v.capabilities = caps;
+      this.saveAgentTokens();
+    }
     if (input.skillIds !== undefined) { const r = this.setNodeSkills(nodeId, input.skillIds); if (!r.ok) return r; } // já publica (e reinicia o processo se rodando)
     if (input.roleId !== undefined && (node.roleId ?? null) !== input.roleId) {
       const r = this.setNodeRole(nodeId, input.roleId); // já publica

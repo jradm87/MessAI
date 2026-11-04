@@ -22,12 +22,12 @@ const savedUrl = (content: string): string => { try { const j = JSON.parse(conte
 function PortalNodeImpl({ id, data, selected }: NodeProps & { data: PortalData }) {
   const { api, stream } = data;
   const [st, setSt] = useState<PortalState | null>(null);
-  const [active, setActive] = useState(false); // assistindo (navegador aberto e recebendo quadros)
   const [url, setUrl] = useState(savedUrl(data.content)); const urlFocus = useRef(false);
   const [err, setErr] = useState<string | null>(null);
   const [design, setDesign] = useState(false); const [picked, setPicked] = useState<PortalInspect | null>(null);
   const img = useRef<HTMLImageElement>(null); const view = useRef<HTMLDivElement>(null);
   const stRef = useRef<PortalState | null>(null); stRef.current = st;
+  const active = st?.status === "running" || st?.status === "starting"; // deriva do estado real do runtime
   const activeRef = useRef(false); activeRef.current = active;
   const queue = useRef<Promise<unknown>>(Promise.resolve()); const lastMove = useRef(0);
 
@@ -38,9 +38,9 @@ function PortalNodeImpl({ id, data, selected }: NodeProps & { data: PortalData }
   }, [api, id]);
 
   // estado inicial sem abrir o navegador; se já estiver rodando (agente), assiste direto
-  useEffect(() => { let alive = true; void api.portalState(id).then((s) => { if (alive) { setSt(s); if (s.status === "running" || s.status === "starting") setActive(true); } }).catch(() => {}); return () => { alive = false; }; }, [api, id]);
+  useEffect(() => { let alive = true; void api.portalState(id).then((s) => { if (alive) setSt(s); }).catch(() => {}); return () => { alive = false; }; }, [api, id]);
+  // assiste SEMPRE (portalWatch não lança o navegador; só recebe quadros/estado se já estiver rodando) — pega o portal aberto por um agente
   useEffect(() => {
-    if (!active) return;
     const watch = () => stream.send({ type: "portalWatch", nodeId: id });
     watch();
     const off = stream.on((m) => {
@@ -50,18 +50,18 @@ function PortalNodeImpl({ id, data, selected }: NodeProps & { data: PortalData }
       else if (m.type === "error" && !("sessionId" in m && m.sessionId)) setErr(m.error.message);
     });
     return () => { off(); stream.send({ type: "portalUnwatch", nodeId: id }); };
-  }, [active, stream, id]);
+  }, [stream, id]);
   // viewport = tamanho do nó (1:1 com o que se vê), com debounce
   useEffect(() => {
-    const el = view.current; if (!el || !active) return;
+    const el = view.current; if (!el) return;
     let t: ReturnType<typeof setTimeout> | undefined;
-    const ro = new ResizeObserver(() => { clearTimeout(t); t = setTimeout(() => { const w = Math.round(el.clientWidth), h = Math.round(el.clientHeight); const s = stRef.current; if (w >= 200 && h >= 150 && s && (s.width !== w || s.height !== h)) void act({ action: "viewport", width: w, height: h }); }, 300); });
+    const ro = new ResizeObserver(() => { clearTimeout(t); t = setTimeout(() => { if (!activeRef.current) return; const w = Math.round(el.clientWidth), h = Math.round(el.clientHeight); const s = stRef.current; if (w >= 200 && h >= 150 && s && (s.width !== w || s.height !== h)) void act({ action: "viewport", width: w, height: h }); }, 300); });
     ro.observe(el); return () => { clearTimeout(t); ro.disconnect(); };
-  }, [active, act]);
+  }, [act]);
 
-  const start = (target?: string) => { setActive(true); const u = (target ?? url).trim(); if (u) void act({ action: "navigate", url: u }); else void api.portalAct(id, { action: "eval", expression: "1" }).then((r) => setSt(r.state)).catch((e) => setErr(String(e instanceof Error ? e.message : e))); };
+  const start = (target?: string) => { const u = (target ?? url).trim(); if (u) void act({ action: "navigate", url: u }); else void api.portalAct(id, { action: "eval", expression: "1" }).then((r) => setSt(r.state)).catch((e) => setErr(String(e instanceof Error ? e.message : e))); };
   const go = () => { if (!url.trim()) return; if (!active) start(url); else void act({ action: "navigate", url: url.trim() }); };
-  const stop = () => { setActive(false); setPicked(null); void api.portalAct(id, { action: "close" }).then((r) => setSt(r.state)).catch(() => {}); if (img.current) img.current.removeAttribute("src"); };
+  const stop = () => { setPicked(null); void api.portalAct(id, { action: "close" }).then((r) => setSt(r.state)).catch(() => {}); if (img.current) img.current.removeAttribute("src"); };
 
   const pos = (e: RMouseEvent | { clientX: number; clientY: number }) => {
     const r = img.current?.getBoundingClientRect(); const s = stRef.current; if (!r || !s || !r.width) return null;

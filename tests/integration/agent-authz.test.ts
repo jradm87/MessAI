@@ -132,6 +132,20 @@ describe("Credencial por agente + autorização por capacidade (#87)", () => {
     expect((await call(full.token, "GET", "/v1/ws")).status).toBe(403);
   });
 
+  it("ligar o Modo Maestro concede maestro:conduct ao token VIVO do agente (sem reiniciar); desligar remove (#3/#29)", async () => {
+    const r = (await api("POST", `/v1/workspaces/${ws.workspaceId}/nodes`, { expectedRevision: await rev(ws.workspaceId), kind: "terminal", title: "Cond", command: "/bin/sh", geometry: { x: 0, y: 0, w: 100, h: 100 } })).json as { node: Node };
+    const tk = ((await api("POST", `/v1/nodes/${r.node.nodeId}/token`, {})).json as { token: string }).token; // token PADRÃO (caps dinâmicas)
+    expect((await call(tk, "POST", `/v1/nodes/${r.node.nodeId}/maestro/recruit`, { command: "/bin/sh" })).status).toBe(403); // sem Maestro: não conduz
+    // o app liga o Maestro no nó
+    expect((await api("PATCH", `/v1/nodes/${r.node.nodeId}`, { expectedRevision: await rev(ws.workspaceId), maestro: true })).status).toBe(200);
+    const rec = await call(tk, "POST", `/v1/nodes/${r.node.nodeId}/maestro/recruit`, { command: "/bin/sh", name: "Filho" }); // MESMO token agora conduz
+    expect(rec.status, JSON.stringify(rec.json)).toBe(201);
+    expect(((await api("GET", `/v1/workspaces/${ws.workspaceId}`)).json as { nodes: { title: string }[] }).nodes.some((n) => n.title === "Filho")).toBe(true);
+    // desligar remove a capacidade do mesmo token
+    expect((await api("PATCH", `/v1/nodes/${r.node.nodeId}`, { expectedRevision: await rev(ws.workspaceId), maestro: false })).status).toBe(200);
+    expect((await call(tk, "POST", `/v1/nodes/${r.node.nodeId}/maestro/recruit`, { command: "/bin/sh" })).status).toBe(403);
+  });
+
   it("revogar, parar, descarregar ou apagar o terminal invalida a credencial; reiniciar/recarregar rotaciona", async () => {
     let t = ((await api("POST", `/v1/nodes/${agent.nodeId}/token`, {})).json as AgentTokenInfo).token;
     expect((await call(t, "GET", `/v1/workspaces/${ws.workspaceId}`)).status).toBe(200);

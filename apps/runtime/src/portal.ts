@@ -307,11 +307,13 @@ export class PortalManager {
     return e.starting;
   }
   peek(nodeId: string): PortalSession | undefined { const s = this.entries.get(nodeId)?.session; return s?.alive ? s : undefined; }
-  async watch(nodeId: string, key: string, initialUrl: string): Promise<PortalSession> {
+  /** Observar NÃO lança o navegador: só registra o observador e, se já houver sessão viva (ex.: um agente abriu), liga o screencast.
+   *  O navegador só nasce por uma ação explícita (navigate/open). Assim o app pode assistir todos os portais sem subir Chrome à toa. */
+  watch(nodeId: string, key: string): void {
     const e = this.entry(nodeId); e.watchers.add(key);
-    const s = await this.ensure(nodeId, initialUrl);
-    await s.startScreencast(); if (s.lastFrame) this.hooks.onFrame(nodeId, s.lastFrame); this.publish(nodeId);
-    return s;
+    const s = e.session;
+    if (s?.alive) { void s.startScreencast(); if (s.lastFrame) this.hooks.onFrame(nodeId, s.lastFrame); }
+    this.publish(nodeId);
   }
   unwatch(nodeId: string, key: string): void {
     const e = this.entries.get(nodeId); if (!e) return; e.watchers.delete(key);

@@ -336,8 +336,8 @@ try {
       const s = await snapshot(); const ps = s.nodes.filter((n) => n.kind === "portal");
       if (!ps.length) console.log("Nenhum portal neste espaço. Crie com `mess portal new [url]`.");
       for (const n of ps) { let u = ""; try { u = (JSON.parse(n.content ?? "{}") as { url?: string }).url ?? ""; } catch { /* sem url */ } console.log(`${short(n.nodeId)}  ${n.title.padEnd(24)} ${u || "(em branco)"}`); }
-    } else if (first === "new") {
-      args.shift(); const name = flagVal("--name"); const url = args[0] ?? "";
+    } else if (first === "new" || first === "create") {
+      args.shift(); const name = flagVal("--name") ?? (args[1] && !args[1].startsWith("-") ? args.splice(1,1)[0] : undefined); const url = args[0] ?? "";
       const s = await snapshot(); const me = s.nodes.find((n) => n.nodeId === nodeId);
       const g = me ? { x: me.geometry.x + me.geometry.w + 40, y: me.geometry.y, w: 560, h: 400 } : { x: 40, y: 40, w: 560, h: 400 };
       const r = await call<{ node: Node }>("POST", `/v1/workspaces/${workspaceId}/nodes`, { expectedRevision: s.workspace.revision, kind: "portal", ...(name ? { title: name } : {}), geometry: g, content: JSON.stringify({ url }) });
@@ -350,7 +350,8 @@ try {
       if (!n) throw new Error("portal não encontrado (veja `mess portal list`)");
       const act = (a: Record<string, unknown>) => call<PortalActResult>("POST", `/v1/portals/${n.nodeId}/act`, a);
       const line = (r: PortalActResult) => console.log(`${r.state.title ? `${r.state.title} — ` : ""}${r.state.url || "(em branco)"}${r.state.loading ? " (carregando)" : ""}`);
-      if (op === "open" || op === "navigate") { const url = args[0]; if (!url) throw new Error("uso: mess portal <portal> open <url>"); line(await act({ action: "navigate", url })); }
+      if (op === "info") { const st = await call<{ status: string; url: string; title: string; loading: boolean; width: number; height: number }>("GET", `/v1/portals/${n.nodeId}`); console.log(`${st.status}  ${st.url || "(em branco)"}  "${st.title}"  ${st.width}x${st.height}`); }
+      else if (op === "open" || op === "navigate") { const url = args[0]; if (!url) throw new Error("uso: mess portal <portal> open <url>"); line(await act({ action: "navigate", url })); }
       else if (op === "back" || op === "forward" || op === "reload") line(await act({ action: op }));
       else if (op === "state") { const st = await call<{ status: string; url: string; title: string; loading: boolean; width: number; height: number }>("GET", `/v1/portals/${n.nodeId}`); console.log(`${st.status}  ${st.url || "(em branco)"}  "${st.title}"  ${st.width}x${st.height}${st.loading ? "  carregando" : ""}`); }
       else if (op === "close") { await act({ action: "close" }); console.log("portal fechado (o navegador é reaberto na URL salva ao próximo uso)"); }
