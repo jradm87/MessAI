@@ -14,11 +14,11 @@ jobs:
     # ubuntu-22.04 (glibc 2.35): ubuntu-latest passou a glibc 2.42 e os addons nativos (node-pty, better-sqlite3)
     # ficavam exigindo GLIBC_2.42 — não carregavam em distro nenhuma mais antiga. 2.35 roda em quase tudo.
     runs-on: ubuntu-22.04
-    # g++-12: o g++ 11 padrão do 22.04 não compila os headers do V8 do Electron 45
-    # (v8config.h: "expected identifier before __attribute__"). O glibc exigido continua o do sistema (2.35).
+    # g++-14: g++ 11/12 do 22.04 não compilam os headers do V8 do Electron 45
+    # (v8config.h: V8_EXPORT __attribute__ + [[deprecated]]). glibc continua o do sistema (2.35).
     env:
-      CC: gcc-12
-      CXX: g++-12
+      CC: gcc-14
+      CXX: g++-14
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -26,7 +26,12 @@ jobs:
           node-version: "22"
           cache: npm
       - name: Toolchain para addons nativos
-        run: sudo apt-get update && sudo apt-get install -y build-essential g++-12 gcc-12 python3 libsecret-1-dev
+        # g++-14 (via toolchain PPA): os headers do V8 do Electron 45 (V8_EXPORT __attribute__ + [[deprecated]])
+        # só compilam com g++ >= 13; o 22.04 só traz g++-12. O glibc continua o do sistema (2.35).
+        run: |
+          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          sudo apt-get update
+          sudo apt-get install -y build-essential g++-14 gcc-14 python3 libsecret-1-dev
       - run: npm ci
       - name: Build + testes (gate antes de publicar)
         run: |
