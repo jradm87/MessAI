@@ -40,6 +40,9 @@ for (const m of NATIVE) {
 writeFileSync(join(res, "package.json"), JSON.stringify({ name: "messai-runtime-bundle", version: "0.0.1", private: true, dependencies: Object.fromEntries(NATIVE.map((m) => [m, "*"])) }, null, 2) + "\n");
 run(`"${bin("electron-rebuild")}" -v ${ELECTRON} -m "${res}" -w ${NATIVE.join(",")} -f`);
 
+// 3.5) skills do MessAI → resources/skills (o runtime instala nas pastas dos agentes no boot)
+if (existsSync(join(root, "skills"))) { rmSync(join(res, "skills"), { recursive: true, force: true }); cpSync(join(root, "skills"), join(res, "skills"), { recursive: true }); }
+
 // 4) electron-builder (lê a config em apps/desktop/package.json "build")
 const args = process.argv.slice(2);
 const publish = args.includes("--publish"); // sobe pro GitHub release + gera latest-linux.yml (auto-update)

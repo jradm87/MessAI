@@ -12,7 +12,9 @@ const env = (k: keyof typeof AGENT_ENV) => process.env[AGENT_ENV[k]];
 const defaultSocket = () => { const d = process.env["MESS_DATA_DIR"]; return (d ? `${d}/agent.sock` : `${process.env["HOME"] ?? ""}/.messai/agent.sock`); };
 const socketPath = env("socket") || defaultSocket();
 const token = env("token"), workspaceId = env("workspaceId"), nodeId = env("nodeId");
-if (!token) { console.error("Fora de um terminal MessAI: a credencial (MESS_TOKEN) não chegou ao comando.\nSe este é um terminal Codex, o preset já herda o ambiente — recrie o terminal na versão nova. Caso contrário, rode `mess` de dentro de um terminal do MessAI."); process.exit(2); }
+const [cmd, sub, ...rest] = process.argv.slice(2);
+const isHelp = !cmd || cmd === "help" || cmd === "--help" || cmd === "-h";
+if (!isHelp && !token) { console.error("Fora de um terminal MessAI: a credencial (MESS_TOKEN) não chegou ao comando.\nSe este é um terminal Codex, o preset já herda o ambiente — recrie o terminal na versão nova. Caso contrário, rode `mess` de dentro de um terminal do MessAI."); process.exit(2); }
 
 function call<T>(method: string, path: string, body?: unknown): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -34,9 +36,8 @@ const snapshot = () => call<WorkspaceSnapshot>("GET", `/v1/workspaces/${workspac
 const findNode = (nodes: Node[], ref: string) => nodes.find((n) => n.nodeId === ref || n.nodeId.startsWith(ref) || n.title.toLowerCase() === ref.toLowerCase());
 const short = (id: string) => id.slice(0, 8);
 
-const [cmd, sub, ...rest] = process.argv.slice(2);
 try {
-  if (!cmd || cmd === "help" || cmd === "--help") {
+  if (isHelp) {
     console.log(`rea — workspace visual
   mess context                      espaço, seu nó e notas conectadas (com conteúdo)
   mess nodes                        lista nós do espaço
@@ -344,7 +345,8 @@ try {
       const s = await snapshot(); const me = s.nodes.find((n) => n.nodeId === nodeId);
       const g = me ? { x: me.geometry.x + me.geometry.w + 40, y: me.geometry.y, w: 560, h: 400 } : { x: 40, y: 40, w: 560, h: 400 };
       const r = await call<{ node: Node }>("POST", `/v1/workspaces/${workspaceId}/nodes`, { expectedRevision: s.workspace.revision, kind: "portal", ...(name ? { title: name } : {}), geometry: g, autoPlace: true, content: JSON.stringify({ url }) });
-      console.log(`portal criado [${short(r.node.nodeId)}] "${r.node.title}"${url ? ` → ${url}` : ""}`);
+      if (nodeId) { const s2 = await snapshot(); await call("POST", `/v1/workspaces/${workspaceId}/connections`, { expectedRevision: s2.workspace.revision, sourceNodeId: nodeId, targetNodeId: r.node.nodeId }).catch(() => {}); }
+      console.log(`portal criado [${short(r.node.nodeId)}] "${r.node.title}"${url ? ` → ${url}` : ""}${nodeId ? " e ligado ao seu nó" : ""}`);
     } else {
       const OPS = ["open", "navigate", "back", "forward", "reload", "state", "close", "snapshot", "click", "type", "key", "scroll", "eval", "wait-text", "screenshot"];
       if (OPS.includes(args[0]!) && args[1] && !OPS.includes(args[1])) [args[0], args[1]] = [args[1]!, args[0]!]; // aceita também `mess portal snapshot <portal>` (ordem da skill do Maestri)
@@ -400,7 +402,8 @@ try {
       const s = await snapshot(); const me = s.nodes.find((n) => n.nodeId === nodeId);
       const g = me ? { x: me.geometry.x + me.geometry.w + 40, y: me.geometry.y, w: 360, h: 640 } : { x: 40, y: 40, w: 360, h: 640 };
       const r = await call<{ node: Node }>("POST", `/v1/workspaces/${workspaceId}/nodes`, { expectedRevision: s.workspace.revision, kind: "device", ...(name ? { title: name } : {}), geometry: g, autoPlace: true, content: JSON.stringify({ ...(serial ? { serial } : {}), ...(avd ? { avd } : {}) }) });
-      console.log(`dispositivo criado [${short(r.node.nodeId)}] "${r.node.title}"`);
+      if (nodeId) { const s2 = await snapshot(); await call("POST", `/v1/workspaces/${workspaceId}/connections`, { expectedRevision: s2.workspace.revision, sourceNodeId: nodeId, targetNodeId: r.node.nodeId }).catch(() => {}); }
+      console.log(`dispositivo criado [${short(r.node.nodeId)}] "${r.node.title}"${nodeId ? " e ligado ao seu nó" : ""}`);
     } else {
       const OPS = ["select", "boot", "disconnect", "shutdown", "state", "ui", "tap", "longpress", "swipe", "key", "text", "launch", "stop", "apps", "screenshot"];
       if (OPS.includes(args[0]!) && args[1] && !OPS.includes(args[1])) [args[0], args[1]] = [args[1]!, args[0]!]; // aceita também `mess device tap <nó> …`
