@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import { AGENT_ENV, type Band, type BandAskResult, type AskResult, type ChatMessage, type EnvVarEntry, type FloorCopyInfo, type FloorHooksState, type FloorPrState, type GitHostEntry, type Message, type Node, type NotificationItem, type Routine, type RoutineRunResult, type Session, type Workspace, type WorkspaceBundle, type WorkspaceBundlePreview, type WorkspaceSnapshot } from "@messai/contracts";
 
-import type { PortalActResult, PortalSnapshot, PortalScreenshot } from "@messai/contracts";
+import type { PortalActResult, PortalSnapshot, PortalScreenshot, DeviceList, DeviceActResult, DeviceUiTree, DeviceScreenshot, DeviceState } from "@messai/contracts";
 
 const env = (k: keyof typeof AGENT_ENV) => process.env[AGENT_ENV[k]];
 const socketPath = env("socket"), token = env("token"), workspaceId = env("workspaceId"), nodeId = env("nodeId");
@@ -65,6 +65,13 @@ try {
   mess portal <portal> click <ref|x,y> [--right] [--double]  · type <ref> <texto> [--submit] [--clear]
   mess portal <portal> key <Enter|Tab|ArrowDown|…> · scroll <dy> [dx] · eval <js> · wait-text <texto> [--timeout seg]
   mess portal <portal> screenshot [arquivo.png]   (exige a capacidade portals:control)
+  mess device list                  aparelhos/emuladores Android (adb) e AVDs disponíveis
+  mess device new [--name n] [--serial s | --avd a]   cria um nó de dispositivo no canvas
+  mess device <nó> select <serial> · boot <avd> [--persist] · disconnect · shutdown · state
+  mess device <nó> ui [--all]       árvore de elementos da tela (com o centro x,y de cada um)
+  mess device <nó> tap <x> <y> · longpress <x> <y> [ms] · swipe <x1> <y1> <x2> <y2> [ms]
+  mess device <nó> key <back|home|recents|enter|…> · text <ASCII> · launch <pacote> [atividade] · stop <pacote> · apps
+  mess device <nó> screenshot [arquivo.png]   (exige a capacidade devices:control)
   mess floor list                   andares do térreo deste espaço
   mess floor create <nome> [--branch b] [--base ref] [--no-git]
   mess floor status <working|blocked|review|done> [texto]   status do andar atual
@@ -368,6 +375,56 @@ try {
       else if (op === "wait-text") { const to = flagVal("--timeout"); if (!args.length) throw new Error("uso: mess portal <portal> wait-text <texto> [--timeout seg]"); const r = await act({ action: "waitForText", text: args.join(" "), ...(to ? { timeoutMs: Math.round(Number(to) * 1000) } : {}) }); console.log(r.ok ? "encontrado" : (r.message ?? "não apareceu")); if (!r.ok) process.exitCode = 1; }
       else if (op === "screenshot") { const sh = await call<PortalScreenshot>("GET", `/v1/portals/${n.nodeId}/screenshot`); const f = resolvePath(args[0] ?? `portal-${short(n.nodeId)}.png`); writeFileSync(f, Buffer.from(sh.data, "base64")); console.log(`${f} (${sh.width}x${sh.height})`); }
       else throw new Error("uso: mess portal <portal> open|back|forward|reload|state|snapshot|click|type|key|scroll|eval|wait-text|screenshot|close");
+    }
+  } else if (cmd === "device") {
+    const args = [sub, ...rest].filter((a): a is string => a !== undefined);
+    const flag = (f: string) => { const i = args.indexOf(f); if (i >= 0) { args.splice(i, 1); return true; } return false; };
+    const flagVal = (f: string) => { const i = args.indexOf(f); if (i < 0) return undefined; const v = args[i + 1]; args.splice(i, 2); return v; };
+    const first = args[0];
+    if (!first || first === "list") {
+      const l = await call<DeviceList>("GET", "/v1/devices");
+      if (!l.adb) console.log(`adb indisponível: ${l.adbError ?? ""}`);
+      for (const d of l.devices) console.log(`${d.serial.padEnd(22)} ${d.state.padEnd(12)} ${d.kind.padEnd(8)} ${d.model ?? ""}`);
+      if (l.adb && !l.devices.length) console.log("Nenhum dispositivo conectado.");
+      console.log(l.avds.length ? `AVDs (emuladores): ${l.avds.join(", ")}` : l.emulator ? "Nenhum AVD criado." : "Emulador Android não instalado.");
+      const s = await snapshot(); const ds = s.nodes.filter((n) => n.kind === "device");
+      if (ds.length) { console.log("\nNós de dispositivo neste espaço:"); for (const n of ds) console.log(`${short(n.nodeId)}  ${n.title}`); }
+    } else if (first === "new") {
+      args.shift(); const name = flagVal("--name"); const serial = flagVal("--serial"); const avd = flagVal("--avd");
+      const s = await snapshot(); const me = s.nodes.find((n) => n.nodeId === nodeId);
+      const g = me ? { x: me.geometry.x + me.geometry.w + 40, y: me.geometry.y, w: 360, h: 640 } : { x: 40, y: 40, w: 360, h: 640 };
+      const r = await call<{ node: Node }>("POST", `/v1/workspaces/${workspaceId}/nodes`, { expectedRevision: s.workspace.revision, kind: "device", ...(name ? { title: name } : {}), geometry: g, content: JSON.stringify({ ...(serial ? { serial } : {}), ...(avd ? { avd } : {}) }) });
+      console.log(`dispositivo criado [${short(r.node.nodeId)}] "${r.node.title}"`);
+    } else {
+      const ref = args.shift()!; const op = args.shift();
+      const s = await snapshot(); const n = findNode(s.nodes.filter((x) => x.kind === "device"), ref);
+      if (!n) throw new Error("nó de dispositivo não encontrado (veja `mess device list`)");
+      const act = (a: Record<string, unknown>) => call<DeviceActResult>("POST", `/v1/devices/${n.nodeId}/act`, a);
+      const num = (v: string | undefined, what: string) => { const x = Number(v); if (v === undefined || !Number.isFinite(x)) throw new Error(`${what} inválido`); return x; };
+      const line = (r: DeviceActResult) => console.log(`${r.state.status}${r.state.serial ? ` ${r.state.serial}` : ""}${r.state.model ? ` (${r.state.model})` : ""}${r.state.foreground ? ` · ${r.state.foreground}` : ""}`);
+      if (op === "select") { if (!args[0]) throw new Error("uso: mess device <nó> select <serial>"); line(await act({ action: "select", serial: args[0] })); }
+      else if (op === "boot") { const persist = flag("--persist"); if (!args[0]) throw new Error("uso: mess device <nó> boot <avd> [--persist]"); console.log("iniciando o emulador (1–2 min)…"); line(await act({ action: "boot", avd: args[0], ...(persist ? { persist: true } : {}) })); }
+      else if (op === "disconnect" || op === "shutdown") line(await act({ action: op }));
+      else if (op === "state") { const st = await call<DeviceState>("GET", `/v1/devices/${n.nodeId}`); console.log(`${st.status}  ${st.serial ?? "-"}  ${st.avd ?? ""}  ${st.model ?? ""}  ${st.width}x${st.height}${st.foreground ? `  ${st.foreground}` : ""}${st.error ? `  ERRO: ${st.error}` : ""}${st.message ? `  ${st.message}` : ""}`); }
+      else if (op === "tap") line(await act({ action: "tap", x: num(args[0], "x"), y: num(args[1], "y") }));
+      else if (op === "longpress") line(await act({ action: "longpress", x: num(args[0], "x"), y: num(args[1], "y"), ...(args[2] ? { ms: num(args[2], "ms") } : {}) }));
+      else if (op === "swipe") line(await act({ action: "swipe", x1: num(args[0], "x1"), y1: num(args[1], "y1"), x2: num(args[2], "x2"), y2: num(args[3], "y2"), ...(args[4] ? { ms: num(args[4], "ms") } : {}) }));
+      else if (op === "key") { if (!args[0]) throw new Error("uso: mess device <nó> key <back|home|recents|enter|…>"); line(await act({ action: "key", key: args[0] })); }
+      else if (op === "text") { if (!args.length) throw new Error("uso: mess device <nó> text <texto ASCII>"); line(await act({ action: "text", text: args.join(" ") })); }
+      else if (op === "launch") { if (!args[0]) throw new Error("uso: mess device <nó> launch <pacote> [atividade]"); line(await act({ action: "launch", package: args[0], ...(args[1] ? { activity: args[1] } : {}) })); }
+      else if (op === "stop") { if (!args[0]) throw new Error("uso: mess device <nó> stop <pacote>"); line(await act({ action: "stop", package: args[0] })); }
+      else if (op === "apps") for (const p of await call<string[]>("GET", `/v1/devices/${n.nodeId}/apps`)) console.log(p);
+      else if (op === "ui") {
+        const all = flag("--all"); const t = await call<DeviceUiTree>("GET", `/v1/devices/${n.nodeId}/ui`);
+        for (const e of t.nodes) {
+          if (!all && !(e.text || e.desc || e.clickable || e.scrollable)) continue;
+          const cx = Math.round((e.bounds.x1 + e.bounds.x2) / 2), cy = Math.round((e.bounds.y1 + e.bounds.y2) / 2);
+          console.log(`${"  ".repeat(all ? e.depth : 0)}[${e.ref}] ${e.cls.split(".").pop()}${e.text ? ` "${e.text}"` : ""}${e.desc ? ` desc="${e.desc}"` : ""}${e.resourceId ? ` id=${e.resourceId}` : ""} centro=(${cx},${cy})${e.clickable ? " clicável" : ""}${e.scrollable ? " rolável" : ""}${e.enabled ? "" : " desabilitado"}${e.checked ? " marcado" : ""}`);
+        }
+        if (t.truncated) console.log("… (árvore truncada)");
+      }
+      else if (op === "screenshot") { const sh = await call<DeviceScreenshot>("GET", `/v1/devices/${n.nodeId}/screenshot`); const f = resolvePath(args[0] ?? `device-${short(n.nodeId)}.png`); writeFileSync(f, Buffer.from(sh.data, "base64")); console.log(`${f} (${sh.width}x${sh.height})`); }
+      else throw new Error("uso: mess device <nó> select|boot|disconnect|shutdown|state|ui|tap|longpress|swipe|key|text|launch|stop|apps|screenshot");
     }
   } else if (cmd === "maestro") {
     if (!nodeId) throw new Error("sem MESS_NODE_ID");

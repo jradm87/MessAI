@@ -728,3 +728,89 @@ export function portalKey(name: string): PortalKeyInfo | null {
   }
   return null;
 }
+
+// ---------- #73 Portais de dispositivo (Android via adb) ----------
+export type AdbDevice = { serial: string; state: string; kind: "emulator" | "usb" | "network"; model?: string; product?: string };
+/** Saída de `adb devices -l` → dispositivos. Ignora o cabeçalho, linhas em branco e avisos do daemon ("* daemon started"). */
+export function parseAdbDevices(out: string): AdbDevice[] {
+  const res: AdbDevice[] = [];
+  for (const raw of out.split("\n")) {
+    const line = raw.trim(); if (!line || line.startsWith("List of devices") || line.startsWith("*")) continue;
+    const m = /^(\S+)\s+(device|offline|unauthorized|bootloader|recovery|sideload|authorizing|no permissions\S*|connecting)\b(.*)$/.exec(line); if (!m) continue;
+    const kv = (k: string) => new RegExp(`(?:^|\\s)${k}:(\\S+)`).exec(m[3] ?? "")?.[1];
+    const serial = m[1]!; const model = kv("model"); const product = kv("product");
+    res.push({ serial, state: m[2]!, kind: serial.startsWith("emulator-") ? "emulator" : /^[\d.]+:\d+$/.test(serial) || serial.includes("._adb-tls") ? "network" : "usb", ...(model ? { model: model.replace(/_/g, " ") } : {}), ...(product ? { product } : {}) });
+  }
+  return res;
+}
+/** Tamanho da tela: `wm size` ("Physical size: 1080x2400", com "Override size:" quando alterado — este vale). */
+export function parseWmSize(out: string): { w: number; h: number } | null {
+  const ov = /Override size:\s*(\d+)x(\d+)/.exec(out); const ph = /Physical size:\s*(\d+)x(\d+)/.exec(out); const m = ov ?? ph;
+  return m ? { w: Number(m[1]), h: Number(m[2]) } : null;
+}
+export const parseAndroidPackages = (out: string): string[] => out.split("\n").map((l) => /^package:(\S+)/.exec(l.trim())?.[1]).filter((p): p is string => !!p).sort();
+/** `pacote/atividade` em foco, a partir de `dumpsys window` (mCurrentFocus) ou de `dumpsys activity` (ResumedActivity). */
+export function parseAndroidFocus(out: string): string | undefined {
+  for (const re of [/mCurrentFocus=Window\{[^}]*\s([A-Za-z0-9_.]+\/[A-Za-z0-9_.$]+)\}/, /(?:ResumedActivity|mFocusedApp)[^\n]*?\s([A-Za-z0-9_.]+\/[A-Za-z0-9_.$]+)/]) { const m = re.exec(out); if (m) return m[1]; }
+  return undefined;
+}
+export const isAndroidPackage = (s: string): boolean => /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/.test(s) && s.length <= 200;
+export const isAndroidActivity = (s: string): boolean => /^[A-Za-z0-9_.$]+$/.test(s) && s.length <= 300;
+export const isAvdName = (s: string): boolean => /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(s);
+export const isAdbSerial = (s: string): boolean => /^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/.test(s);
+
+const KEYS: Record<string, string> = {
+  back: "KEYCODE_BACK", home: "KEYCODE_HOME", recents: "KEYCODE_APP_SWITCH", app_switch: "KEYCODE_APP_SWITCH", enter: "KEYCODE_ENTER", tab: "KEYCODE_TAB", delete: "KEYCODE_DEL", backspace: "KEYCODE_DEL",
+  forward_delete: "KEYCODE_FORWARD_DEL", power: "KEYCODE_POWER", volume_up: "KEYCODE_VOLUME_UP", volume_down: "KEYCODE_VOLUME_DOWN", mute: "KEYCODE_VOLUME_MUTE", menu: "KEYCODE_MENU", search: "KEYCODE_SEARCH",
+  up: "KEYCODE_DPAD_UP", down: "KEYCODE_DPAD_DOWN", left: "KEYCODE_DPAD_LEFT", right: "KEYCODE_DPAD_RIGHT", center: "KEYCODE_DPAD_CENTER", escape: "KEYCODE_ESCAPE", space: "KEYCODE_SPACE",
+  wakeup: "KEYCODE_WAKEUP", sleep: "KEYCODE_SLEEP", camera: "KEYCODE_CAMERA", notifications: "KEYCODE_NOTIFICATION",
+};
+/** Nome amigável (back, home, recents, enter…) ou KEYCODE_XXX ou número → argumento de `input keyevent`. null = inválido (nada de texto livre indo para o shell do aparelho). */
+export function androidKey(name: string): string | null {
+  const k = KEYS[name.toLowerCase()]; if (k) return k;
+  if (/^KEYCODE_[A-Z0-9_]{1,40}$/.test(name)) return name;
+  if (/^\d{1,3}$/.test(name)) return name;
+  return null;
+}
+/**
+ * Argumento seguro para `adb shell input text <arg>`: o `adb shell` entrega a linha ao shell do APARELHO, então o texto vai entre aspas
+ * simples (com ' escapado) e o espaço vira %s (convenção do `input text`). Só ASCII imprimível: o `input text` não suporta Unicode.
+ * Quebra de linha não é aceita aqui (use a tecla Enter).
+ */
+export function androidInputText(text: string): { ok: true; arg: string } | { ok: false; reason: string } {
+  for (const ch of text) { const c = ch.codePointAt(0)!; if (c < 0x20 || c > 0x7e) return { ok: false, reason: c === 10 || c === 13 ? "quebra de linha não vai por texto: envie a tecla enter" : "o Android só aceita ASCII imprimível via adb (sem acentos/emoji)" }; }
+  return { ok: true, arg: `'${text.replace(/'/g, `'\\''`).replace(/ /g, "%s")}'` };
+}
+
+export type UiNode = { ref: number; depth: number; cls: string; pkg: string; text: string; desc: string; resourceId: string; clickable: boolean; enabled: boolean; focusable: boolean; scrollable: boolean; checked: boolean; selected: boolean; bounds: { x1: number; y1: number; x2: number; y2: number } };
+const xmlUnescape = (s: string): string => s.replace(/&#(\d+);/g, (_, n: string) => String.fromCodePoint(Number(n))).replace(/&#x([0-9a-fA-F]+);/g, (_, n: string) => String.fromCodePoint(parseInt(n, 16))).replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");
+/** `uiautomator dump` (XML) → nós achatados em ordem de documento, com profundidade e `ref` sequencial. Tolera lixo antes/depois do XML. */
+export function parseUiDump(xml: string, max = 2000): { nodes: UiNode[]; truncated: boolean } {
+  const start = xml.indexOf("<hierarchy"); const end = xml.lastIndexOf("</hierarchy>");
+  const body = start >= 0 ? xml.slice(start, end >= 0 ? end : undefined) : xml;
+  const nodes: UiNode[] = []; let depth = -1; let truncated = false;
+  const tag = /<(\/?)node\b([^>]*?)(\/?)>/g; let m: RegExpExecArray | null;
+  while ((m = tag.exec(body))) {
+    if (m[1]) { depth--; continue; }
+    depth++;
+    const attrs: Record<string, string> = {}; const re = /([\w:-]+)="([^"]*)"/g; let a: RegExpExecArray | null;
+    while ((a = re.exec(m[2]!))) attrs[a[1]!] = xmlUnescape(a[2]!);
+    const b = /\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]/.exec(attrs["bounds"] ?? "");
+    if (nodes.length >= max) truncated = true;
+    else if (b) nodes.push({ ref: nodes.length, depth, cls: attrs["class"] ?? "", pkg: attrs["package"] ?? "", text: attrs["text"] ?? "", desc: attrs["content-desc"] ?? "", resourceId: attrs["resource-id"] ?? "", clickable: attrs["clickable"] === "true", enabled: attrs["enabled"] !== "false", focusable: attrs["focusable"] === "true", scrollable: attrs["scrollable"] === "true", checked: attrs["checked"] === "true", selected: attrs["selected"] === "true", bounds: { x1: Number(b[1]), y1: Number(b[2]), x2: Number(b[3]), y2: Number(b[4]) } });
+    if (m[3]) depth--; // <node ... /> autofechado
+  }
+  return { nodes, truncated };
+}
+/** O nó mais específico (menor área) que contém o ponto — o que está "embaixo do dedo". */
+export function uiNodeAt(nodes: UiNode[], x: number, y: number): UiNode | null {
+  let best: UiNode | null = null; let area = Infinity;
+  for (const n of nodes) { const { x1, y1, x2, y2 } = n.bounds; if (x >= x1 && x < x2 && y >= y1 && y < y2) { const a = (x2 - x1) * (y2 - y1); if (a <= area) { area = a; best = n; } } }
+  return best;
+}
+/** Dimensões de um PNG pelo cabeçalho IHDR (sem decodificar). null se não for PNG. */
+export function pngSize(buf: Uint8Array): { w: number; h: number } | null {
+  if (buf.length < 24) return null; const sig = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  for (let i = 0; i < 8; i++) if (buf[i] !== sig[i]) return null;
+  const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength); return { w: dv.getUint32(16), h: dv.getUint32(20) };
+}

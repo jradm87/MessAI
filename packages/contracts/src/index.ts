@@ -2,7 +2,7 @@ import { Type, type Static } from "@sinclair/typebox";
 
 export const PROTOCOL_VERSION = 1 as const;
 /** Incrementar a cada mudança de snapshot/rotas; o cliente avisa quando o runtime está atrás. */
-export const BUILD_VERSION = 32 as const;
+export const BUILD_VERSION = 33 as const;
 
 // ---------- Identidades ----------
 export const Id = Type.String({ minLength: 8, maxLength: 64 });
@@ -54,7 +54,7 @@ export const Geometry = Type.Object({
 });
 export type Geometry = Static<typeof Geometry>;
 
-export const NodeKind = Type.Union([Type.Literal("terminal"), Type.Literal("note"), Type.Literal("text"), Type.Literal("tree"), Type.Literal("binder"), Type.Literal("portal")]); // binder = fichário (#74); portal = navegador embutido (#26)
+export const NodeKind = Type.Union([Type.Literal("terminal"), Type.Literal("note"), Type.Literal("text"), Type.Literal("tree"), Type.Literal("binder"), Type.Literal("portal"), Type.Literal("device")]); // binder = fichário (#74); portal = navegador embutido (#26); device = Android/emulador (#73)
 export type NodeKind = Static<typeof NodeKind>;
 
 // #93 [MESS-09] Modo isolado: worktree separa código, não processos/rede/filesystem. Um terminal "isolado" roda sob bubblewrap:
@@ -720,6 +720,46 @@ export type PortalScreenshot = Static<typeof PortalScreenshot>;
 export const PortalInspect = Type.Object({ tag: Type.String(), selector: Type.String(), text: Type.String(), html: Type.String(), rect: Type.Object({ x: Type.Number(), y: Type.Number(), w: Type.Number(), h: Type.Number() }) });
 export type PortalInspect = Static<typeof PortalInspect>;
 
+// ---------- #73 Portais de dispositivo: Android/emulador no canvas (adb), dirigível por agentes ----------
+export const DeviceInfo = Type.Object({ serial: Type.String(), state: Type.String(), kind: Type.Union([Type.Literal("emulator"), Type.Literal("usb"), Type.Literal("network")]), model: Type.Optional(Type.String()), product: Type.Optional(Type.String()) });
+export type DeviceInfo = Static<typeof DeviceInfo>;
+export const DeviceList = Type.Object({ adb: Type.Boolean(), adbError: Type.Optional(Type.String()), emulator: Type.Boolean(), devices: Type.Array(DeviceInfo), avds: Type.Array(Type.String()) });
+export type DeviceList = Static<typeof DeviceList>;
+export const DeviceStatus = Type.Union([Type.Literal("stopped"), Type.Literal("starting"), Type.Literal("connected"), Type.Literal("error")]);
+export type DeviceStatus = Static<typeof DeviceStatus>;
+export const DeviceState = Type.Object({
+  nodeId: Id, status: DeviceStatus, serial: Type.Optional(Type.String()), avd: Type.Optional(Type.String()), model: Type.Optional(Type.String()),
+  width: Type.Integer(), height: Type.Integer(), foreground: Type.Optional(Type.String()), watchers: Type.Integer(), message: Type.Optional(Type.String()), error: Type.Optional(Type.String()),
+});
+export type DeviceState = Static<typeof DeviceState>;
+const Coord = Type.Number({ minimum: 0, maximum: 20000 });
+export const DeviceAct = Type.Union([
+  Type.Object({ action: Type.Literal("select"), serial: Type.String({ minLength: 1, maxLength: 100 }) }), // liga o nó a um dispositivo já conectado
+  Type.Object({ action: Type.Literal("boot"), avd: Type.String({ minLength: 1, maxLength: 100 }), persist: Type.Optional(Type.Boolean()), wait: Type.Optional(Type.Boolean()) }), // wait=false: devolve já (estado "starting"); inicia o emulador (efêmero por padrão: -read-only) e liga o nó
+  Type.Object({ action: Type.Literal("shutdown") }), // só emulador iniciado por este runtime
+  Type.Object({ action: Type.Literal("disconnect") }), // desliga o nó do dispositivo (não encerra o aparelho)
+  Type.Object({ action: Type.Literal("tap"), x: Coord, y: Coord }),
+  Type.Object({ action: Type.Literal("longpress"), x: Coord, y: Coord, ms: Type.Optional(Type.Integer({ minimum: 300, maximum: 5000 })) }),
+  Type.Object({ action: Type.Literal("swipe"), x1: Coord, y1: Coord, x2: Coord, y2: Coord, ms: Type.Optional(Type.Integer({ minimum: 50, maximum: 5000 })) }),
+  Type.Object({ action: Type.Literal("key"), key: Type.String({ minLength: 1, maxLength: 40 }) }),
+  Type.Object({ action: Type.Literal("text"), text: Type.String({ minLength: 1, maxLength: 2000 }) }),
+  Type.Object({ action: Type.Literal("launch"), package: Type.String({ minLength: 1, maxLength: 200 }), activity: Type.Optional(Type.String({ minLength: 1, maxLength: 300 })) }),
+  Type.Object({ action: Type.Literal("stop"), package: Type.String({ minLength: 1, maxLength: 200 }) }),
+]);
+export type DeviceAct = Static<typeof DeviceAct>;
+export const DeviceActResult = Type.Object({ ok: Type.Boolean(), state: DeviceState, message: Type.Optional(Type.String()) });
+export type DeviceActResult = Static<typeof DeviceActResult>;
+export const DeviceUiNode = Type.Object({
+  ref: Type.Integer(), depth: Type.Integer(), cls: Type.String(), pkg: Type.String(), text: Type.String(), desc: Type.String(), resourceId: Type.String(),
+  clickable: Type.Boolean(), enabled: Type.Boolean(), focusable: Type.Boolean(), scrollable: Type.Boolean(), checked: Type.Boolean(), selected: Type.Boolean(),
+  bounds: Type.Object({ x1: Type.Integer(), y1: Type.Integer(), x2: Type.Integer(), y2: Type.Integer() }),
+});
+export type DeviceUiNode = Static<typeof DeviceUiNode>;
+export const DeviceUiTree = Type.Object({ nodes: Type.Array(DeviceUiNode), truncated: Type.Boolean() });
+export type DeviceUiTree = Static<typeof DeviceUiTree>;
+export const DeviceScreenshot = Type.Object({ mime: Type.Literal("image/png"), data: Type.String(), width: Type.Integer(), height: Type.Integer() });
+export type DeviceScreenshot = Static<typeof DeviceScreenshot>;
+
 export const WsClientMessage = Type.Union([
   Type.Object({ type: Type.Literal("subscribe"), workspaceId: Id }),
   Type.Object({ type: Type.Literal("attach"), sessionId: Id }),
@@ -730,6 +770,8 @@ export const WsClientMessage = Type.Union([
   Type.Object({ type: Type.Literal("releaseLease"), sessionId: Id }),
   Type.Object({ type: Type.Literal("portalWatch"), nodeId: Id }), // #26 só o app: recebe os quadros do portal
   Type.Object({ type: Type.Literal("portalUnwatch"), nodeId: Id }),
+  Type.Object({ type: Type.Literal("deviceWatch"), nodeId: Id }), // #73 só o app: recebe os quadros do dispositivo
+  Type.Object({ type: Type.Literal("deviceUnwatch"), nodeId: Id }),
 ]);
 export type WsClientMessage = Static<typeof WsClientMessage>;
 
@@ -774,6 +816,7 @@ export const AgentCapability = Type.Union([
   Type.Literal("workspace:manage"),
   Type.Literal("terminal:control"),
   Type.Literal("maestro:conduct"),
+  Type.Literal("devices:control"), // #73: dirigir um dispositivo/emulador Android (adb) — também sai do sandbox (rede do aparelho, adb), nunca aprovável para isolado
   Type.Literal("portals:control"), // #26: dirigir um navegador (portal) — sai do sandbox pela rede, então nunca é aprovável para agente isolado
 ]);
 export type AgentCapability = Static<typeof AgentCapability>;
@@ -795,6 +838,8 @@ export type DecideApproval = Static<typeof DecideApproval>;
 export const WsServerMessage = Type.Union([
   Type.Object({ type: Type.Literal("portalFrame"), nodeId: Id, data: Type.String(), width: Type.Integer(), height: Type.Integer() }), // data: JPEG em base64
   Type.Object({ type: Type.Literal("portalState"), state: PortalState }),
+  Type.Object({ type: Type.Literal("deviceFrame"), nodeId: Id, data: Type.String(), width: Type.Integer(), height: Type.Integer() }), // data: PNG em base64
+  Type.Object({ type: Type.Literal("deviceState"), state: DeviceState }),
   Type.Object({ type: Type.Literal("hello"), clientId: Id, protocolVersion: Type.Integer() }),
   Type.Object({ type: Type.Literal("snapshot"), sessionId: Id, sequence: Type.Integer(), data: Type.String(), session: Session }),
   Type.Object({ type: Type.Literal("output"), sessionId: Id, sequence: Type.Integer(), data: Type.String() }),

@@ -1,0 +1,34 @@
+#!/bin/bash
+# adb FALSO para os testes (#73): registra cada chamada em $FAKE_ADB_DIR/calls.log e responde o suficiente para o runtime.
+D="${FAKE_ADB_DIR:?}"; HERE="$(cd "$(dirname "$0")" && pwd)"
+echo "$*" >> "$D/calls.log"
+SERIAL=""; if [ "$1" = "-s" ]; then SERIAL="$2"; shift 2; fi
+listed() { [ -n "$SERIAL" ] && grep -q "^$SERIAL " "$D/devices" 2>/dev/null; }
+state() { grep "^$SERIAL " "$D/devices" | awk '{print $2}'; }
+bump() { n=$(cat "$D/count" 2>/dev/null || echo 0); echo $((n+1)) > "$D/count"; }
+case "$1" in
+  devices) echo "List of devices attached"; cat "$D/devices" 2>/dev/null; echo ;;
+  get-state) if listed; then state; else echo "error: device '$SERIAL' not found" >&2; exit 1; fi ;;
+  emu)
+    if ! listed; then echo "error: device '$SERIAL' not found" >&2; exit 1; fi
+    if [ "$2" = "avd" ] && [ "$3" = "name" ]; then cat "$D/avd-$SERIAL" 2>/dev/null || echo "Unknown"; echo OK
+    elif [ "$2" = "kill" ]; then P=$(cat "$D/pid-$SERIAL" 2>/dev/null); [ -n "$P" ] && kill "$P" 2>/dev/null; echo "OK: killing emulator, bye bye" ;
+    fi ;;
+  exec-out)
+    case "$2" in
+      screencap) if [ $(( $(cat "$D/count" 2>/dev/null || echo 0) % 2 )) -eq 0 ]; then cat "$HERE/phone-a.png"; else cat "$HERE/phone-b.png"; fi ;;
+      uiautomator) cat "$HERE/ui.xml" ;;
+    esac ;;
+  shell)
+    shift
+    case "$1" in
+      getprop) case "$2" in ro.product.model) echo "Fake Phone" ;; sys.boot_completed) echo 1 ;; *) echo ;; esac ;;
+      wm) echo "Physical size: 270x480" ;;
+      input) bump ;;
+      pm) printf 'package:com.fake.app\r\npackage:org.fake.other\r\n' ;;
+      dumpsys) echo "  mCurrentFocus=Window{abc u0 com.fake.app/com.fake.app.Main}" ;;
+      monkey) echo "Events injected: 1" ;;
+      am) : ;;
+    esac ;;
+esac
+exit 0

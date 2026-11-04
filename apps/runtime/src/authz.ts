@@ -36,6 +36,11 @@ const RULES: Rule[] = [
   ["GET", "/v1/portals/:id", r("portals:control", "node")], ["POST", "/v1/portals/:id/act", r("portals:control", "node")],
   ["GET", "/v1/portals/:id/snapshot", r("portals:control", "node")], ["GET", "/v1/portals/:id/screenshot", r("portals:control", "node")],
 
+  // ---- #73 dispositivos Android (adb): também sai do sandbox ----
+  ["GET", "/v1/devices", r("devices:control")],
+  ["GET", "/v1/devices/:id", r("devices:control", "node")], ["POST", "/v1/devices/:id/act", r("devices:control", "node")],
+  ["GET", "/v1/devices/:id/ui", r("devices:control", "node")], ["GET", "/v1/devices/:id/screenshot", r("devices:control", "node")], ["GET", "/v1/devices/:id/apps", r("devices:control", "node")],
+
   // ---- arquivos ----
   ["GET", "/v1/workspaces/:id/tree", r("files:read", "ws")],
   ["GET", "/v1/workspaces/:id/file", r("files:read", "ws")],

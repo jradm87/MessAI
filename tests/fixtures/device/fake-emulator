@@ -1,0 +1,13 @@
+#!/bin/bash
+# emulator FALSO (#73): -list-avds; com -avd/-port "sobe" um aparelho emulator-PORT depois de ~1 s e fica vivo até receber TERM (ou `adb emu kill`).
+D="${FAKE_ADB_DIR:?}"
+echo "$*" >> "$D/emulator.log"
+if [ "$1" = "-list-avds" ]; then echo "Pixel_Fake"; echo "Other_AVD"; exit 0; fi
+AVD=""; PORT=""
+while [ $# -gt 0 ]; do case "$1" in -avd) AVD="$2"; shift ;; -port) PORT="$2"; shift ;; esac; shift; done
+S="emulator-$PORT"
+echo $$ > "$D/pid-$S"; echo "$AVD" > "$D/avd-$S"
+trap 'grep -v "^$S " "$D/devices" > "$D/devices.tmp"; mv "$D/devices.tmp" "$D/devices"; exit 0' TERM INT
+sleep "${FAKE_BOOT_SECONDS:-1}"
+echo "$S device product:sdk model:Pixel_Fake device:generic transport_id:9" >> "$D/devices"
+while true; do sleep 0.2; done

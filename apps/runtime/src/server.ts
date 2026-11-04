@@ -3,7 +3,7 @@ import websocket from "@fastify/websocket";
 import { Value } from "@sinclair/typebox/value";
 import type { WebSocket } from "ws";
 import {
-  BUILD_VERSION, PROTOCOL_VERSION, PortalAct, GitCommitInput, GitBranchInput, GitCheckoutInput, GitMergeInput, GitPushInput, SendMessage, Ask, CreateConnection, CreateDrawing, CreateNode, CreateWorkspace, DeleteNode, PatchNode, PatchWorkspace, ApplyLayout, WsClientMessage,
+  BUILD_VERSION, PROTOCOL_VERSION, DeviceAct, PortalAct, GitCommitInput, GitBranchInput, GitCheckoutInput, GitMergeInput, GitPushInput, SendMessage, Ask, CreateConnection, CreateDrawing, CreateNode, CreateWorkspace, DeleteNode, PatchNode, PatchWorkspace, ApplyLayout, WsClientMessage,
   type Capabilities, type WsServerMessage, type ApiError,
  CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, PutFloorHooks, RunFloorHookInput, StopFloorHookInput, PutFloorExcludes, CreateFloorPrInput, PatchFloorPrInput, PutGitHostsInput, PutEnvVarsInput, PreviewWorkspaceImportInput, ImportWorkspaceInput, DuplicateWorkspaceInput, SendNotifyInput, CreateRoutineInput, PatchRoutineInput, FsOp, PatchRuntimeSettings, PutPresets, CreateSkill, PatchSkill, CreateApproval, DecideApproval, BackupInput, RestoreInput, MoveDataInput, ResetInput, CreateNodeGroup, PatchNodeGroup, SaveScore, PatchScore, PlaceScore, CreateBand, PatchBand, AskBand, MaestroRecruit, MaestroTarget, MaestroAssign, ExportAttachment, PutInstructions, SyncInstructions, KillProcInput, IssueAgentTokenInput, type PresetInput, type Preset } from "@messai/contracts";
 import type { Result } from "@messai/domain";
@@ -171,6 +171,13 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
   app.get<{ Params: { id: string }; Querystring: { path?: string } }>("/v1/workspaces/:id/tree", async (req, reply) => send(reply, await svc.listTree(req.params.id, req.query.path ?? "")));
   app.get<{ Params: { id: string }; Querystring: { path?: string } }>("/v1/workspaces/:id/file", async (req, reply) => send(reply, svc.readFile(req.params.id, req.query.path ?? "")));
   app.post<{ Params: { id: string } }>("/v1/workspaces/:id/fs", async (req, reply) => { const b = body<FsOp>(FsOp, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.fsOp(req.params.id, b)); });
+  // #73 dispositivos Android (adb): lista, estado, ações estruturadas, árvore de UI, captura e apps
+  app.get("/v1/devices", async (_req, reply) => send(reply, await svc.deviceList()));
+  app.get<{ Params: { id: string } }>("/v1/devices/:id", async (req, reply) => send(reply, svc.deviceState(req.params.id)));
+  app.post<{ Params: { id: string } }>("/v1/devices/:id/act", async (req, reply) => { const b = body<DeviceAct>(DeviceAct, req.body); if ("code" in b) return invalid(reply, b); return send(reply, await svc.deviceAct(req.params.id, b)); });
+  app.get<{ Params: { id: string } }>("/v1/devices/:id/ui", async (req, reply) => send(reply, await svc.deviceUi(req.params.id)));
+  app.get<{ Params: { id: string } }>("/v1/devices/:id/screenshot", async (req, reply) => send(reply, await svc.deviceScreenshot(req.params.id)));
+  app.get<{ Params: { id: string } }>("/v1/devices/:id/apps", async (req, reply) => send(reply, await svc.deviceApps(req.params.id)));
   // #26 portais (navegador embutido): estado, ações, snapshot e captura
   app.get<{ Params: { id: string } }>("/v1/portals/:id", async (req, reply) => send(reply, svc.portalState(req.params.id)));
   app.post<{ Params: { id: string } }>("/v1/portals/:id/act", async (req, reply) => { const b = body<PortalAct>(PortalAct, req.body); if ("code" in b) return invalid(reply, b); return send(reply, await svc.portalAct(req.params.id, b)); });
@@ -479,6 +486,10 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
         const onPortalFrame = (nodeId: string, f: { data: string; width: number; height: number }) => { if (watchedPortals.has(nodeId)) push({ type: "portalFrame", nodeId, data: f.data, width: f.width, height: f.height }); };
         const onPortalState = (state: import("@messai/contracts").PortalState) => { if (watchedPortals.has(state.nodeId)) push({ type: "portalState", state }); };
         svc.on("portalFrame", onPortalFrame); svc.on("portalState", onPortalState);
+        const watchedDevices = new Set<string>(); // #73 só o app assiste (quadros do dispositivo)
+        const onDeviceFrame = (nodeId: string, f: { mime: "image/png"; data: string; width: number; height: number }) => { if (watchedDevices.has(nodeId)) push({ type: "deviceFrame", nodeId, data: f.data, width: f.width, height: f.height }); };
+        const onDeviceState = (state: import("@messai/contracts").DeviceState) => { if (watchedDevices.has(state.nodeId)) push({ type: "deviceState", state }); };
+        svc.on("deviceFrame", onDeviceFrame); svc.on("deviceState", onDeviceState);
         svc.sessions.on("output", onOutput);
         svc.sessions.on("session", onSession);
         svc.on("workspace", onWorkspace);
@@ -515,6 +526,12 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
               return;
             }
             case "portalUnwatch": watchedPortals.delete(m.nodeId); svc.portalUnwatch(m.nodeId, clientId); return;
+            case "deviceWatch": {
+              watchedDevices.add(m.nodeId);
+              void svc.deviceWatch(m.nodeId, clientId).then((r) => { if (!r.ok) { watchedDevices.delete(m.nodeId); push({ type: "error", error: r.error }); } else push({ type: "deviceState", state: r.value }); });
+              return;
+            }
+            case "deviceUnwatch": watchedDevices.delete(m.nodeId); svc.deviceUnwatch(m.nodeId, clientId); return;
             case "input": {
               const r = svc.sessions.write(m.sessionId, clientId, m.data);
               if (!r.ok) push({ type: "error", error: r.error, sessionId: m.sessionId }); return;
@@ -528,6 +545,7 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
         socket.on("close", () => {
           for (const id of attached) svc.sessions.releaseLease(id, clientId);
           for (const id of watchedPortals) svc.portalUnwatch(id, clientId); svc.off("portalFrame", onPortalFrame); svc.off("portalState", onPortalState);
+          for (const id of watchedDevices) svc.deviceUnwatch(id, clientId); svc.off("deviceFrame", onDeviceFrame); svc.off("deviceState", onDeviceState);
           svc.sessions.off("output", onOutput); svc.sessions.off("session", onSession); svc.off("workspace", onWorkspace); svc.off("message", onMessage); svc.sessions.off("taskFinished", onTaskFinished); svc.off("taskSummary", onTaskSummary); svc.off("floorHook", onFloorHook); svc.off("notification", onNotification); svc.off("approval", onApproval); svc.off("sidebar", onSidebar); svc.off("chat", onChat);
         });
       });

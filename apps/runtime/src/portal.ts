@@ -165,7 +165,10 @@ export class PortalSession {
     } catch { /* fechando */ }
   }
 
-  private async untilLoaded(ms = 20_000): Promise<void> { await new Promise((r) => setTimeout(r, 60)); const t = Date.now(); while (this.state.loading && Date.now() - t < ms && !this.closed) await new Promise((r) => setTimeout(r, 80)); }
+  private async untilLoaded(ms = 20_000): Promise<void> {
+    await new Promise((r) => setTimeout(r, 60)); const t = Date.now(); while (this.state.loading && Date.now() - t < ms && !this.closed) await new Promise((r) => setTimeout(r, 80));
+    if (!this.closed) await this.refreshNav(); // título e histórico já atualizados no estado devolvido (senão o agente vê a URL no lugar do título)
+  }
   async navigate(input: string): Promise<void> {
     this.touch(); const u = normalizePortalUrl(input); if (!u.ok) throw new Error(u.reason);
     const r = await this.p<{ errorText?: string }>("Page.navigate", { url: u.url }, 20_000);

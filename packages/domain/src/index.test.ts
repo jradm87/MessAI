@@ -1,5 +1,5 @@
 import {  describe, expect, it } from "vitest";
-import { canMessage, formatDelivery, resolveNodeRef, parseCrossRef, resolveCrossNodeRef, parseGitRemote, buildPrCompareUrl, canWrite, checkRevision, decideLease, normalizeGeometry, trimBuffer, MAX_BUFFER_BYTES, applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxAttachPlan, shellQuote, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, alignGeometries, gridLayout, agentKind, agentResume, stripAnsi, normalizePortalUrl, parsePortal, portalKey, serializePortal } from "./index.js";
+import { canMessage, formatDelivery, resolveNodeRef, parseCrossRef, resolveCrossNodeRef, parseGitRemote, buildPrCompareUrl, canWrite, checkRevision, decideLease, normalizeGeometry, trimBuffer, MAX_BUFFER_BYTES, applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxAttachPlan, shellQuote, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, alignGeometries, gridLayout, agentKind, agentResume, stripAnsi, normalizePortalUrl, parsePortal, portalKey, serializePortal, androidInputText, androidKey, isAdbSerial, isAndroidActivity, isAndroidPackage, isAvdName, parseAdbDevices, parseAndroidFocus, parseAndroidPackages, parseUiDump, parseWmSize, pngSize, uiNodeAt } from "./index.js";
 
 describe("revisão", () => {
   it("aceita revisão igual e devolve próxima", () => {
@@ -337,5 +337,47 @@ describe("portais (#26)", () => {
   it("conteúdo do nó portal: round trip e tolerância a lixo", () => {
     expect(parsePortal(serializePortal({ url: "https://a.b/" }))).toEqual({ url: "https://a.b/" });
     for (const junk of ["", "x", "{", "[]", "{\"url\":3}", undefined]) expect(parsePortal(junk as string | undefined)).toEqual({ url: "" });
+  });
+});
+
+describe("dispositivos Android (#73)", () => {
+  it("parseAdbDevices: emulador, USB, rede, offline/unauthorized; ignora cabeçalho e avisos do daemon", () => {
+    const out = `* daemon not running; starting now at tcp:5037\n* daemon started successfully\nList of devices attached\nemulator-5554          device product:sdk_gphone_x86_64 model:sdk_gphone_x86_64 device:generic_x86_64 transport_id:1\nR58M123ABC             device usb:1-2 product:beyond1 model:SM_G973F device:beyond1 transport_id:2\n192.168.0.5:5555       device product:x model:Pixel_6 device:oriole transport_id:3\nZZZ                    unauthorized usb:1-3 transport_id:4\nOFF                    offline\n\n`;
+    const d = parseAdbDevices(out);
+    expect(d.map((x) => `${x.serial}|${x.state}|${x.kind}`)).toEqual(["emulator-5554|device|emulator", "R58M123ABC|device|usb", "192.168.0.5:5555|device|network", "ZZZ|unauthorized|usb", "OFF|offline|usb"]);
+    expect(d[1]).toMatchObject({ model: "SM G973F", product: "beyond1" }); expect(parseAdbDevices("")).toEqual([]);
+  });
+  it("parseWmSize prefere o Override; parseAndroidPackages ordena; parseAndroidFocus acha pacote/atividade", () => {
+    expect(parseWmSize("Physical size: 1080x1920\n")).toEqual({ w: 1080, h: 1920 }); expect(parseWmSize("Physical size: 1080x1920\nOverride size: 720x1280")).toEqual({ w: 720, h: 1280 }); expect(parseWmSize("erro")).toBeNull();
+    expect(parseAndroidPackages("package:com.b\r\npackage:com.a.x\n\nlixo")).toEqual(["com.a.x", "com.b"]);
+    expect(parseAndroidFocus("  mCurrentFocus=Window{2c0a107 u0 com.google.android.apps.nexuslauncher/com.google.android.apps.nexuslauncher.NexusLauncherActivity}")).toBe("com.google.android.apps.nexuslauncher/com.google.android.apps.nexuslauncher.NexusLauncherActivity");
+    expect(parseAndroidFocus("  ResumedActivity: ActivityRecord{abc u0 com.android.settings/.Settings t12}")).toBe("com.android.settings/.Settings"); expect(parseAndroidFocus("nada")).toBeUndefined();
+  });
+  it("validadores: pacote, atividade, AVD e serial recusam o que não é nome (nada vai ao shell do aparelho)", () => {
+    for (const ok of ["com.android.settings", "br.com.coamo.app.gestor.rural", "a.b"]) expect(isAndroidPackage(ok), ok).toBe(true);
+    for (const bad of ["com", "com.evil; rm -rf /", "com.a b", "1com.a", "com..a", "$(id).x", "com.a\nb", ""]) expect(isAndroidPackage(bad), bad).toBe(false);
+    expect(isAndroidActivity(".Settings")).toBe(true); expect(isAndroidActivity("com.a.Main$Inner")).toBe(true); expect(isAndroidActivity("a;b")).toBe(false);
+    expect(isAvdName("avd-api30-playstore")).toBe(true); expect(isAvdName("-no-window")).toBe(false); expect(isAvdName("a b")).toBe(false);
+    expect(isAdbSerial("emulator-5554")).toBe(true); expect(isAdbSerial("192.168.0.5:5555")).toBe(true); expect(isAdbSerial("-s")).toBe(false); expect(isAdbSerial("a;b")).toBe(false);
+  });
+  it("androidKey: nomes amigáveis, KEYCODE_ e números; texto livre recusado", () => {
+    expect(androidKey("back")).toBe("KEYCODE_BACK"); expect(androidKey("HOME")).toBe("KEYCODE_HOME"); expect(androidKey("recents")).toBe("KEYCODE_APP_SWITCH"); expect(androidKey("KEYCODE_VOLUME_UP")).toBe("KEYCODE_VOLUME_UP"); expect(androidKey("66")).toBe("66");
+    for (const bad of ["KEYCODE_HOME; reboot", "back && reboot", "$(id)", "keycode_home", "1234", ""]) expect(androidKey(bad), bad).toBeNull();
+  });
+  it("androidInputText: aspas simples escapadas, espaço vira %s, só ASCII imprimível", () => {
+    expect(androidInputText("ola mundo")).toEqual({ ok: true, arg: "'ola%smundo'" });
+    expect(androidInputText("it's $(id); `x` & \"q\"")).toEqual({ ok: true, arg: `'it'\\''s%s$(id);%s\`x\`%s&%s"q"'` });
+    expect(androidInputText("olá")).toMatchObject({ ok: false }); expect(androidInputText("a\nb")).toMatchObject({ ok: false, reason: expect.stringContaining("enter") }); expect(androidInputText("😀")).toMatchObject({ ok: false });
+  });
+  it("parseUiDump: aninhamento, escapes XML, nós autofechados, bounds; uiNodeAt escolhe o menor; tolera lixo e limite", () => {
+    const xml = `<?xml version='1.0' encoding='UTF-8' standalone='yes' ?><hierarchy rotation="0"><node index="0" text="" resource-id="" class="android.widget.FrameLayout" package="p" content-desc="" clickable="false" enabled="true" scrollable="false" checked="false" selected="false" focusable="false" bounds="[0,0][1080,1920]"><node index="0" text="Entrar &amp; sair" resource-id="p:id/btn" class="android.widget.Button" package="p" content-desc="Botão&#10;um" clickable="true" enabled="false" scrollable="false" checked="true" selected="false" focusable="true" bounds="[100,200][500,300]" /><node index="1" text="" resource-id="" class="android.widget.ScrollView" package="p" content-desc="" clickable="false" enabled="true" scrollable="true" checked="false" selected="false" focusable="false" bounds="[0,400][1080,1800]"><node index="0" text="x" class="android.widget.TextView" package="p" bounds="[10,410][200,460]" /></node></node></hierarchy>UI hierchary dumped to: /dev/tty`;
+    const t = parseUiDump(xml); expect(t.nodes.map((n) => `${n.ref}:${n.depth}:${n.cls.split(".").pop()}`)).toEqual(["0:0:FrameLayout", "1:1:Button", "2:1:ScrollView", "3:2:TextView"]);
+    expect(t.nodes[1]).toMatchObject({ text: "Entrar & sair", desc: "Botão\num", resourceId: "p:id/btn", clickable: true, enabled: false, checked: true, bounds: { x1: 100, y1: 200, x2: 500, y2: 300 } }); expect(t.nodes[2]!.scrollable).toBe(true); expect(t.truncated).toBe(false);
+    expect(uiNodeAt(t.nodes, 300, 250)!.text).toBe("Entrar & sair"); expect(uiNodeAt(t.nodes, 50, 430)!.text).toBe("x"); expect(uiNodeAt(t.nodes, 900, 100)!.cls).toContain("FrameLayout"); expect(uiNodeAt(t.nodes, 5000, 5000)).toBeNull();
+    expect(parseUiDump(xml, 2)).toMatchObject({ truncated: true }); expect(parseUiDump("lixo").nodes).toEqual([]); expect(parseUiDump("").nodes).toEqual([]);
+  });
+  it("pngSize lê o IHDR; recusa o que não é PNG", () => {
+    const png = new Uint8Array(33); png.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0); new DataView(png.buffer).setUint32(16, 1080); new DataView(png.buffer).setUint32(20, 1920);
+    expect(pngSize(png)).toEqual({ w: 1080, h: 1920 }); expect(pngSize(new Uint8Array(40))).toBeNull(); expect(pngSize(new Uint8Array(3))).toBeNull();
   });
 });

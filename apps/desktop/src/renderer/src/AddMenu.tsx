@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { Preset } from "@messai/contracts";
 import { WsIcon } from "./wsicons.js";
 
-export type AddChoice = { kind: "note" } | { kind: "tree" } | { kind: "binder" } | { kind: "portal" } | { kind: "terminal"; preset?: Preset; command?: string };
+export type AddChoice = { kind: "note" } | { kind: "tree" } | { kind: "binder" } | { kind: "portal" } | { kind: "device" } | { kind: "terminal"; preset?: Preset; command?: string };
 
 /** Menu "Adicionar" usado pela toolbar e pelo clique direito no canvas. */
 export function AddMenu({ presets, onPick, onClose, x, y }: { presets: Preset[]; onPick: (c: AddChoice) => void; onClose: () => void; x: number; y: number }) {
@@ -20,6 +20,7 @@ export function AddMenu({ presets, onPick, onClose, x, y }: { presets: Preset[];
         <div className="mi" onClick={() => onPick({ kind: "tree" })}>▦ Árvore de arquivos</div>
         <div className="mi" onClick={() => onPick({ kind: "binder" })} data-testid="add-binder">▥ Fichário</div>
         <div className="mi" onClick={() => onPick({ kind: "portal" })} data-testid="add-portal">◍ Portal (navegador)</div>
+        <div className="mi" onClick={() => onPick({ kind: "device" })} data-testid="add-device">▯ Dispositivo Android</div>
         {sub && (
           <div className="menu sub">
             {custom === null ? (

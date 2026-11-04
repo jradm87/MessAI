@@ -7,6 +7,9 @@ import { WORKSPACE_BUNDLE_FORMAT } from "@messai/contracts";
 import type { AgentCapability, IssueAgentTokenInput, AgentTokenInfo, Approval, CreateApproval, NodeIsolation } from "@messai/contracts";
 import { ISOLATED_APPROVABLE_CAPS, ISOLATED_DEFAULT_CAPS, validateIsolation, normalizePortalUrl, parsePortal, serializePortal } from "@messai/domain";
 import { PortalManager, type PortalFrame } from "./portal.js";
+import { DeviceManager, listDevices, type DeviceFrame } from "./device.js";
+import type { DeviceList, DeviceState, DeviceAct, DeviceActResult, DeviceUiTree, DeviceScreenshot } from "@messai/contracts";
+import { isAdbSerial, isAvdName } from "@messai/domain";
 import type { PortalState, PortalAct, PortalActResult, PortalSnapshot, PortalScreenshot } from "@messai/contracts";
 import { buildIsolatedPlan, probeIsolation } from "./isolation.js";
 import { readProcTree } from "./procs.js";
@@ -39,7 +42,7 @@ import { watch, type FSWatcher } from "chokidar";
 const MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", svg: "image/svg+xml", pdf: "application/pdf", md: "text/markdown", markdown: "text/markdown", txt: "text/plain", json: "application/json", csv: "text/csv", html: "text/html", log: "text/plain", ts: "text/plain", js: "text/plain", py: "text/plain", sh: "text/plain", yml: "text/plain", yaml: "text/plain" };
 export const mimeOf = (name: string): string => MIME[extname(name).slice(1).toLowerCase()] ?? "application/octet-stream";
 
-export type ServiceEvents = { workspace: [snapshot: WorkspaceSnapshot]; message: [message: Message]; sidebar: [sidebar: Sidebar]; chat: [message: ChatMessage]; taskSummary: [summary: TaskSummary]; floorHook: [workspaceId: string, status: FloorHookStatus]; notification: [notification: NotificationItem]; approval: [approval: Approval]; portalFrame: [nodeId: string, frame: PortalFrame]; portalState: [state: PortalState] };
+export type ServiceEvents = { workspace: [snapshot: WorkspaceSnapshot]; message: [message: Message]; sidebar: [sidebar: Sidebar]; chat: [message: ChatMessage]; taskSummary: [summary: TaskSummary]; floorHook: [workspaceId: string, status: FloorHookStatus]; notification: [notification: NotificationItem]; approval: [approval: Approval]; portalFrame: [nodeId: string, frame: PortalFrame]; portalState: [state: PortalState]; deviceFrame: [nodeId: string, frame: DeviceFrame]; deviceState: [state: DeviceState] };
 
 export type AgentUsageLimit = { label: string; pct: number; resets: string };
 export type AgentUsageItem = { id: string; label: string; available: boolean; note?: string; plan?: string; limits?: AgentUsageLimit[]; metrics: { label: string; value: string }[]; models: { name: string; input: number; output: number }[] };
@@ -102,9 +105,20 @@ async function runCmd(cmd: string, args: string[], opts: { cwd?: string; timeout
 /** Teto para operações git síncronas de andares (transacionais, raras): limita o pior caso em vez de travar indefinidamente. */
 const GIT_SYNC_TIMEOUT_MS = 15_000;
 
+/** Conteúdo do nó `device`: JSON {serial?, avd?} (a última seleção). Tolerante a lixo; só valores bem formados. */
+function parseDeviceContent(content: string | undefined): { serial?: string; avd?: string } {
+  try { const j = JSON.parse(content ?? "") as { serial?: unknown; avd?: unknown }; return { ...(typeof j.serial === "string" && isAdbSerial(j.serial) ? { serial: j.serial } : {}), ...(typeof j.avd === "string" && isAvdName(j.avd) ? { avd: j.avd } : {}) }; } catch { return {}; }
+}
+
 export class WorkspaceService extends EventEmitter<ServiceEvents> {
   /** Companheiro (#66): resume turnos concluídos com modelo local; sem Ollama, fica quieto. */
   readonly companion: Companion;
+  /** #73 dispositivos Android: uma sessão adb por nó `device`; a seleção (serial/AVD) é gravada no nó SEM mexer na revisão do espaço. */
+  readonly devices = new DeviceManager({
+    onState: (_id, st) => this.emit("deviceState", st),
+    onFrame: (id, f) => this.emit("deviceFrame", id, f),
+    onBound: (id, sel) => { const n = this.store.getNode(id); if (n?.kind === "device") { const cur = JSON.stringify(parseDeviceContent(n.content)); const next = JSON.stringify({ ...parseDeviceContent(n.content), ...sel }); if (cur !== next) this.store.updateNode(id, { content: next }); } },
+  });
   /** #26 portais: um navegador por nó `portal`, criado sob demanda. A URL atual é gravada no conteúdo do nó SEM mexer na revisão do espaço. */
   readonly portals = new PortalManager({
     onState: (_id, st) => this.emit("portalState", st),
@@ -163,7 +177,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const custom = this.readNodeCaps()[node.nodeId];
     if (custom) return [...custom];
     if (node.isolation) return [...ISOLATED_DEFAULT_CAPS]; // #93 isolado: nada que execute código fora do sandbox
-    return ["files:read", "files:write", "chat:post", "nodes:read", "nodes:write", "messages:send", "workspace:manage", "terminal:control", "portals:control", ...(node.maestro ? ["maestro:conduct" as const] : [])];
+    return ["files:read", "files:write", "chat:post", "nodes:read", "nodes:write", "messages:send", "workspace:manage", "terminal:control", "portals:control", "devices:control", ...(node.maestro ? ["maestro:conduct" as const] : [])];
   }
   /** Emite (rotaciona) a credencial do agente de um terminal; as anteriores do nó são revogadas. */
   issueAgentToken(nodeId: string, input?: IssueAgentTokenInput, sessionId?: string, ttlDefaultSeconds = 86400): Result<AgentTokenInfo> {
@@ -1131,6 +1145,61 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
   async portalScreenshot(nodeId: string): Promise<Result<PortalScreenshot>> { const s = await this.portalSession(nodeId); if (!s.ok) return s; try { const r = await s.value.screenshot(); return succeed({ mime: "image/png", ...r }); } catch (e) { return fail("INVALID", (e as Error).message); } }
   shutdownPortals(): void { this.portals.killAllSync(); }
 
+  // ---- #73 dispositivos Android ----
+  private deviceNode(nodeId: string): Result<Node> { const n = this.store.getNode(nodeId); if (!n || n.kind !== "device") return fail("NOT_FOUND", "dispositivo não encontrado"); return succeed(n); }
+  async deviceList(): Promise<Result<DeviceList>> { return succeed(await listDevices()); }
+  deviceState(nodeId: string): Result<DeviceState> { const n = this.deviceNode(nodeId); if (!n.ok) return n; return succeed(this.devices.state(nodeId, parseDeviceContent(n.value.content))); }
+  /** Garante o dispositivo ligado; depois de reiniciar o runtime reconecta pelo serial salvo (por AVD, só iniciando de novo). */
+  private async deviceConn(nodeId: string): Promise<Result<import("./device.js").AdbDevice>> {
+    const n = this.deviceNode(nodeId); if (!n.ok) return n;
+    let d = this.devices.peek(nodeId);
+    if (!d) {
+      const saved = parseDeviceContent(n.value.content);
+      if (!saved.serial) return fail("INVALID", saved.avd ? `emulador ${saved.avd} parado — inicie-o (mess device <nó> boot ${saved.avd})` : "nenhum dispositivo ligado a este nó (mess device list; mess device <nó> select <serial>)");
+      try { await this.devices.select(nodeId, saved.serial, saved.avd); } catch (e) { return fail("INVALID", (e as Error).message); }
+      d = this.devices.peek(nodeId);
+    }
+    return d ? succeed(d) : fail("INVALID", "dispositivo indisponível");
+  }
+  async deviceWatch(nodeId: string, key: string): Promise<Result<DeviceState>> {
+    const n = this.deviceNode(nodeId); if (!n.ok) return n;
+    this.devices.watch(nodeId, key);
+    if (!this.devices.peek(nodeId)) { const saved = parseDeviceContent(n.value.content); if (saved.serial) void this.devices.select(nodeId, saved.serial, saved.avd).catch(() => {}); } // reconecta ao aparelho salvo ao assistir
+    return succeed(this.devices.state(nodeId, parseDeviceContent(n.value.content)));
+  }
+  deviceUnwatch(nodeId: string, key: string): void { this.devices.unwatch(nodeId, key); }
+  async deviceAct(nodeId: string, act: DeviceAct): Promise<Result<DeviceActResult>> {
+    const n = this.deviceNode(nodeId); if (!n.ok) return n;
+    const st = () => this.devices.state(nodeId, parseDeviceContent(this.store.getNode(nodeId)?.content));
+    try {
+      switch (act.action) {
+        case "select": await this.devices.select(nodeId, act.serial); return succeed({ ok: true, state: st() });
+        case "boot": {
+          if (act.wait === false) { void this.devices.boot(nodeId, act.avd, !!act.persist).catch(() => {}); await new Promise((r) => setTimeout(r, 30)); return succeed({ ok: true, state: st(), message: "iniciando" }); }
+          await this.devices.boot(nodeId, act.avd, !!act.persist); return succeed({ ok: true, state: st() });
+        }
+        case "shutdown": await this.devices.shutdown(nodeId); return succeed({ ok: true, state: st() });
+        case "disconnect": this.devices.disconnect(nodeId); return succeed({ ok: true, state: st() });
+      }
+      const c = await this.deviceConn(nodeId); if (!c.ok) return c; const d = c.value;
+      switch (act.action) {
+        case "tap": await d.tap(act.x, act.y); break;
+        case "longpress": await d.longpress(act.x, act.y, act.ms); break;
+        case "swipe": await d.swipe(act.x1, act.y1, act.x2, act.y2, act.ms); break;
+        case "key": await d.key(act.key); break;
+        case "text": await d.typeText(act.text); break;
+        case "launch": await d.launch(act.package, act.activity); break;
+        case "stop": await d.stopApp(act.package); break;
+      }
+      this.devices.refreshForeground(nodeId);
+      return succeed({ ok: true, state: st() });
+    } catch (e) { return fail("INVALID", (e as Error).message); }
+  }
+  async deviceUi(nodeId: string): Promise<Result<DeviceUiTree>> { const c = await this.deviceConn(nodeId); if (!c.ok) return c; try { return succeed(await c.value.uiTree()); } catch (e) { return fail("INVALID", (e as Error).message); } }
+  async deviceScreenshot(nodeId: string): Promise<Result<DeviceScreenshot>> { const c = await this.deviceConn(nodeId); if (!c.ok) return c; try { const s = await c.value.screenshot(); return succeed({ mime: "image/png", data: s.png.toString("base64"), width: s.w, height: s.h }); } catch (e) { return fail("INVALID", (e as Error).message); } }
+  async deviceApps(nodeId: string): Promise<Result<string[]>> { const c = await this.deviceConn(nodeId); if (!c.ok) return c; try { return succeed(await c.value.apps()); } catch (e) { return fail("INVALID", (e as Error).message); } }
+  shutdownDevices(): void { this.devices.stopAllLoops(); }
+
   // ---- #30 git do espaço (raiz do espaço; andar = worktree) ----
   private gitRoot(workspaceId: string): Result<string> { const r = this.wsRoot(workspaceId); return r.ok ? succeed(r.value) : r; }
   private gitPath(root: string, p: string): Result<string> { const r = this.resolveIn(root, p); if (!r.ok) return r; if (!r.value.rel) return fail("INVALID", "caminho inválido"); return succeed(r.value.rel); }
@@ -1789,7 +1858,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     // andares primeiro: um térreo não some com andares órfãos
     for (const f of this.store.listFloors(id)) { const r = this.deleteWorkspace(f.workspaceId, opts); if (!r.ok) return r; }
     for (const s of ["setup", "run", "teardown"] as FloorHookSection[]) this.stopHookSection(id, s);
-    for (const n of this.store.listNodes(id)) if (n.kind === "portal") void this.portals.close(n.nodeId); // #26
+    for (const n of this.store.listNodes(id)) { if (n.kind === "portal") void this.portals.close(n.nodeId); if (n.kind === "device") void this.devices.close(n.nodeId); } // #26 #73
     if (w.parentId) {
       const hk = this.readHooksConfig(id);
       if (hk.teardown.trim() && existsSync(w.cwd)) {
@@ -1831,13 +1900,21 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       const raw = parsePortal(input.content).url;
       if (raw) { const u = normalizePortalUrl(raw); if (!u.ok) return fail("INVALID", u.reason); portalContent = serializePortal({ url: u.url }); } else portalContent = serializePortal({ url: "" });
     }
+    let deviceContent = "";
+    if (input.kind === "device") { // #73 só serial/AVD bem formados entram no conteúdo
+      const raw = (() => { try { return JSON.parse(input.content ?? "{}") as { serial?: unknown; avd?: unknown }; } catch { return null; } })();
+      if (input.content && !raw) return fail("INVALID", "conteúdo do dispositivo inválido");
+      if (raw && ((raw.serial !== undefined && !(typeof raw.serial === "string" && isAdbSerial(raw.serial))) || (raw.avd !== undefined && !(typeof raw.avd === "string" && isAvdName(raw.avd))))) return fail("INVALID", "serial/AVD inválido");
+      deviceContent = JSON.stringify(parseDeviceContent(input.content));
+    }
     const node: Node = {
       nodeId: newId(), workspaceId, kind: input.kind,
-      title: input.title ?? (input.kind === "terminal" ? "Terminal" : input.kind === "text" ? "Texto" : input.kind === "tree" ? "Arquivos" : input.kind === "binder" ? "Fichário" : input.kind === "portal" ? "Portal" : "Nota"),
+      title: input.title ?? (input.kind === "terminal" ? "Terminal" : input.kind === "text" ? "Texto" : input.kind === "tree" ? "Arquivos" : input.kind === "binder" ? "Fichário" : input.kind === "portal" ? "Portal" : input.kind === "device" ? "Dispositivo" : "Nota"),
       geometry: normalizeGeometry(input.geometry), createdAt: nowIso(),
       ...(input.kind === "note" || input.kind === "text" ? { content: input.content ?? "" } : {}),
       ...(input.kind === "tree" ? { content: input.content ?? JSON.stringify({ root: "", mode: "list" }) } : {}),
       ...(input.kind === "portal" ? { content: portalContent } : {}),
+      ...(input.kind === "device" ? { content: deviceContent } : {}),
       ...(input.kind === "binder" ? { content: input.content ?? JSON.stringify({ pages: [{ id: "p1", title: "Página 1", content: "" }], active: "p1", color: "" }) } : {}),
       ...(input.kind === "terminal" && input.roleId ? { roleId: input.roleId } : {}),
       // #56 aparência do terminal (vinda do preset)
@@ -2891,6 +2968,11 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       const raw = parsePortal(input.content).url;
       if (raw) { const u = normalizePortalUrl(raw); if (!u.ok) return fail("INVALID", u.reason); input = { ...input, content: serializePortal({ url: u.url }) }; } else input = { ...input, content: serializePortal({ url: "" }) };
     }
+    if (node.kind === "device" && input.content !== undefined) { // #73
+      const raw = (() => { try { return JSON.parse(input.content) as { serial?: unknown; avd?: unknown }; } catch { return null; } })();
+      if (!raw || (raw.serial !== undefined && !(typeof raw.serial === "string" && isAdbSerial(raw.serial))) || (raw.avd !== undefined && !(typeof raw.avd === "string" && isAvdName(raw.avd)))) return fail("INVALID", "serial/AVD inválido");
+      input = { ...input, content: JSON.stringify(parseDeviceContent(input.content)) };
+    }
     let title = input.title; let titleAuto: boolean | undefined;
     let filePath: string | undefined;
     if (node.kind === "note") {
@@ -2928,6 +3010,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     if (!rev.ok) return rev;
     if (node.sessionId) this.sessions.dispose(node.sessionId);
     if (node.kind === "portal") void this.portals.close(nodeId); // #26 mata o navegador do portal
+    if (node.kind === "device") void this.devices.close(nodeId); // #73 solta o aparelho (e encerra o emulador que nós iniciamos)
     this.revokeAgentTokensForNode(nodeId); this.writeNodeCaps(nodeId, null); // #87
     if (node.kind === "note" && node.filePath) this.unwatchNote(node.filePath);
     if (node.kind === "note" && node.filePath && node.filePath.startsWith(this.notesDir(node.workspaceId))) { try { unlinkSync(node.filePath); } catch { /* já removido */ } }
