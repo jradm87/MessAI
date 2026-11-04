@@ -8,8 +8,11 @@ import { AGENT_ENV, type Band, type BandAskResult, type AskResult, type ChatMess
 import type { PortalActResult, PortalSnapshot, PortalScreenshot, DeviceList, DeviceActResult, DeviceUiTree, DeviceScreenshot, DeviceState } from "@messai/contracts";
 
 const env = (k: keyof typeof AGENT_ENV) => process.env[AGENT_ENV[k]];
-const socketPath = env("socket"), token = env("token"), workspaceId = env("workspaceId"), nodeId = env("nodeId");
-if (!socketPath || !token) { console.error("Fora de um terminal MessAI: MESS_SOCKET/MESS_TOKEN ausentes."); process.exit(2); }
+// Socket é determinístico (não-secreto): se o agente perdeu MESS_SOCKET no ambiente (ex.: política de env de alguns CLIs), cai no padrão.
+const defaultSocket = () => { const d = process.env["MESS_DATA_DIR"]; return (d ? `${d}/agent.sock` : `${process.env["HOME"] ?? ""}/.messai/agent.sock`); };
+const socketPath = env("socket") || defaultSocket();
+const token = env("token"), workspaceId = env("workspaceId"), nodeId = env("nodeId");
+if (!token) { console.error("Fora de um terminal MessAI: a credencial (MESS_TOKEN) não chegou ao comando.\nSe este é um terminal Codex, o preset já herda o ambiente — recrie o terminal na versão nova. Caso contrário, rode `mess` de dentro de um terminal do MessAI."); process.exit(2); }
 
 function call<T>(method: string, path: string, body?: unknown): Promise<T> {
   return new Promise((resolve, reject) => {

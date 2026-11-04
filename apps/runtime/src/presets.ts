@@ -15,7 +15,8 @@ export function defaultPresets(defaultShell: string): PresetInput[] {
   return [
     { ...base, id: "shell", label: "Shell", command: defaultShell, args: [] },
     { ...base, id: "claude", label: "Claude Code", command: "claude", args: ["--append-system-prompt", AGENT_HINT] },
-    { ...base, id: "codex", label: "Codex", command: "codex", args: [] },
+    // Codex herda só um conjunto mínimo de env nos comandos (shell snapshots) e descartava MESS_SOCKET/MESS_TOKEN → `mess` falhava. inherit=all repassa tudo.
+    { ...base, id: "codex", label: "Codex", command: "codex", args: ["-c", "shell_environment_policy.inherit=all", "-c", "shell_environment_policy.ignore_default_excludes=true"] },
     { ...base, id: "opencode", label: "OpenCode", command: "opencode", args: [] },
     { ...base, id: "antigravity", label: "Antigravity", command: "agy", args: [] }, // o binário é `agy`
   ];
