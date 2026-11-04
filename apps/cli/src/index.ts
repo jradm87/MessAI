@@ -343,6 +343,8 @@ try {
       const r = await call<{ node: Node }>("POST", `/v1/workspaces/${workspaceId}/nodes`, { expectedRevision: s.workspace.revision, kind: "portal", ...(name ? { title: name } : {}), geometry: g, content: JSON.stringify({ url }) });
       console.log(`portal criado [${short(r.node.nodeId)}] "${r.node.title}"${url ? ` → ${url}` : ""}`);
     } else {
+      const OPS = ["open", "navigate", "back", "forward", "reload", "state", "close", "snapshot", "click", "type", "key", "scroll", "eval", "wait-text", "screenshot"];
+      if (OPS.includes(args[0]!) && args[1] && !OPS.includes(args[1])) [args[0], args[1]] = [args[1]!, args[0]!]; // aceita também `mess portal snapshot <portal>` (ordem da skill do Maestri)
       const ref = args.shift()!; const op = args.shift();
       const s = await snapshot(); const n = findNode(s.nodes.filter((x) => x.kind === "portal"), ref);
       if (!n) throw new Error("portal não encontrado (veja `mess portal list`)");
@@ -396,6 +398,8 @@ try {
       const r = await call<{ node: Node }>("POST", `/v1/workspaces/${workspaceId}/nodes`, { expectedRevision: s.workspace.revision, kind: "device", ...(name ? { title: name } : {}), geometry: g, content: JSON.stringify({ ...(serial ? { serial } : {}), ...(avd ? { avd } : {}) }) });
       console.log(`dispositivo criado [${short(r.node.nodeId)}] "${r.node.title}"`);
     } else {
+      const OPS = ["select", "boot", "disconnect", "shutdown", "state", "ui", "tap", "longpress", "swipe", "key", "text", "launch", "stop", "apps", "screenshot"];
+      if (OPS.includes(args[0]!) && args[1] && !OPS.includes(args[1])) [args[0], args[1]] = [args[1]!, args[0]!]; // aceita também `mess device tap <nó> …`
       const ref = args.shift()!; const op = args.shift();
       const s = await snapshot(); const n = findNode(s.nodes.filter((x) => x.kind === "device"), ref);
       if (!n) throw new Error("nó de dispositivo não encontrado (veja `mess device list`)");
