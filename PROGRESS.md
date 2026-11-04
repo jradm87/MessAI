@@ -39,13 +39,13 @@
 - [x] #86 (MESS-01) symlink `c43363e` · [x] #87 (MESS-02) authz por agente `e45b2ed`
 
 ### Fase 8 — Gigantes
-- [x] #93 (MESS-09) modo isolado `a06891f` · [x] #30 Editor+git `be9a863` · [x] #26 Portais web (este commit)
+- [x] #93 (MESS-09) modo isolado `a06891f` · [x] #30 Editor+git `be9a863` · [x] #26 Portais web `1a4af72`
 - [ ] #73 Portais Android (adb/scrcpy) — último da Fase 8 pela ordem escolhida pelo usuário
 - [ ] **#28 Hub e #59 Controle remoto: PULADOS por decisão do usuário (seguem abertos)**
 
 ## Estado atual
 - **Fase atual:** 8 (Gigantes). Fechados: #93, #30, #26. Falta **#73 portais Android** (adb/scrcpy disponíveis). #28 hub e #59 controle remoto: **pulados por decisão do usuário** (seguem abertos).
-- **Branch de trabalho:** `auto/fase6` (rastreia `origin/auto/fase6`). Commits recentes assinados (GPG), **sem** `Co-Authored-By` (preferência do usuário): `e45b2ed` #87 · `a06891f` #93 · `be9a863` #30 · #26 (último).
+- **Branch de trabalho:** `auto/fase6` (rastreia `origin/auto/fase6`). Commits recentes assinados (GPG), **sem** `Co-Authored-By` (preferência do usuário): `e45b2ed` #87 · `a06891f` #93 · `be9a863` #30 · `1a4af72` #26 (último).
 - **#26 portais (resumo):** nó `portal` = **Chromium por portal dirigido pelo RUNTIME via CDP sobre PIPE** (`--remote-debugging-pipe`, NUNCA porta TCP: uma porta 127.0.0.1 seria alcançável por agente isolado com rede host). `apps/runtime/src/portal.ts` (CdpPipe, PortalSession, PortalManager; perfil efêmero em `$TMPDIR/mess-portal-*`; processo em grupo próprio, kill do grupo; limite 6 sessões; ocioso 10 min fecha), `packages/domain` (`normalizePortalUrl` só http/https, `portalKey`, `parsePortal`), rotas `GET /v1/portals/:id[/snapshot|/screenshot]` + `POST /v1/portals/:id/act`, WS `portalWatch/portalUnwatch` → `portalFrame`/`portalState` (só app), capacidade nova `portals:control` (padrão do agente confiável; **nunca** aprovável para isolado), CLI `mess portal …`, UI `PortalNode.tsx` (barra de endereço, quadros, mouse/teclado/roda, modo design com "Enviar ao agente", fechar navegador). Navegador: `MESS_BROWSER` ou google-chrome/chromium/brave no PATH (não vai no AppImage). URL atual gravada no nó SEM bump de revisão. Atalhos globais ignoram teclas dentro do portal (`isTyping` inclui `.portal-view`).
 - **#30 editor+git (resumo):** `apps/runtime/src/git.ts` (execFile sem shell, sem prompt, refs validadas), rotas `/v1/workspaces/:id/git*` (leitura = `files:read`; escrita só app), `expectedMtimeMs` no write (409), CodeMirror 6 (`CodeEditor.tsx`, `FilePreview.tsx`), `GitPanel.tsx`.
 - **BUILD_VERSION = 32** (o app troca o runtime antigo sozinho ao abrir).
