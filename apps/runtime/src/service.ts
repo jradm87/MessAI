@@ -1120,6 +1120,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
   portalUnwatch(nodeId: string, key: string): void { this.portals.unwatch(nodeId, key); }
   async portalAct(nodeId: string, act: PortalAct): Promise<Result<PortalActResult>> {
     if (act.action === "close") { const n = this.portalNode(nodeId); if (!n.ok) return n; await this.portals.close(nodeId); return succeed({ ok: true, state: this.portals.state(nodeId, parsePortal(n.value.content).url) }); }
+    if (act.action === "navigate") { const u = normalizePortalUrl(act.url); if (!u.ok) return fail("INVALID", u.reason); } // URL inválida é recusada ANTES de abrir o navegador (e de navegar para a URL salva)
     const s = await this.portalSession(nodeId); if (!s.ok) return s;
     const p = s.value; let value: unknown; let message: string | undefined; let ok = true;
     try {

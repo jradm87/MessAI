@@ -63,8 +63,9 @@ describe("portais: validação sem navegador", () => {
     expect((await api("PATCH", `/v1/nodes/${ok.nodeId}`, { expectedRevision: rev, content: JSON.stringify({ url: "file:///etc/passwd" }) })).status).toBe(400);
     expect(((await api("GET", `/v1/portals/${ok.nodeId}`)).json as St)).toMatchObject({ status: "stopped", url: "https://exemplo.com/x" }); // não abre navegador só por consultar
     expect((await api("GET", "/v1/portals/nao-existe")).status).toBe(404);
-    const act0 = await act(ok.nodeId, { action: "navigate", url: "file:///etc/passwd" });
-    expect(act0.status === 400 || act0.status === 501).toBe(true); // 400 (URL) ou 501 (sem navegador): nunca 200
+    const t0 = Date.now(); const act0 = await act(ok.nodeId, { action: "navigate", url: "file:///etc/passwd" });
+    expect(act0.status).toBe(400); expect(act0.json.error.message).toMatch(/esquema não permitido/); expect(Date.now() - t0).toBeLessThan(2000); // recusa ANTES de abrir o navegador (nem tenta ir à URL salva)
+    expect(((await api("GET", `/v1/portals/${ok.nodeId}`)).json as St).status).toBe("stopped"); // e continua sem navegador
   });
 });
 
