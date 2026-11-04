@@ -814,3 +814,11 @@ export function pngSize(buf: Uint8Array): { w: number; h: number } | null {
   for (let i = 0; i < 8; i++) if (buf[i] !== sig[i]) return null;
   const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength); return { w: dv.getUint32(16), h: dv.getUint32(20) };
 }
+
+/** #29/#93 — Claude autônomo só quando isolado: dentro do sandbox do MessAI o Claude roda sem as perguntas de permissão; fora dele, mantém. */
+export function withIsolatedClaudeAutonomy(command: string, args: string[], isolated: boolean): string[] {
+  if (!isolated) return args;
+  if (agentKind(command, args).agentType !== "claudeCode") return args;
+  if (args.includes("--dangerously-skip-permissions")) return args;
+  return [...args, "--dangerously-skip-permissions"];
+}

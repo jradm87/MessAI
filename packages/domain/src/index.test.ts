@@ -1,5 +1,5 @@
 import {  describe, expect, it } from "vitest";
-import { canMessage, formatDelivery, resolveNodeRef, parseCrossRef, resolveCrossNodeRef, parseGitRemote, buildPrCompareUrl, canWrite, checkRevision, decideLease, normalizeGeometry, trimBuffer, MAX_BUFFER_BYTES, applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxAttachPlan, shellQuote, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, alignGeometries, gridLayout, agentKind, agentResume, stripAnsi, normalizePortalUrl, parsePortal, portalKey, serializePortal, androidInputText, androidKey, isAdbSerial, isAndroidActivity, isAndroidPackage, isAvdName, parseAdbDevices, parseAndroidFocus, parseAndroidPackages, parseUiDump, parseWmSize, pngSize, uiNodeAt } from "./index.js";
+import { canMessage, formatDelivery, resolveNodeRef, parseCrossRef, resolveCrossNodeRef, parseGitRemote, buildPrCompareUrl, canWrite, checkRevision, decideLease, normalizeGeometry, trimBuffer, MAX_BUFFER_BYTES, applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxAttachPlan, shellQuote, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, alignGeometries, gridLayout, agentKind, agentResume, stripAnsi, normalizePortalUrl, parsePortal, portalKey, serializePortal, androidInputText, androidKey, isAdbSerial, isAndroidActivity, isAndroidPackage, isAvdName, parseAdbDevices, parseAndroidFocus, parseAndroidPackages, parseUiDump, parseWmSize, pngSize, uiNodeAt, withIsolatedClaudeAutonomy } from "./index.js";
 
 describe("revisão", () => {
   it("aceita revisão igual e devolve próxima", () => {
@@ -379,5 +379,15 @@ describe("dispositivos Android (#73)", () => {
   it("pngSize lê o IHDR; recusa o que não é PNG", () => {
     const png = new Uint8Array(33); png.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0); new DataView(png.buffer).setUint32(16, 1080); new DataView(png.buffer).setUint32(20, 1920);
     expect(pngSize(png)).toEqual({ w: 1080, h: 1920 }); expect(pngSize(new Uint8Array(40))).toBeNull(); expect(pngSize(new Uint8Array(3))).toBeNull();
+  });
+});
+
+describe("Claude autônomo só quando isolado (#29/#93)", () => {
+  it("adiciona --dangerously-skip-permissions só p/ claude isolado; nunca fora do isolado nem p/ outros agentes", () => {
+    expect(withIsolatedClaudeAutonomy("claude", ["--append-system-prompt", "x"], true)).toContain("--dangerously-skip-permissions");
+    expect(withIsolatedClaudeAutonomy("claude", [], false)).toEqual([]); // fora do isolado: mantém
+    expect(withIsolatedClaudeAutonomy("codex", [], true)).toEqual([]); // outro agente: não mexe
+    expect(withIsolatedClaudeAutonomy("/bin/sh", [], true)).toEqual([]); // shell: não mexe
+    expect(withIsolatedClaudeAutonomy("claude", ["--dangerously-skip-permissions"], true)).toEqual(["--dangerously-skip-permissions"]); // não duplica
   });
 });
