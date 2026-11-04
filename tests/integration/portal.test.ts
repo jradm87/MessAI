@@ -55,6 +55,21 @@ afterAll(async () => {
   try { rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch { /* o SO limpa /tmp; limpeza não reprova a suíte */ }
 }, 30_000);
 
+describe("autoPlace (#nós não sobrepostos)", () => {
+  it("nós criados com autoPlace ficam lado a lado, sem sobrepor", async () => {
+    const ws = ((await api("POST", "/v1/workspaces", { name: "place", cwd: dir })).json as { workspaceId: string }).workspaceId;
+    const xs: number[] = [];
+    for (let i = 0; i < 3; i++) {
+      const rev = ((await api("GET", `/v1/workspaces/${ws}`)).json as { workspace: { revision: number } }).workspace.revision;
+      const r = (await api("POST", `/v1/workspaces/${ws}/nodes`, { expectedRevision: rev, kind: "note", title: `n${i}`, geometry: { x: 0, y: 0, w: 200, h: 150 }, autoPlace: true, content: "" })).json as { node: { geometry: { x: number } } };
+      xs.push(r.node.geometry.x);
+    }
+    const sorted = [...xs].sort((a, b) => a - b);
+    expect(sorted.every((x, i) => i === 0 || x - sorted[i - 1]! >= 200)).toBe(true); // separados por pelo menos a largura
+    expect(new Set(xs).size).toBe(3); // nenhum no mesmo x
+  });
+});
+
 describe("portais: validação sem navegador", () => {
   it("URL do conteúdo é normalizada; esquemas perigosos recusados na criação e no PATCH", async () => {
     for (const bad of ["file:///etc/passwd", "javascript:alert(1)", "data:text/html,<b>x</b>", "chrome://settings", "https://u:p@a.b"]) expect((await mkPortal("bad", bad)).status, bad).toBe(400);

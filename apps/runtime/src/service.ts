@@ -1916,7 +1916,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const node: Node = {
       nodeId: newId(), workspaceId, kind: input.kind,
       title: input.title ?? (input.kind === "terminal" ? "Terminal" : input.kind === "text" ? "Texto" : input.kind === "tree" ? "Arquivos" : input.kind === "binder" ? "Fichário" : input.kind === "portal" ? "Portal" : input.kind === "device" ? "Dispositivo" : "Nota"),
-      geometry: normalizeGeometry(input.geometry), createdAt: nowIso(),
+      geometry: input.autoPlace ? this.placeFree(this.store.listNodes(workspaceId), input.geometry.w, input.geometry.h) : normalizeGeometry(input.geometry), createdAt: nowIso(),
       ...(input.kind === "note" || input.kind === "text" ? { content: input.content ?? "" } : {}),
       ...(input.kind === "tree" ? { content: input.content ?? JSON.stringify({ root: "", mode: "list" }) } : {}),
       ...(input.kind === "portal" ? { content: portalContent } : {}),
@@ -2035,7 +2035,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       ...(ground ? { [AGENT_ENV.floorId]: w.workspaceId, [AGENT_ENV.floorName]: w.name, [AGENT_ENV.floorBranch]: w.branch ?? "", [AGENT_ENV.branchName]: w.branch ?? "", [AGENT_ENV.floorPath]: w.cwd, [AGENT_ENV.rootPath]: ground.cwd, [AGENT_ENV.projectName]: ground.name } : { [AGENT_ENV.rootPath]: w.cwd, [AGENT_ENV.projectName]: w.name }),
       [AGENT_ENV.socket]: this.cfg.socketPath, [AGENT_ENV.token]: agentToken,
       [AGENT_ENV.workspaceId]: w.workspaceId, [AGENT_ENV.workspaceName]: w.name, [AGENT_ENV.workspaceDir]: w.cwd,
-      [AGENT_ENV.nodeId]: node.nodeId, [AGENT_ENV.sessionId]: s.sessionId,
+      [AGENT_ENV.nodeId]: node.nodeId, [AGENT_ENV.sessionId]: s.sessionId, [AGENT_ENV.cli]: join(CLI_DIR, "mess"),
       ...(node.maestro ? { [AGENT_ENV.maestro]: "1" } : {}), // #29
       SHELL: this.cfg.defaultShell,
       // Empacotado: o launcher `mess` roda o CLI com o Node do Electron (sem Node do sistema).
@@ -3146,6 +3146,14 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const ok = canMessage(this.store.listConnections(maestro.workspaceId), maestro.nodeId, to.value.nodeId);
     if (!ok.ok) return fail("FORBIDDEN", "o condutor só age sobre terminais ligados a ele");
     return succeed(to.value);
+  }
+  /** Uma posição que NÃO sobrepõe nenhum nó existente: à direita de tudo, no topo. Simples e nunca colide (usado por agentes/CLI via autoPlace). */
+  private placeFree(nodes: Node[], w: number, h: number): Node["geometry"] {
+    const norm = normalizeGeometry({ x: 0, y: 0, w, h });
+    if (!nodes.length) return { x: 40, y: 40, w: norm.w, h: norm.h };
+    const right = Math.max(...nodes.map((n) => n.geometry.x + n.geometry.w));
+    const top = Math.min(...nodes.map((n) => n.geometry.y));
+    return { x: right + 40, y: top, w: norm.w, h: norm.h };
   }
   private freeSpotNear(anchor: Node, nodes: Node[], w: number, h: number): Node["geometry"] {
     const x = anchor.geometry.x + anchor.geometry.w + 60;

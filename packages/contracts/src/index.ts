@@ -628,6 +628,7 @@ export const CreateNode = Type.Object({
   skillIds: Type.Optional(Type.Array(Id, { maxItems: 20 })), // #57
   maestro: Type.Optional(Type.Boolean()), // #29 nasce condutor (preset com Maestro)
   isolation: Type.Optional(NodeIsolation), // #93 nasce no modo isolado
+  autoPlace: Type.Optional(Type.Boolean()), // runtime escolhe uma posição livre (não sobrepõe) — usado por agentes/CLI
 });
 export type CreateNode = Static<typeof CreateNode>;
 
@@ -953,6 +954,7 @@ export const AGENT_ENV = {
   skills: "MESS_SKILLS", // #57 nomes das habilidades anexadas, separados por vírgula
   skillsText: "MESS_SKILLS_TEXT", // #57 instruções completas das habilidades
   maestro: "MESS_MAESTRO", // #29 "1" quando o terminal é condutor
+  cli: "MESS_CLI", // caminho absoluto do executável `mess` (p/ CLIs como o Codex que resetam o PATH via shell snapshot)
 } as const;
 
 // #57 — Skills: conjuntos de instruções reutilizáveis anexáveis a um terminal (vários por nó), injetadas como o papel.

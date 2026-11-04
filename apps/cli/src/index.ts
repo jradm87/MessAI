@@ -239,7 +239,7 @@ try {
     let s = await snapshot();
     const me = s.nodes.find((n) => n.nodeId === nodeId);
     const g = me ? { x: me.geometry.x + me.geometry.w + 40, y: me.geometry.y, w: 280, h: 180 } : { x: 40, y: 40, w: 280, h: 180 };
-    const r = await call<{ node: Node; revision: number }>("POST", `/v1/workspaces/${workspaceId}/nodes`, { expectedRevision: s.workspace.revision, kind: "note", title, geometry: g, content: text.join(" ") });
+    const r = await call<{ node: Node; revision: number }>("POST", `/v1/workspaces/${workspaceId}/nodes`, { expectedRevision: s.workspace.revision, kind: "note", title, geometry: g, autoPlace: true, content: text.join(" ") });
     if (nodeId) { s = await snapshot(); await call("POST", `/v1/workspaces/${workspaceId}/connections`, { expectedRevision: s.workspace.revision, sourceNodeId: nodeId, targetNodeId: r.node.nodeId }); }
     console.log(`nota criada [${short(r.node.nodeId)}]${nodeId ? " e ligada ao seu nó" : ""}`);
   } else if (cmd === "note" && sub === "append") {
@@ -343,7 +343,7 @@ try {
       args.shift(); const name = flagVal("--name") ?? (args[1] && !args[1].startsWith("-") ? args.splice(1,1)[0] : undefined); const url = args[0] ?? "";
       const s = await snapshot(); const me = s.nodes.find((n) => n.nodeId === nodeId);
       const g = me ? { x: me.geometry.x + me.geometry.w + 40, y: me.geometry.y, w: 560, h: 400 } : { x: 40, y: 40, w: 560, h: 400 };
-      const r = await call<{ node: Node }>("POST", `/v1/workspaces/${workspaceId}/nodes`, { expectedRevision: s.workspace.revision, kind: "portal", ...(name ? { title: name } : {}), geometry: g, content: JSON.stringify({ url }) });
+      const r = await call<{ node: Node }>("POST", `/v1/workspaces/${workspaceId}/nodes`, { expectedRevision: s.workspace.revision, kind: "portal", ...(name ? { title: name } : {}), geometry: g, autoPlace: true, content: JSON.stringify({ url }) });
       console.log(`portal criado [${short(r.node.nodeId)}] "${r.node.title}"${url ? ` → ${url}` : ""}`);
     } else {
       const OPS = ["open", "navigate", "back", "forward", "reload", "state", "close", "snapshot", "click", "type", "key", "scroll", "eval", "wait-text", "screenshot"];
@@ -399,7 +399,7 @@ try {
       args.shift(); const name = flagVal("--name"); const serial = flagVal("--serial"); const avd = flagVal("--avd");
       const s = await snapshot(); const me = s.nodes.find((n) => n.nodeId === nodeId);
       const g = me ? { x: me.geometry.x + me.geometry.w + 40, y: me.geometry.y, w: 360, h: 640 } : { x: 40, y: 40, w: 360, h: 640 };
-      const r = await call<{ node: Node }>("POST", `/v1/workspaces/${workspaceId}/nodes`, { expectedRevision: s.workspace.revision, kind: "device", ...(name ? { title: name } : {}), geometry: g, content: JSON.stringify({ ...(serial ? { serial } : {}), ...(avd ? { avd } : {}) }) });
+      const r = await call<{ node: Node }>("POST", `/v1/workspaces/${workspaceId}/nodes`, { expectedRevision: s.workspace.revision, kind: "device", ...(name ? { title: name } : {}), geometry: g, autoPlace: true, content: JSON.stringify({ ...(serial ? { serial } : {}), ...(avd ? { avd } : {}) }) });
       console.log(`dispositivo criado [${short(r.node.nodeId)}] "${r.node.title}"`);
     } else {
       const OPS = ["select", "boot", "disconnect", "shutdown", "state", "ui", "tap", "longpress", "swipe", "key", "text", "launch", "stop", "apps", "screenshot"];
