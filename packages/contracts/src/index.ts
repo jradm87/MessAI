@@ -2,7 +2,7 @@ import { Type, type Static } from "@sinclair/typebox";
 
 export const PROTOCOL_VERSION = 1 as const;
 /** Incrementar a cada mudança de snapshot/rotas; o cliente avisa quando o runtime está atrás. */
-export const BUILD_VERSION = 30 as const;
+export const BUILD_VERSION = 31 as const;
 
 // ---------- Identidades ----------
 export const Id = Type.String({ minLength: 8, maxLength: 64 });
@@ -784,10 +784,37 @@ export type FileEntry = Static<typeof FileEntry>;
 /** Entrada da árvore de arquivos (relativa ao diretório do espaço). */
 export const TreeEntry = Type.Object({ name: Type.String(), path: Type.String(), dir: Type.Boolean(), size: Type.Integer(), mtime: Type.String(), git: Type.Optional(Type.String()) });
 export type TreeEntry = Static<typeof TreeEntry>;
-export const FileContent = Type.Object({ path: Type.String(), size: Type.Integer(), binary: Type.Boolean(), text: Type.Optional(Type.String()), truncated: Type.Boolean() });
+export const FileContent = Type.Object({ path: Type.String(), size: Type.Integer(), binary: Type.Boolean(), text: Type.Optional(Type.String()), truncated: Type.Boolean(), mtimeMs: Type.Optional(Type.Number()) });
 export type FileContent = Static<typeof FileContent>;
-export const FsOp = Type.Object({ op: Type.Union([Type.Literal("mkdir"), Type.Literal("touch"), Type.Literal("rename"), Type.Literal("delete"), Type.Literal("write")]), path: Type.String({ minLength: 1 }), to: Type.Optional(Type.String({ minLength: 1 })), text: Type.Optional(Type.String()) });
+export const FsOp = Type.Object({ op: Type.Union([Type.Literal("mkdir"), Type.Literal("touch"), Type.Literal("rename"), Type.Literal("delete"), Type.Literal("write")]), path: Type.String({ minLength: 1 }), to: Type.Optional(Type.String({ minLength: 1 })), text: Type.Optional(Type.String()), expectedMtimeMs: Type.Optional(Type.Number()) }); // #30: write com expectedMtimeMs recusa (CONFLICT) se o arquivo mudou no disco desde a leitura
 export type FsOp = Static<typeof FsOp>;
+
+// #30 — git do espaço (raiz do espaço = repositório; andares = worktree). Leitura: GET; escrita: só o app.
+export const GitFile = Type.Object({ path: Type.String(), code: Type.String(), staged: Type.Boolean(), unstaged: Type.Boolean() }); // code: M A D R ? U (conflito)
+export type GitFile = Static<typeof GitFile>;
+export const GitBranch = Type.Object({ name: Type.String(), current: Type.Boolean(), remote: Type.Boolean() });
+export type GitBranch = Static<typeof GitBranch>;
+export const GitInfo = Type.Object({
+  isRepo: Type.Boolean(), branch: Type.Optional(Type.String()), detached: Type.Optional(Type.Boolean()), upstream: Type.Optional(Type.String()),
+  ahead: Type.Integer(), behind: Type.Integer(), merging: Type.Boolean(), files: Type.Array(GitFile), branches: Type.Array(GitBranch),
+});
+export type GitInfo = Static<typeof GitInfo>;
+export const GitCommitEntry = Type.Object({ hash: Type.String(), short: Type.String(), author: Type.String(), date: Type.String(), subject: Type.String() });
+export type GitCommitEntry = Static<typeof GitCommitEntry>;
+export const GitDiff = Type.Object({ path: Type.Optional(Type.String()), text: Type.String(), truncated: Type.Boolean() });
+export type GitDiff = Static<typeof GitDiff>;
+export const GitCommitInput = Type.Object({ message: Type.String({ minLength: 1, maxLength: 5000 }), paths: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { maxItems: 500 })) }); // sem paths: tudo (git add -A)
+export type GitCommitInput = Static<typeof GitCommitInput>;
+export const GitBranchInput = Type.Object({ name: Type.String({ minLength: 1, maxLength: 200 }), from: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })) }); // cria e muda para a branch
+export type GitBranchInput = Static<typeof GitBranchInput>;
+export const GitCheckoutInput = Type.Object({ branch: Type.String({ minLength: 1, maxLength: 200 }) });
+export type GitCheckoutInput = Static<typeof GitCheckoutInput>;
+export const GitMergeInput = Type.Object({ branch: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })), abort: Type.Optional(Type.Boolean()) });
+export type GitMergeInput = Static<typeof GitMergeInput>;
+export const GitPushInput = Type.Object({ setUpstream: Type.Optional(Type.Boolean()) });
+export type GitPushInput = Static<typeof GitPushInput>;
+export const GitOpResult = Type.Object({ ok: Type.Boolean(), output: Type.String(), conflicts: Type.Optional(Type.Array(Type.String())) });
+export type GitOpResult = Static<typeof GitOpResult>;
 export const SearchHit = Type.Object({ path: Type.String(), line: Type.Optional(Type.Integer()), text: Type.Optional(Type.String()) });
 export type SearchHit = Static<typeof SearchHit>;
 // #41 — busca de texto (FTS5) em notas/textos e chats: GET /v1/find?q=&workspaceId=&kinds=note,chat

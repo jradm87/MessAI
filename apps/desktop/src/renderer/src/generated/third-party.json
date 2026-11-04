@@ -1,5 +1,5 @@
 {
- "generatedAt": "2026-11-01",
+ "generatedAt": "2026-11-04",
  "generatedFrom": [
   "apps/desktop",
   "apps/runtime",
@@ -73,6 +73,190 @@
    "repository": "https://github.com/Chevrotain/chevrotain",
    "via": [
     "chevrotain"
+   ]
+  },
+  {
+   "name": "@codemirror/autocomplete",
+   "version": "6.20.4",
+   "license": "MIT",
+   "repository": "https://code.haverbeke.berlin/codemirror/autocomplete",
+   "via": [
+    "@codemirror/lang-css",
+    "@codemirror/lang-html",
+    "@codemirror/lang-javascript",
+    "@codemirror/lang-markdown",
+    "@codemirror/lang-python",
+    "@codemirror/lang-yaml"
+   ]
+  },
+  {
+   "name": "@codemirror/commands",
+   "version": "6.11.1",
+   "license": "MIT",
+   "repository": "https://code.haverbeke.berlin/codemirror/commands",
+   "via": [
+    "@messai/desktop"
+   ]
+  },
+  {
+   "name": "@codemirror/lang-css",
+   "version": "6.3.1",
+   "license": "MIT",
+   "repository": "https://github.com/codemirror/lang-css",
+   "via": [
+    "@messai/desktop",
+    "@codemirror/lang-html"
+   ]
+  },
+  {
+   "name": "@codemirror/lang-html",
+   "version": "6.4.12",
+   "license": "MIT",
+   "repository": "https://code.haverbeke.berlin/codemirror/lang-html",
+   "via": [
+    "@messai/desktop",
+    "@codemirror/lang-markdown"
+   ]
+  },
+  {
+   "name": "@codemirror/lang-javascript",
+   "version": "6.2.5",
+   "license": "MIT",
+   "repository": "https://github.com/codemirror/lang-javascript",
+   "via": [
+    "@codemirror/lang-html",
+    "@messai/desktop"
+   ]
+  },
+  {
+   "name": "@codemirror/lang-json",
+   "version": "6.0.2",
+   "license": "MIT",
+   "repository": "https://github.com/codemirror/lang-json",
+   "via": [
+    "@messai/desktop"
+   ]
+  },
+  {
+   "name": "@codemirror/lang-markdown",
+   "version": "6.5.2",
+   "license": "MIT",
+   "repository": "https://code.haverbeke.berlin/codemirror/lang-markdown",
+   "via": [
+    "@messai/desktop"
+   ]
+  },
+  {
+   "name": "@codemirror/lang-python",
+   "version": "6.2.1",
+   "license": "MIT",
+   "repository": "https://github.com/codemirror/lang-python",
+   "via": [
+    "@messai/desktop"
+   ]
+  },
+  {
+   "name": "@codemirror/lang-yaml",
+   "version": "6.1.3",
+   "license": "MIT",
+   "repository": "https://github.com/codemirror/lang-yaml",
+   "via": [
+    "@messai/desktop"
+   ]
+  },
+  {
+   "name": "@codemirror/language",
+   "version": "6.13.1",
+   "license": "MIT",
+   "repository": "https://code.haverbeke.berlin/codemirror/language",
+   "via": [
+    "@codemirror/commands",
+    "@codemirror/autocomplete",
+    "@codemirror/lang-css",
+    "@codemirror/lang-javascript",
+    "@codemirror/lang-html",
+    "@codemirror/lang-json",
+    "@codemirror/lang-markdown",
+    "@codemirror/lang-python",
+    "@codemirror/lang-yaml",
+    "@messai/desktop",
+    "@codemirror/theme-one-dark"
+   ]
+  },
+  {
+   "name": "@codemirror/lint",
+   "version": "6.9.7",
+   "license": "MIT",
+   "repository": "https://code.haverbeke.berlin/codemirror/lint",
+   "via": [
+    "@codemirror/lang-javascript"
+   ]
+  },
+  {
+   "name": "@codemirror/search",
+   "version": "6.7.2",
+   "license": "MIT",
+   "repository": "https://code.haverbeke.berlin/codemirror/search",
+   "via": [
+    "@messai/desktop"
+   ]
+  },
+  {
+   "name": "@codemirror/state",
+   "version": "6.7.6",
+   "license": "MIT",
+   "repository": "https://code.haverbeke.berlin/codemirror/state",
+   "via": [
+    "@codemirror/language",
+    "@codemirror/view",
+    "@codemirror/commands",
+    "@codemirror/autocomplete",
+    "@codemirror/lang-css",
+    "@codemirror/lint",
+    "@codemirror/lang-javascript",
+    "@codemirror/lang-html",
+    "@codemirror/lang-markdown",
+    "@codemirror/lang-python",
+    "@codemirror/lang-yaml",
+    "@codemirror/search",
+    "@messai/desktop",
+    "@codemirror/theme-one-dark"
+   ]
+  },
+  {
+   "name": "@codemirror/streamparser",
+   "version": "6.0.0",
+   "license": "MIT",
+   "repository": "https://code.haverbeke.berlin/codemirror/streamparser",
+   "via": [
+    "@codemirror/language"
+   ]
+  },
+  {
+   "name": "@codemirror/theme-one-dark",
+   "version": "6.1.3",
+   "license": "MIT",
+   "repository": "https://github.com/codemirror/theme-one-dark",
+   "via": [
+    "@messai/desktop"
+   ]
+  },
+  {
+   "name": "@codemirror/view",
+   "version": "6.43.15",
+   "license": "MIT",
+   "repository": "https://code.haverbeke.berlin/codemirror/view",
+   "via": [
+    "@codemirror/language",
+    "@codemirror/commands",
+    "@codemirror/autocomplete",
+    "@codemirror/lint",
+    "@codemirror/lang-javascript",
+    "@codemirror/lang-html",
+    "@codemirror/lang-markdown",
+    "@codemirror/search",
+    "@codemirror/theme-one-dark",
+    "@messai/desktop"
    ]
   },
   {
@@ -164,6 +348,139 @@
    "repository": "https://github.com/iconify/iconify",
    "via": [
     "mermaid"
+   ]
+  },
+  {
+   "name": "@lezer/common",
+   "version": "1.5.5",
+   "license": "MIT",
+   "repository": "https://code.haverbeke.berlin/lezer/common",
+   "via": [
+    "@codemirror/language",
+    "@lezer/highlight",
+    "@lezer/lr",
+    "@codemirror/commands",
+    "@codemirror/autocomplete",
+    "@codemirror/lang-css",
+    "@lezer/css",
+    "@codemirror/lang-javascript",
+    "@lezer/javascript",
+    "@lezer/html",
+    "@codemirror/lang-html",
+    "@lezer/json",
+    "@lezer/markdown",
+    "@codemirror/lang-markdown",
+    "@codemirror/lang-python",
+    "@lezer/python",
+    "@codemirror/lang-yaml",
+    "@lezer/yaml"
+   ]
+  },
+  {
+   "name": "@lezer/css",
+   "version": "1.3.9",
+   "license": "MIT",
+   "repository": "https://code.haverbeke.berlin/lezer/css",
+   "via": [
+    "@codemirror/lang-css",
+    "@codemirror/lang-html"
+   ]
+  },
+  {
+   "name": "@lezer/highlight",
+   "version": "1.2.5",
+   "license": "MIT",
+   "repository": "https://code.haverbeke.berlin/lezer/highlight",
+   "via": [
+    "@codemirror/language",
+    "@lezer/css",
+    "@lezer/javascript",
+    "@lezer/html",
+    "@lezer/json",
+    "@lezer/markdown",
+    "@lezer/python",
+    "@codemirror/lang-yaml",
+    "@lezer/yaml",
+    "@codemirror/theme-one-dark"
+   ]
+  },
+  {
+   "name": "@lezer/html",
+   "version": "1.3.13",
+   "license": "MIT",
+   "repository": "https://github.com/lezer-parser/html",
+   "via": [
+    "@codemirror/lang-html"
+   ]
+  },
+  {
+   "name": "@lezer/javascript",
+   "version": "1.5.6",
+   "license": "MIT",
+   "repository": "https://code.haverbeke.berlin/lezer/javascript",
+   "via": [
+    "@codemirror/lang-javascript"
+   ]
+  },
+  {
+   "name": "@lezer/json",
+   "version": "1.0.3",
+   "license": "MIT",
+   "repository": "https://github.com/lezer-parser/json",
+   "via": [
+    "@codemirror/lang-json"
+   ]
+  },
+  {
+   "name": "@lezer/lr",
+   "version": "1.4.12",
+   "license": "MIT",
+   "repository": "https://code.haverbeke.berlin/lezer/lr",
+   "via": [
+    "@codemirror/language",
+    "@lezer/css",
+    "@lezer/javascript",
+    "@lezer/html",
+    "@lezer/json",
+    "@lezer/python",
+    "@codemirror/lang-yaml",
+    "@lezer/yaml"
+   ]
+  },
+  {
+   "name": "@lezer/markdown",
+   "version": "1.8.1",
+   "license": "MIT",
+   "repository": "https://code.haverbeke.berlin/lezer/markdown",
+   "via": [
+    "@codemirror/lang-markdown"
+   ]
+  },
+  {
+   "name": "@lezer/python",
+   "version": "1.1.19",
+   "license": "MIT",
+   "repository": "https://code.haverbeke.berlin/lezer/python",
+   "via": [
+    "@codemirror/lang-python"
+   ]
+  },
+  {
+   "name": "@lezer/yaml",
+   "version": "1.0.4",
+   "license": "MIT",
+   "repository": "https://github.com/lezer-parser/yaml",
+   "via": [
+    "@codemirror/lang-yaml"
+   ]
+  },
+  {
+   "name": "@marijn/find-cluster-break",
+   "version": "1.0.4",
+   "license": "MIT",
+   "repository": "https://code.haverbeke.berlin/marijn/find-cluster-break",
+   "via": [
+    "@codemirror/state"
    ]
   },
   {
@@ -735,6 +1052,17 @@
    "repository": "https://github.com/iVis-at-Bilkent/cose-base",
    "via": [
     "cytoscape-fcose"
+   ]
+  },
+  {
+   "name": "crelt",
+   "version": "1.0.7",
+   "license": "MIT",
+   "repository": "https://code.haverbeke.berlin/marijn/crelt",
+   "via": [
+    "@codemirror/view",
+    "@codemirror/lint",
+    "@codemirror/search"
    ]
   },
   {
@@ -1903,6 +2231,16 @@
    ]
   },
   {
+   "name": "style-mod",
+   "version": "4.1.4",
+   "license": "MIT",
+   "repository": "https://code.haverbeke.berlin/marijn/style-mod",
+   "via": [
+    "@codemirror/view",
+    "@codemirror/language"
+   ]
+  },
+  {
    "name": "stylis",
    "version": "4.4.0",
    "license": "MIT",
@@ -2045,6 +2383,15 @@
    "repository": "https://github.com/microsoft/vscode-uri",
    "via": [
     "langium"
+   ]
+  },
+  {
+   "name": "w3c-keyname",
+   "version": "2.2.8",
+   "license": "MIT",
+   "repository": "https://github.com/marijnh/w3c-keyname",
+   "via": [
+    "@codemirror/view"
    ]
   },
   {

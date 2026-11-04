@@ -25,6 +25,7 @@ import { NoteNode } from "./NoteNode.js";
 import { TextNode } from "./TextNode.js";
 import { TreeNode } from "./TreeNode.js";
 import { FilePreview } from "./FilePreview.js";
+import { GitPanel } from "./GitPanel.js";
 import { RopeEdge, CircuitEdge, type EdgeData } from "./RopeEdge.js";
 import { AddMenu, type AddChoice } from "./AddMenu.js";
 import { Toolbar, type Tool, type DrawStyle } from "./Toolbar.js";
@@ -137,6 +138,7 @@ function Canvas({ conn }: { conn: Connection }) {
   const [rolesDialog, setRolesDialog] = useState(false);
   const [floorDialog, setFloorDialog] = useState<Workspace | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
+  const [gitOpen, setGitOpen] = useState(false); // #30 painel git do espaço
   const [usage, setUsage] = useState(false);
   const [prefsOpen, setPrefsOpen] = useState(false); // #64 janela de Preferências
   const [paletteOpen, setPaletteOpen] = useState(false); // #69 paleta global
@@ -464,7 +466,7 @@ function Canvas({ conn }: { conn: Connection }) {
               onSpill: (pageId: string) => void spillPage(n, pageId), onUnstack: () => void unstackBinder(n), onPull: () => void pullIntoBinder(n.nodeId) }
           : n.kind === "tree" ? { title: n.title, content: n.content ?? "", editSignal: renameSig.id === n.nodeId ? renameSig.n : 0, workspaceId: snap.workspace.workspaceId, api, ...(n.groupId ? { groupId: n.groupId } : {}), onChange: change, onDelete: del, onRename: rename, ...extras,
               onOpenNote: (rel: string) => void mutate((r) => api.createNode(snap.workspace.workspaceId, { expectedRevision: r, kind: "note", geometry: { x: n.geometry.x + n.geometry.w + 40, y: n.geometry.y, w: 360, h: 260 }, filePath: `${snap.workspace.cwd}/${rel}` })),
-              onPreview: (rel: string) => setPreview(rel), toast }
+              onPreview: (rel: string) => setPreview(rel), onGit: () => setGitOpen(true), toast }
           : { content: n.content ?? "", onChange: change, onDelete: del, onRaise: extras.onRaise, editSignal: renameSig.id === n.nodeId ? renameSig.n : 0 },
       };
     }));
@@ -510,6 +512,7 @@ function Canvas({ conn }: { conn: Connection }) {
     { id: "theme", label: "Alternar tema", keywords: "claro escuro sistema" },
     { id: "minimap", label: "Alternar minimapa", detail: "Ctrl+Shift+M" },
     { id: "hud", label: "Janela flutuante do companheiro", keywords: "hud resumo" },
+    { id: "git", label: "Git do espaço (commit, branch, merge, pull/push)…", keywords: "git commit branch merge pull push historico diff" },
     { id: "approvals", label: "Pedidos de permissão dos agentes isolados…", keywords: "aprovar isolado sandbox permissão capacidade" },
     { id: "attention.next", label: "Ir ao próximo terminal esperando você", detail: "Ctrl+Shift+A", keywords: "atenção" },
   ];
@@ -530,6 +533,7 @@ function Canvas({ conn }: { conn: Connection }) {
       case "bands": if (current) setBandsOpen(true); return;
       case "routines": if (current) setRoutinesOpen(true); return;
       case "approvals": setApprovalsOpen(true); return;
+      case "git": if (current) setGitOpen(true); return;
       case "instructions": setPref("agentsSub", "instructions"); setPref("prefsTab", "agents"); setPrefsOpen(true); return;
       case "theme": setThemePref(nextTheme(getThemePref())); return;
       case "minimap": setMinimap((v) => !v); return;
@@ -944,6 +948,7 @@ function Canvas({ conn }: { conn: Connection }) {
         {transferDialog && <WorkspaceTransferDialog api={api} mode={transferDialog.mode} {...(transferDialog.workspace ? { workspace: transferDialog.workspace } : {})} onImported={(w) => { void refreshList(); setCurrent(w.workspaceId); toast(`Espaço "${w.name}" importado!`, "ok"); }} onClose={() => setTransferDialog(null)} />}
         {menu && <AddMenu presets={presets.filter((p) => p.enabled)}x={menu.x} y={menu.y} onClose={() => setMenu(null)} onPick={(c) => add(c, menu.at)} />}
         {dialog && <NewTerminalDialog presets={presets.filter((p) => p.enabled)}roles={roles} defaultCwd={snap?.workspace.cwd || homeDir} onClose={() => { setDialog(null); setTool("select"); }} onCreate={(i) => createTerminal(dialog.rect, i)} onManageRoles={() => setRolesDialog(true)} tmux={features.includes("terminal.tmux")} iso={isoSupport} />}
+        {gitOpen && snap && <GitPanel api={api} workspaceId={snap.workspace.workspaceId} onClose={() => setGitOpen(false)} onOpenFile={(rel) => setPreview(rel)} />}
         {preview && snap && <FilePreview api={api} workspaceId={snap.workspace.workspaceId} path={preview} onClose={() => setPreview(null)} onOpenNote={(rel) => { setPreview(null); void mutate((r) => api.createNode(snap.workspace.workspaceId, { expectedRevision: r, kind: "note", geometry: { ...freeSpot(snap.nodes, { w: 360, h: 260 }), w: 360, h: 260 }, filePath: `${snap.workspace.cwd}/${rel}` })); }} />}
         {floorDialog && <FloorDialog ground={floorDialog} api={api} onSubmit={(i) => void submitFloor(floorDialog, i)} onClose={() => setFloorDialog(null)} />}
         {overview && groundOf(overview) && <FloorOverview ground={groundOf(overview)!} floors={side.workspaces.filter((w) => w.parentId === overview)} current={current} terminals={side.terminals} api={api} stream={stream}

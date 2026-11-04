@@ -36,6 +36,8 @@ const RULES: Rule[] = [
   ["GET", "/v1/workspaces/:id/tree", r("files:read", "ws")],
   ["GET", "/v1/workspaces/:id/file", r("files:read", "ws")],
   ["GET", "/v1/workspaces/:id/search", r("files:read", "ws")],
+  ["GET", "/v1/workspaces/:id/git", r("files:read", "ws")], ["GET", "/v1/workspaces/:id/git/log", r("files:read", "ws")], ["GET", "/v1/workspaces/:id/git/diff", r("files:read", "ws")], // #30 leitura; commit/pull/push/branch/merge: só o app (agentes usam o git no próprio terminal)
+  ["POST", "/v1/workspaces/:id/git/commit", D], ["POST", "/v1/workspaces/:id/git/branch", D], ["POST", "/v1/workspaces/:id/git/checkout", D], ["POST", "/v1/workspaces/:id/git/merge", D], ["POST", "/v1/workspaces/:id/git/pull", D], ["POST", "/v1/workspaces/:id/git/push", D],
   ["GET", "/v1/workspaces/:id/instructions", r("files:read", "ws")],
   ["GET", "/v1/nodes/:id/files", r("files:read", "node")],
   ["GET", "/v1/chat-attachments/:id/raw", r("files:read")],

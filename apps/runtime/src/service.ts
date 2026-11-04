@@ -8,6 +8,9 @@ import type { AgentCapability, IssueAgentTokenInput, AgentTokenInfo, Approval, C
 import { ISOLATED_APPROVABLE_CAPS, ISOLATED_DEFAULT_CAPS, validateIsolation } from "@messai/domain";
 import { buildIsolatedPlan, probeIsolation } from "./isolation.js";
 import { readProcTree } from "./procs.js";
+import * as gitops from "./git.js";
+import { isSafeRef } from "./git.js";
+import type { GitInfo, GitCommitEntry, GitDiff, GitOpResult, GitCommitInput, GitBranchInput, GitCheckoutInput, GitMergeInput, GitPushInput } from "@messai/contracts";
 import type { SessionProcs, KillProcInput } from "@messai/contracts";
 import { listProviders } from "./providers.js";
 import { probeAccounts } from "./accounts.js";
@@ -1007,10 +1010,10 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const n = readSync(fd, buf, 0, buf.length, 0);
     closeSync(fd);
     const head = buf.subarray(0, n);
-    if (looksBinary(head)) return succeed({ path: p.value.rel, size: st.size, binary: true, truncated: false });
-    return succeed({ path: p.value.rel, size: st.size, binary: false, text: head.toString("utf8"), truncated: st.size > LIMIT });
+    if (looksBinary(head)) return succeed({ path: p.value.rel, size: st.size, binary: true, truncated: false, mtimeMs: st.mtimeMs });
+    return succeed({ path: p.value.rel, size: st.size, binary: false, text: head.toString("utf8"), truncated: st.size > LIMIT, mtimeMs: st.mtimeMs });
   }
-  fsOp(workspaceId: string, input: FsOp): Result<{ path: string }> {
+  fsOp(workspaceId: string, input: FsOp): Result<{ path: string; mtimeMs?: number }> {
     const root = this.wsRoot(workspaceId); if (!root.ok) return root;
     const rejectSymlinkLeaf = input.op !== "delete";
     const p = this.resolveIn(root.value, input.path, { rejectSymlinkLeaf }); if (!p.ok) return p;
@@ -1037,6 +1040,8 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       } else if (input.op === "write") {
         const safeTarget = ensureSafeParent(p.value.abs);
         if (!safeTarget.ok) return safeTarget;
+        // editor (#30): se o arquivo mudou no disco desde a leitura (outro agente/ferramenta), recusa em vez de sobrescrever em silêncio
+        if (input.expectedMtimeMs !== undefined && existsSync(safeTarget.value) && Math.abs(statSync(safeTarget.value).mtimeMs - input.expectedMtimeMs) > 1) return fail("CONFLICT", "o arquivo mudou no disco desde que foi aberto");
         const fd = openSync(safeTarget.value, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | fsConstants.O_NOFOLLOW, 0o644);
         try {
           const data = Buffer.from(input.text ?? "", "utf8");
@@ -1044,6 +1049,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
         } finally {
           closeSync(fd);
         }
+        return succeed({ path: p.value.rel, mtimeMs: statSync(safeTarget.value).mtimeMs });
       } else if (input.op === "rename") {
         if (!input.to) return fail("INVALID", "destino obrigatório");
         const t = this.resolveIn(root.value, input.to, { rejectSymlinkLeaf: true });
@@ -1075,6 +1081,49 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       return fail("INTERNAL", String((e as Error).message ?? e));
     }
     return succeed({ path: p.value.rel });
+  }
+  // ---- #30 git do espaço (raiz do espaço; andar = worktree) ----
+  private gitRoot(workspaceId: string): Result<string> { const r = this.wsRoot(workspaceId); return r.ok ? succeed(r.value) : r; }
+  private gitPath(root: string, p: string): Result<string> { const r = this.resolveIn(root, p); if (!r.ok) return r; if (!r.value.rel) return fail("INVALID", "caminho inválido"); return succeed(r.value.rel); }
+  private afterGitWrite(root: string): void { this.gitStatusCache.delete(root); }
+  async gitInfo(workspaceId: string): Promise<Result<GitInfo>> { const r = this.gitRoot(workspaceId); if (!r.ok) return r; return succeed(await gitops.gitInfo(r.value)); }
+  async gitLog(workspaceId: string, limit: number, path?: string): Promise<Result<GitCommitEntry[]>> {
+    const r = this.gitRoot(workspaceId); if (!r.ok) return r;
+    let rel: string | undefined; if (path) { const p = this.gitPath(r.value, path); if (!p.ok) return p; rel = p.value; }
+    return succeed(await gitops.gitLog(r.value, limit, rel));
+  }
+  async gitDiff(workspaceId: string, path?: string): Promise<Result<GitDiff>> {
+    const r = this.gitRoot(workspaceId); if (!r.ok) return r;
+    let rel: string | undefined; if (path) { const p = this.gitPath(r.value, path); if (!p.ok) return p; rel = p.value; }
+    return succeed(await gitops.gitDiff(r.value, rel));
+  }
+  private async gitMutate(workspaceId: string, fn: (root: string) => Promise<GitOpResult>): Promise<Result<GitOpResult>> {
+    const r = this.gitRoot(workspaceId); if (!r.ok) return r;
+    if (!(await gitops.gitInfo(r.value)).isRepo) return fail("INVALID", "esta pasta não é um repositório git");
+    const res = await fn(r.value); this.afterGitWrite(r.value); return succeed(res);
+  }
+  async gitCommit(workspaceId: string, input: GitCommitInput): Promise<Result<GitOpResult>> {
+    const root = this.gitRoot(workspaceId); if (!root.ok) return root;
+    const paths: string[] = [];
+    for (const p of input.paths ?? []) { const v = this.gitPath(root.value, p); if (!v.ok) return v; paths.push(v.value); }
+    return this.gitMutate(workspaceId, (rt) => gitops.gitCommit(rt, input.message, paths));
+  }
+  async gitBranch(workspaceId: string, input: GitBranchInput): Promise<Result<GitOpResult>> {
+    if (!isSafeRef(input.name) || (input.from && !isSafeRef(input.from))) return fail("INVALID", "nome de branch inválido");
+    return this.gitMutate(workspaceId, (rt) => gitops.gitCreateBranch(rt, input.name, input.from));
+  }
+  async gitCheckout(workspaceId: string, input: GitCheckoutInput): Promise<Result<GitOpResult>> {
+    if (!isSafeRef(input.branch)) return fail("INVALID", "nome de branch inválido");
+    return this.gitMutate(workspaceId, (rt) => gitops.gitCheckout(rt, input.branch));
+  }
+  async gitMerge(workspaceId: string, input: GitMergeInput): Promise<Result<GitOpResult>> {
+    if (input.abort) return this.gitMutate(workspaceId, (rt) => gitops.gitMergeAbort(rt));
+    if (!input.branch || !isSafeRef(input.branch)) return fail("INVALID", "nome de branch inválido");
+    const b = input.branch; return this.gitMutate(workspaceId, (rt) => gitops.gitMerge(rt, b));
+  }
+  async gitPull(workspaceId: string): Promise<Result<GitOpResult>> { return this.gitMutate(workspaceId, (rt) => gitops.gitPull(rt)); }
+  async gitPush(workspaceId: string, input: GitPushInput): Promise<Result<GitOpResult>> {
+    return this.gitMutate(workspaceId, async (rt) => gitops.gitPush(rt, !!input.setUpstream, (await gitops.gitInfo(rt)).branch));
   }
   /** Busca por nome (substring) ou, com `content`, por conteúdo (grep -rnI, até 200 linhas). */
   async searchFiles(workspaceId: string, q: string, content: boolean): Promise<Result<SearchHit[]>> {

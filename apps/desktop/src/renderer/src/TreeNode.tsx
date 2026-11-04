@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
-import { ArrowLeft, ArrowRight, ArrowUp, Folder, FolderOpen, FileText, File as FileIcon, FileCode2, Image as ImageIcon, LayoutList, LayoutGrid, RefreshCw, FolderPlus, FilePlus, Search, Home } from "lucide-react";
+import { ArrowLeft, ArrowRight, ArrowUp, Folder, FolderOpen, FileText, File as FileIcon, FileCode2, Image as ImageIcon, LayoutList, LayoutGrid, RefreshCw, FolderPlus, FilePlus, Search, Home, GitBranch } from "lucide-react";
 import type { TreeEntry, SearchHit } from "@messai/contracts";
 import type { Api } from "./api.js";
 import type { NodeExtras } from "./TerminalNode.js";
@@ -11,7 +11,7 @@ export type TreeState = { root: string; mode: "list" | "grid" };
 export type TreeData = {
   title: string; content: string; workspaceId: string; api: Api;
   onChange: (content: string) => void; onDelete: () => void; onRename: (t: string) => void;
-  onOpenNote: (relPath: string) => void; onPreview: (relPath: string) => void; toast: (m: string) => void; editSignal?: number;
+  onOpenNote: (relPath: string) => void; onPreview: (relPath: string) => void; onGit?: () => void; toast: (m: string) => void; editSignal?: number;
 } & NodeExtras;
 
 const parse = (c: string): TreeState => { try { const j = JSON.parse(c) as Partial<TreeState>; return { root: j.root ?? "", mode: j.mode === "grid" ? "grid" : "list" }; } catch { return { root: "", mode: "list" }; } };
@@ -75,6 +75,7 @@ function TreeNodeImpl({ id, data, selected }: NodeProps & { data: TreeData }) {
         <button className={`ib nodrag ${state.mode === "list" ? "on" : ""}`} title="Lista" onClick={() => commit({ ...state, mode: "list" })}><LayoutList size={13} /></button>
         <button className={`ib nodrag ${state.mode === "grid" ? "on" : ""}`} title="Grade de ícones" data-testid="tree-grid" onClick={() => commit({ ...state, mode: "grid" })}><LayoutGrid size={13} /></button>
         <button className="ib nodrag" title="Atualizar" onClick={refresh}><RefreshCw size={13} /></button>
+        {data.onGit && <button className="ib nodrag" title="Git do espaço (commit, branch, merge, pull/push)" data-testid="tree-git-btn" onClick={data.onGit}><GitBranch size={13} /></button>}
         <button className="ib nodrag" title="Nova pasta aqui" onClick={() => mk("mkdir", state.root)}><FolderPlus size={13} /></button>
         <button className="ib nodrag" title="Novo arquivo aqui" onClick={() => mk("touch", state.root)}><FilePlus size={13} /></button>
         <button className="ib nodrag" title="Remover nó" onClick={data.onDelete}>✕</button>

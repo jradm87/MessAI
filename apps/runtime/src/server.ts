@@ -3,7 +3,7 @@ import websocket from "@fastify/websocket";
 import { Value } from "@sinclair/typebox/value";
 import type { WebSocket } from "ws";
 import {
-  BUILD_VERSION, PROTOCOL_VERSION, SendMessage, Ask, CreateConnection, CreateDrawing, CreateNode, CreateWorkspace, DeleteNode, PatchNode, PatchWorkspace, ApplyLayout, WsClientMessage,
+  BUILD_VERSION, PROTOCOL_VERSION, GitCommitInput, GitBranchInput, GitCheckoutInput, GitMergeInput, GitPushInput, SendMessage, Ask, CreateConnection, CreateDrawing, CreateNode, CreateWorkspace, DeleteNode, PatchNode, PatchWorkspace, ApplyLayout, WsClientMessage,
   type Capabilities, type WsServerMessage, type ApiError,
  CreateFolder, PatchFolder, CreateAttachment, SendChat, CreateRole, PatchRole, PatchConnection, PatchDrawing, GroupDrawings, CreateFloor, LandFloor, PutFloorHooks, RunFloorHookInput, StopFloorHookInput, PutFloorExcludes, CreateFloorPrInput, PatchFloorPrInput, PutGitHostsInput, PutEnvVarsInput, PreviewWorkspaceImportInput, ImportWorkspaceInput, DuplicateWorkspaceInput, SendNotifyInput, CreateRoutineInput, PatchRoutineInput, FsOp, PatchRuntimeSettings, PutPresets, CreateSkill, PatchSkill, CreateApproval, DecideApproval, BackupInput, RestoreInput, MoveDataInput, ResetInput, CreateNodeGroup, PatchNodeGroup, SaveScore, PatchScore, PlaceScore, CreateBand, PatchBand, AskBand, MaestroRecruit, MaestroTarget, MaestroAssign, ExportAttachment, PutInstructions, SyncInstructions, KillProcInput, IssueAgentTokenInput, type PresetInput, type Preset } from "@messai/contracts";
 import type { Result } from "@messai/domain";
@@ -171,6 +171,16 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
   app.get<{ Params: { id: string }; Querystring: { path?: string } }>("/v1/workspaces/:id/tree", async (req, reply) => send(reply, await svc.listTree(req.params.id, req.query.path ?? "")));
   app.get<{ Params: { id: string }; Querystring: { path?: string } }>("/v1/workspaces/:id/file", async (req, reply) => send(reply, svc.readFile(req.params.id, req.query.path ?? "")));
   app.post<{ Params: { id: string } }>("/v1/workspaces/:id/fs", async (req, reply) => { const b = body<FsOp>(FsOp, req.body); if ("code" in b) return invalid(reply, b); return send(reply, svc.fsOp(req.params.id, b)); });
+  // #30 git do espaço
+  app.get<{ Params: { id: string } }>("/v1/workspaces/:id/git", async (req, reply) => send(reply, await svc.gitInfo(req.params.id)));
+  app.get<{ Params: { id: string }; Querystring: { limit?: string; path?: string } }>("/v1/workspaces/:id/git/log", async (req, reply) => send(reply, await svc.gitLog(req.params.id, Number(req.query.limit ?? 50) || 50, req.query.path)));
+  app.get<{ Params: { id: string }; Querystring: { path?: string } }>("/v1/workspaces/:id/git/diff", async (req, reply) => send(reply, await svc.gitDiff(req.params.id, req.query.path)));
+  app.post<{ Params: { id: string } }>("/v1/workspaces/:id/git/commit", async (req, reply) => { const b = body<GitCommitInput>(GitCommitInput, req.body); if ("code" in b) return invalid(reply, b); return send(reply, await svc.gitCommit(req.params.id, b)); });
+  app.post<{ Params: { id: string } }>("/v1/workspaces/:id/git/branch", async (req, reply) => { const b = body<GitBranchInput>(GitBranchInput, req.body); if ("code" in b) return invalid(reply, b); return send(reply, await svc.gitBranch(req.params.id, b)); });
+  app.post<{ Params: { id: string } }>("/v1/workspaces/:id/git/checkout", async (req, reply) => { const b = body<GitCheckoutInput>(GitCheckoutInput, req.body); if ("code" in b) return invalid(reply, b); return send(reply, await svc.gitCheckout(req.params.id, b)); });
+  app.post<{ Params: { id: string } }>("/v1/workspaces/:id/git/merge", async (req, reply) => { const b = body<GitMergeInput>(GitMergeInput, req.body ?? {}); if ("code" in b) return invalid(reply, b); return send(reply, await svc.gitMerge(req.params.id, b)); });
+  app.post<{ Params: { id: string } }>("/v1/workspaces/:id/git/pull", async (req, reply) => send(reply, await svc.gitPull(req.params.id)));
+  app.post<{ Params: { id: string } }>("/v1/workspaces/:id/git/push", async (req, reply) => { const b = body<GitPushInput>(GitPushInput, req.body ?? {}); if ("code" in b) return invalid(reply, b); return send(reply, await svc.gitPush(req.params.id, b)); });
   app.get<{ Params: { id: string }; Querystring: { q?: string; content?: string } }>("/v1/workspaces/:id/search", async (req, reply) => send(reply, await svc.searchFiles(req.params.id, req.query.q ?? "", req.query.content === "1")));
 
   // andares (floors)
