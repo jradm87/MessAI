@@ -22,7 +22,7 @@ import { probeAccounts } from "./accounts.js";
 import { backupName, copyBackupFiles, dataStats, isBackupName, listBackups, validateBackup, validateMoveTarget, writeManifest, type BackupEntry } from "./data.js";
 import { BUILD_VERSION } from "@messai/contracts";
 import { defaultPresets, parsePresets, validatePresets, PRESETS_META_KEY } from "./presets.js";
-import { applyRole, withIsolatedClaudeAutonomy, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, DEFAULT_FLOOR_EXCLUDES, normalizeFloorExcludes, shouldExcludeFloorDir, parseGitRemote, buildPrCompareUrl, normalizeEnvVars, mergeEnvLayers, safeRelPath, isWithinCanonicalRoot, looksBinary, canMessage, checkRevision, formatDelivery, normalizeGeometry, planLocalTerminal, resolveNodeRef, resolveCrossNodeRef, validateNewNode, agentKind, agentResume, stripAnsi, fail, succeed, type Result, applySkills, skillsText, placeGeometries, connectionsWithin } from "@messai/domain";
+import { applyRole, withClaudeAutonomy, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, DEFAULT_FLOOR_EXCLUDES, normalizeFloorExcludes, shouldExcludeFloorDir, parseGitRemote, buildPrCompareUrl, normalizeEnvVars, mergeEnvLayers, safeRelPath, isWithinCanonicalRoot, looksBinary, canMessage, checkRevision, formatDelivery, normalizeGeometry, planLocalTerminal, resolveNodeRef, resolveCrossNodeRef, validateNewNode, agentKind, agentResume, stripAnsi, fail, succeed, type Result, applySkills, skillsText, placeGeometries, connectionsWithin } from "@messai/domain";
 import { createHash, randomUUID, randomBytes, timingSafeEqual } from "node:crypto";
 import { Companion } from "./companion.js";
 import type { Store } from "@messai/storage";
@@ -2044,7 +2044,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     };
     if (agentKind(s.command, s.args).agentType === "claudeCode") this.ensureClaudeTrust(s.cwd); // #6 pré-confia a pasta: evita o diálogo de trust (cujo default "No, exit" o briefing fechava)
     // Claude autônomo SÓ quando isolado (#93): no sandbox do MessAI o agente roda sem as perguntas de permissão do Claude Code; fora dele, mantém.
-    const termArgs = withIsolatedClaudeAutonomy(s.command, applySkills(s.command, applyRole(s.command, s.args, role), skills), !!node.isolation);
+    const termArgs = withClaudeAutonomy(s.command, applySkills(s.command, applyRole(s.command, s.args, role), skills));
     let plan = planLocalTerminal({ command: s.command, args: termArgs, cwd: s.cwd, defaultShell: this.cfg.defaultShell, baseEnv, inject });
     // #93 modo isolado: bubblewrap por fora (e tmux, se persistente, por fora dele). Falha FECHADA se o isolamento não for possível.
     if (node.kind === "terminal" && node.isolation) {
@@ -3232,7 +3232,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       let b = this.findBand(w.workspaceId, input.band);
       if (!b.ok && b.error.code === "NOT_FOUND") b = this.createBand(w.workspaceId, { name: input.band });
       if (!b.ok) return b;
-      const pb = this.patchBand(b.value.bandId, { addNodeIds: [node.nodeId, ...(b.value.nodeIds.includes(maestro.nodeId) ? [] : [maestro.nodeId])] });
+      const pb = this.patchBand(b.value.bandId, { addNodeIds: [node.nodeId] }); // só o recrutado entra na banda — o Maestro conduz, não é membro (senão agrupar a banda esconderia o condutor)
       if (!pb.ok) return pb;
       bandId = pb.value.bandId;
     }

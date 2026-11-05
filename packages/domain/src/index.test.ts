@@ -1,5 +1,5 @@
 import {  describe, expect, it } from "vitest";
-import { canMessage, formatDelivery, resolveNodeRef, parseCrossRef, resolveCrossNodeRef, parseGitRemote, buildPrCompareUrl, canWrite, checkRevision, decideLease, normalizeGeometry, trimBuffer, MAX_BUFFER_BYTES, applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxAttachPlan, shellQuote, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, alignGeometries, gridLayout, agentKind, agentResume, stripAnsi, normalizePortalUrl, parsePortal, portalKey, serializePortal, androidInputText, androidKey, isAdbSerial, isAndroidActivity, isAndroidPackage, isAvdName, parseAdbDevices, parseAndroidFocus, parseAndroidPackages, parseUiDump, parseWmSize, pngSize, uiNodeAt, withIsolatedClaudeAutonomy, rectBorderToward, floatingEnds, borderSide, treeLayout, pushOutsideRect } from "./index.js";
+import { canMessage, formatDelivery, resolveNodeRef, parseCrossRef, resolveCrossNodeRef, parseGitRemote, buildPrCompareUrl, canWrite, checkRevision, decideLease, normalizeGeometry, trimBuffer, MAX_BUFFER_BYTES, applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxAttachPlan, shellQuote, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, alignGeometries, gridLayout, agentKind, agentResume, stripAnsi, normalizePortalUrl, parsePortal, portalKey, serializePortal, androidInputText, androidKey, isAdbSerial, isAndroidActivity, isAndroidPackage, isAvdName, parseAdbDevices, parseAndroidFocus, parseAndroidPackages, parseUiDump, parseWmSize, pngSize, uiNodeAt, withClaudeAutonomy, rectBorderToward, floatingEnds, borderSide, treeLayout, pushOutsideRect } from "./index.js";
 
 describe("revisão", () => {
   it("aceita revisão igual e devolve próxima", () => {
@@ -382,13 +382,13 @@ describe("dispositivos Android (#73)", () => {
   });
 });
 
-describe("Claude autônomo só quando isolado (#29/#93)", () => {
-  it("adiciona --dangerously-skip-permissions só p/ claude isolado; nunca fora do isolado nem p/ outros agentes", () => {
-    expect(withIsolatedClaudeAutonomy("claude", ["--append-system-prompt", "x"], true)).toContain("--dangerously-skip-permissions");
-    expect(withIsolatedClaudeAutonomy("claude", [], false)).toEqual([]); // fora do isolado: mantém
-    expect(withIsolatedClaudeAutonomy("codex", [], true)).toEqual([]); // outro agente: não mexe
-    expect(withIsolatedClaudeAutonomy("/bin/sh", [], true)).toEqual([]); // shell: não mexe
-    expect(withIsolatedClaudeAutonomy("claude", ["--dangerously-skip-permissions"], true)).toEqual(["--dangerously-skip-permissions"]); // não duplica
+describe("Claude autônomo sempre (#29, igual Maestri)", () => {
+  it("adiciona --dangerously-skip-permissions p/ claude (mesmo fora do isolado); nunca p/ outros agentes", () => {
+    expect(withClaudeAutonomy("claude", ["--append-system-prompt", "x"])).toContain("--dangerously-skip-permissions");
+    expect(withClaudeAutonomy("claude", [])).toEqual(["--dangerously-skip-permissions"]); // autônomo mesmo fora do isolado
+    expect(withClaudeAutonomy("codex", [])).toEqual([]); // outro agente: não mexe
+    expect(withClaudeAutonomy("/bin/sh", [])).toEqual([]); // shell: não mexe
+    expect(withClaudeAutonomy("claude", ["--dangerously-skip-permissions"])).toEqual(["--dangerously-skip-permissions"]); // não duplica
   });
 });
 

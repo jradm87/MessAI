@@ -15,11 +15,12 @@ You can only conduct if your terminal has the **Maestro** capability. Turn it on
 ```
 mess maestro recruit --preset <id> --name "<Name>"        # recruit a terminal from a preset (claude|codex|opencode|antigravity|shell)
 mess maestro recruit --command "<cmd>" --arg a --arg b --name "<Name>"
-mess maestro dismiss <id|title>                            # end and remove a terminal you recruited
+mess maestro dismiss <id|title>                            # end and remove a TERMINAL you recruited
 mess maestro assign <id|title> <roleName|->                # (re)assign a role; `-` removes it
+mess close <id|title>                                      # delete a NON-terminal node (note / portal / device / binder)
 ```
 
-Recruited terminals are **auto-linked to you** and placed in a free spot (no overlap).
+Recruited terminals are **auto-linked to you** and placed in a free spot (no overlap). To clean up: a **terminal** goes via `mess maestro dismiss`; a **note, portal or device** goes via `mess close` (terminals are refused by `close` on purpose).
 
 ### Roles must pre-exist
 

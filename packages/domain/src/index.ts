@@ -836,9 +836,9 @@ export function pngSize(buf: Uint8Array): { w: number; h: number } | null {
   const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength); return { w: dv.getUint32(16), h: dv.getUint32(20) };
 }
 
-/** #29/#93 — Claude autônomo só quando isolado: dentro do sandbox do MessAI o Claude roda sem as perguntas de permissão; fora dele, mantém. */
-export function withIsolatedClaudeAutonomy(command: string, args: string[], isolated: boolean): string[] {
-  if (!isolated) return args;
+/** #29 — Claude Code autônomo (igual ao Codex e ao Maestri): roda sem as perguntas de permissão, MESMO fora do modo isolado.
+ * A autonomia vem da flag, não do sandbox — assim o Claude recrutado trabalha sozinho e online (o isolado quebrava a rede/credencial). */
+export function withClaudeAutonomy(command: string, args: string[]): string[] {
   if (agentKind(command, args).agentType !== "claudeCode") return args;
   if (args.includes("--dangerously-skip-permissions")) return args;
   return [...args, "--dangerously-skip-permissions"];

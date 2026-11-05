@@ -308,14 +308,23 @@ function Canvas({ conn }: { conn: Connection }) {
   const groupBand = async (bandId: string) => {
     const sn = snapRef.current; if (!sn || !current) return;
     const band = (sn.bands ?? []).find((b) => b.bandId === bandId); if (!band) return;
-    const childIds = band.nodeIds.filter((id) => sn.nodes.some((o) => o.nodeId === id && o.kind === "terminal"));
-    if (childIds.length < 1) { toast("A banda não tem terminais para agrupar"); return; }
+    // nunca empilhar um nó Maestro (condutor) — senão o terminal principal sumiria dentro da pilha
+    const childIds = band.nodeIds.filter((id) => sn.nodes.some((o) => o.nodeId === id && o.kind === "terminal" && !o.maestro));
+    if (childIds.length < 1) { toast("A banda não tem terminais (fora o condutor) para agrupar"); return; }
     if (sn.nodes.some((o) => o.kind === "stack" && parseStack(o.content).bandId === bandId)) { toast("Essa banda já está agrupada"); return; }
     const content = serializeStack({ childIds, active: childIds[0]!, bandId });
-    // posiciona em espaço livre (à direita dos nós que continuam visíveis — os membros viram a pilha e somem), sem sobrepor nada
-    const others = sn.nodes.filter((o) => !childIds.includes(o.nodeId));
-    const geo = freeSpot(others, { w: 760, h: 460 });
-    await mutate((r) => api.createNode(current, { expectedRevision: r, kind: "stack", title: band.name, content, geometry: geo }));
+    // a pilha nasce ONDE os membros estavam (eles somem ao agrupar, então o espaço fica livre) — fica na vista, não fora da tela
+    const members = sn.nodes.filter((o) => childIds.includes(o.nodeId));
+    const minX = Math.min(...members.map((m) => m.geometry.x)), minY = Math.min(...members.map((m) => m.geometry.y));
+    const W = 760, H = 460;
+    // se outro nó visível ocupa esse ponto, desloca pra um espaço livre; senão fica no canto dos membros
+    const others = sn.nodes.filter((o) => !childIds.includes(o.nodeId) && o.kind !== "stack");
+    const overlaps = others.some((o) => minX < o.geometry.x + o.geometry.w && minX + W > o.geometry.x && minY < o.geometry.y + o.geometry.h && minY + H > o.geometry.y);
+    const geo = overlaps ? freeSpot(sn.nodes.filter((o) => !childIds.includes(o.nodeId)), { w: W, h: H }) : { x: minX, y: minY, w: W, h: H };
+    try {
+      const made = await runOp((r) => api.createNode(current, { expectedRevision: r, kind: "stack", title: band.name, content, geometry: geo }));
+      pendingFocus.current = made.node.nodeId; // traz a pilha para a vista assim que aparecer
+    } catch { /* runOp já avisou */ }
   };
   /** Desfaz a pilha: o nó some e os terminais voltam ao canvas (nas posições que tinham). */
   const ungroupStack = async (n: Node) => { if (!current) return; await mutate((r) => api.deleteNode(n.nodeId, r)); };

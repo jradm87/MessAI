@@ -46,6 +46,7 @@ try {
   mess note append <id|título> <texto>
   mess note path <id|título>        caminho do arquivo .md da nota (edite direto se preferir)
   mess connect <id|título>          liga seu nó a outro nó
+  mess close <id|título>            apaga uma nota/portal/dispositivo (terminal: use mess maestro dismiss)
   mess peers                        terminais conectados a você (com quem pode falar)
   mess ask <id|título> <texto>      pergunta a um nó conectado e ESPERA a resposta (última tela)
                                       [--no-wait] só dispara · [--timeout seg] tempo máx. de espera
@@ -454,6 +455,16 @@ try {
       const [ref, role] = args; if (!ref || !role) throw new Error("uso: mess maestro assign <nó> <papel|->");
       const r = await call<Node>("POST", `/v1/nodes/${nodeId}/maestro/assign`, { ref, roleName: role === "-" ? null : role }); console.log(`"${r.title}": ${role === "-" ? "sem papel" : `papel ${role}`}`);
     } else throw new Error("uso: mess maestro recruit|dismiss|assign");
+  } else if (cmd === "close" || cmd === "delete" || cmd === "rm") {
+    // apaga um nó não-terminal do espaço (nota, portal, dispositivo, fichário…); terminais vão por `mess maestro dismiss`
+    const ref = [sub, ...rest].filter((a): a is string => a !== undefined).join(" ").trim();
+    if (!ref) throw new Error("uso: mess close <id|título>  (nota/portal/dispositivo) — terminal: use mess maestro dismiss");
+    const s = await snapshot();
+    const n = findNode(s.nodes, ref);
+    if (!n) throw new Error(`nó não encontrado: ${ref}`);
+    if (n.kind === "terminal") throw new Error(`"${n.title}" é um terminal — use: mess maestro dismiss "${n.title}"`);
+    await call("DELETE", `/v1/nodes/${n.nodeId}`, { expectedRevision: s.workspace.revision });
+    console.log(`apagado: ${n.kind} "${n.title}"`);
   } else if (cmd === "connect") {
     if (!nodeId) throw new Error("sem MESS_NODE_ID");
     const targetRef = [sub, ...rest].filter((a): a is string => a !== undefined).join(" ").trim();
