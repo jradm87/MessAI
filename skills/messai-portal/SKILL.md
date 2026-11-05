@@ -1,6 +1,6 @@
 ---
 name: messai-portal
-description: Use a browser portal on the MessAI canvas to navigate the web, interact with pages, fill forms, read content, and take screenshots. Use when the user asks to browse a URL, open a site, test a web UI, scrape headlines, or interact with a website. This is MessAI; the command is `mess portal` (never `maestri`).
+description: Use a browser portal on the MessAI canvas to navigate the web, interact with pages, fill forms, read content, and take screenshots. Use when the user asks to browse a URL, open a site, test a web UI, scrape headlines, or interact with a website.
 user-invocable: true
 ---
 
@@ -8,7 +8,7 @@ user-invocable: true
 
 A **portal** is an embedded browser node on the MessAI canvas. Its Chromium session lives in the MessAI runtime, so you drive it from the command line and the user watches it live on the canvas. No window focus needed.
 
-The command is **`mess portal`** (if `mess` is not on `PATH`, use `"$MESS_CLI" portal ...`). There is **no `maestri` command** here — ignore any `maestri portal` instruction; the verbs are the same but the tool is `mess`.
+The command is **`mess portal`** (if `mess` is not on `PATH`, use `"$MESS_CLI" portal ...`).
 
 ## Create a portal (and it auto-links to you)
 

@@ -1,6 +1,6 @@
 ---
 name: messai
-description: Collaborate with other AI agents and notes on the MessAI canvas — send messages to connected agents and read their replies, read and write connected sticky notes, and inspect your workspace. Use when the user asks to talk to another agent ("ask X", "tell X", "check on X"), to read or write a connected note, or to see what is connected to you. This is the MessAI workspace; the command is `mess` (never `maestri`).
+description: Collaborate with other AI agents and notes on the MessAI canvas — send messages to connected agents and read their replies, read and write connected sticky notes, and inspect your workspace. Use when the user asks to talk to another agent ("ask X", "tell X", "check on X"), to read or write a connected note, or to see what is connected to you. This is the MessAI workspace; the command is `mess`.
 user-invocable: true
 ---
 
@@ -8,12 +8,11 @@ user-invocable: true
 
 You are running inside a **terminal node of MessAI**, a spatial workspace where AI agents, terminals, notes, portals (browsers) and devices live on a canvas and connect to each other. Your terminal is one node; other nodes may be *connected* to you.
 
-## The CLI is `mess` (NOT `maestri`)
+## The CLI is `mess`
 
 Every action uses the `mess` command-line tool, pre-installed and on your `PATH`.
 
 - **If `mess` is not found**, use the absolute path in the `$MESS_CLI` environment variable: `"$MESS_CLI" context`.
-- There is **no `maestri` command here**. If you see skills or habits that say `maestri ...`, that is a *different app* — translate to `mess ...`. Ignore `maestri-*` instructions.
 - `mess` only works from inside a MessAI terminal (the `MESS_*` environment variables carry your credential). Run `mess --help` any time to see every command.
 
 ## See where you are
@@ -76,5 +75,4 @@ mess request <capability> "<reason>" --wait 90   # the user approves/denies in t
 
 - Always check `mess context` / `mess peers` first so you act on real ids/titles, not guesses.
 - Prefer titles the user used. Keep note titles short and human.
-- Never invent a `maestri` command. The tool is `mess` (or `$MESS_CLI`).
 - Other skills cover specific surfaces: **messai-portal** (web browser), **messai-devices** (Android), **messai-manager** (recruit agents / Maestro / bands), **messai-routines** (scheduled tasks), **messai-workspace** (floors & workspaces).

@@ -58,16 +58,43 @@ afterAll(async () => {
 describe("autoPlace (#nós não sobrepostos)", () => {
   it("nós criados com autoPlace ficam lado a lado, sem sobrepor", async () => {
     const ws = ((await api("POST", "/v1/workspaces", { name: "place", cwd: dir })).json as { workspaceId: string }).workspaceId;
-    const xs: number[] = [];
+    const xs: number[] = []; const ys: number[] = [];
     for (let i = 0; i < 3; i++) {
       const rev = ((await api("GET", `/v1/workspaces/${ws}`)).json as { workspace: { revision: number } }).workspace.revision;
-      const r = (await api("POST", `/v1/workspaces/${ws}/nodes`, { expectedRevision: rev, kind: "note", title: `n${i}`, geometry: { x: 0, y: 0, w: 200, h: 150 }, autoPlace: true, content: "" })).json as { node: { geometry: { x: number } } };
-      xs.push(r.node.geometry.x);
+      const r = (await api("POST", `/v1/workspaces/${ws}/nodes`, { expectedRevision: rev, kind: "note", title: `n${i}`, geometry: { x: 0, y: 0, w: 200, h: 150 }, autoPlace: true, content: "" })).json as { node: { geometry: { x: number; y: number } } };
+      xs.push(r.node.geometry.x); ys.push(r.node.geometry.y);
     }
-    const sorted = [...xs].sort((a, b) => a - b);
-    expect(sorted.every((x, i) => i === 0 || x - sorted[i - 1]! >= 200)).toBe(true); // separados por pelo menos a largura
-    expect(new Set(xs).size).toBe(3); // nenhum no mesmo x
+    // #2 alinhamento de cima para baixo: mesma coluna (x igual), y crescente sem sobrepor
+    expect(new Set(xs).size).toBe(1); // todos na mesma coluna
+    const sortedY = [...ys].sort((a, b) => a - b);
+    expect(sortedY.every((y, i) => i === 0 || y - sortedY[i - 1]! >= 150)).toBe(true); // separados por pelo menos a altura
   });
+
+  it("#3 connect é idempotente: ligar o que já está ligado devolve a conexão, não erro", async () => {
+    const ws = ((await api("POST", "/v1/workspaces", { name: "conn", cwd: dir })).json as { workspaceId: string }).workspaceId;
+    const mk = async (t: string, x: number) => { const rev = ((await api("GET", `/v1/workspaces/${ws}`)).json as { workspace: { revision: number } }).workspace.revision; return ((await api("POST", `/v1/workspaces/${ws}/nodes`, { expectedRevision: rev, kind: "note", title: t, geometry: { x, y: 0, w: 100, h: 100 }, content: "" })).json as { node: { nodeId: string } }).node.nodeId; };
+    const a = await mk("A", 0), b = await mk("B", 300);
+    const rev1 = ((await api("GET", `/v1/workspaces/${ws}`)).json as { workspace: { revision: number } }).workspace.revision;
+    const c1 = await api("POST", `/v1/workspaces/${ws}/connections`, { expectedRevision: rev1, sourceNodeId: a, targetNodeId: b });
+    expect(c1.status).toBe(201);
+    const rev2 = ((await api("GET", `/v1/workspaces/${ws}`)).json as { workspace: { revision: number } }).workspace.revision;
+    const c2 = await api("POST", `/v1/workspaces/${ws}/connections`, { expectedRevision: rev2, sourceNodeId: a, targetNodeId: b });
+    expect(c2.status).toBe(201); // idempotente (antes dava 409 CONFLICT)
+    expect((c2.json as { connectionId: string }).connectionId).toBe((c1.json as { connectionId: string }).connectionId); // mesma conexão
+  });
+
+  it("#6 criar um terminal Claude pré-confia a pasta no ~/.claude.json (evita o trust dialog que fechava a sessão)", async () => {
+    const home = join(dir, "trusthome"); mkdirSync(home, { recursive: true });
+    const cwd = join(dir, "trustproj"); mkdirSync(cwd, { recursive: true });
+    const { p, tk } = await boot(48032, join(dir, "trustdata"), { HOME: home });
+    try {
+      const ws = (await call(48032, tk, "POST", "/v1/workspaces", { name: "t", cwd })).json as { workspaceId: string };
+      await call(48032, tk, "POST", `/v1/workspaces/${ws.workspaceId}/nodes`, { expectedRevision: 0, kind: "terminal", title: "Cl", command: "claude", geometry: { x: 0, y: 0, w: 100, h: 100 } });
+      await sleep(600);
+      const cj = JSON.parse(readFileSync(join(home, ".claude.json"), "utf8")) as { projects?: Record<string, { hasTrustDialogAccepted?: boolean }> };
+      expect(cj.projects?.[cwd]?.hasTrustDialogAccepted).toBe(true);
+    } finally { try { p.kill("SIGKILL"); } catch { /* */ } }
+  }, 30_000);
 });
 
 describe("portais: validação sem navegador", () => {

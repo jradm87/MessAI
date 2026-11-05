@@ -2041,6 +2041,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       // Empacotado: o launcher `mess` roda o CLI com o Node do Electron (sem Node do sistema).
       ...(process.env["MESS_RESOURCES"] ? { MESS_ELECTRON: process.execPath } : {}),
     };
+    if (agentKind(s.command, s.args).agentType === "claudeCode") this.ensureClaudeTrust(s.cwd); // #6 pré-confia a pasta: evita o diálogo de trust (cujo default "No, exit" o briefing fechava)
     // Claude autônomo SÓ quando isolado (#93): no sandbox do MessAI o agente roda sem as perguntas de permissão do Claude Code; fora dele, mantém.
     const termArgs = withIsolatedClaudeAutonomy(s.command, applySkills(s.command, applyRole(s.command, s.args, role), skills), !!node.isolation);
     let plan = planLocalTerminal({ command: s.command, args: termArgs, cwd: s.cwd, defaultShell: this.cfg.defaultShell, baseEnv, inject });
@@ -2771,9 +2772,8 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     }
     if (a.workspaceId !== workspaceId && b.workspaceId !== workspaceId) return fail("INVALID", "nós inválidos para este espaço");
     if (a.nodeId === b.nodeId) return fail("INVALID", "um nó não se conecta a si mesmo");
-    if (this.store.listNodeConnections(a.nodeId).some((c) => (c.sourceNodeId === a.nodeId && c.targetNodeId === b.nodeId) || (c.sourceNodeId === b.nodeId && c.targetNodeId === a.nodeId && a.workspaceId !== b.workspaceId))) {
-      return fail("CONFLICT", "conexão já existe");
-    }
+    const existing = this.store.listNodeConnections(a.nodeId).find((c) => (c.sourceNodeId === a.nodeId && c.targetNodeId === b!.nodeId) || (c.sourceNodeId === b!.nodeId && c.targetNodeId === a.nodeId && a.workspaceId !== b!.workspaceId));
+    if (existing) return succeed(existing); // idempotente: ligar o que já está ligado não é erro (agentes repetem o connect por hábito)
     const c: Connection = { connectionId: newId(), workspaceId, sourceNodeId: a.nodeId, targetNodeId: b.nodeId, createdAt: nowIso(), ...(input.label ? { label: input.label } : {}) };
     this.store.transaction(() => { this.store.insertConnection(c); this.store.bumpRevision(workspaceId, rev.value); });
     this.publishConnectionEndpoints(c);
@@ -3149,21 +3149,37 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     if (!ok.ok) return fail("FORBIDDEN", "o condutor só age sobre terminais ligados a ele");
     return succeed(to.value);
   }
+  /**
+   * #6 — Pré-confia a pasta no Claude Code (~/.claude.json projects[cwd].hasTrustDialogAccepted=true), para o Claude recrutado
+   * não abrir o diálogo "trust this folder" cujo padrão é "No, exit" — o Enter do briefing do Maestro o selecionava e a sessão SAÍA.
+   * É exatamente o que o usuário faria clicando "Yes, I trust". Idempotente e não-fatal.
+   */
+  private ensureClaudeTrust(cwd: string): void {
+    try {
+      const p = join(homedir(), ".claude.json");
+      const j = existsSync(p) ? JSON.parse(readFileSync(p, "utf8")) as { projects?: Record<string, Record<string, unknown>> } : {};
+      j.projects ??= {};
+      const cur = j.projects[cwd] ?? {};
+      if (cur["hasTrustDialogAccepted"] === true) return; // já confiável
+      j.projects[cwd] = { ...cur, hasTrustDialogAccepted: true };
+      writeFileSync(p, JSON.stringify(j, null, 2));
+    } catch { /* não bloqueia o spawn se o json estiver indisponível/em uso */ }
+  }
   /** Uma posição que NÃO sobrepõe nenhum nó existente: à direita de tudo, no topo. Simples e nunca colide (usado por agentes/CLI via autoPlace). */
   private placeFree(nodes: Node[], w: number, h: number): Node["geometry"] {
     const norm = normalizeGeometry({ x: 0, y: 0, w, h });
     if (!nodes.length) return { x: 40, y: 40, w: norm.w, h: norm.h };
-    const right = Math.max(...nodes.map((n) => n.geometry.x + n.geometry.w));
-    const top = Math.min(...nodes.map((n) => n.geometry.y));
-    return { x: right + 40, y: top, w: norm.w, h: norm.h };
+    const left = Math.min(...nodes.map((n) => n.geometry.x));
+    const bottom = Math.max(...nodes.map((n) => n.geometry.y + n.geometry.h));
+    return { x: left, y: bottom + 40, w: norm.w, h: norm.h }; // empilha de cima para baixo (mesma coluna à esquerda)
   }
   private freeSpotNear(anchor: Node, nodes: Node[], w: number, h: number): Node["geometry"] {
-    const x = anchor.geometry.x + anchor.geometry.w + 60;
-    for (let k = 0; k < 40; k++) {
-      const y = anchor.geometry.y + k * (h + 30);
+    const x = anchor.geometry.x; // mesma coluna do condutor
+    for (let k = 1; k < 80; k++) {
+      const y = anchor.geometry.y + k * (anchor.geometry.h + 30); // empilha para baixo
       if (!nodes.some((n) => x < n.geometry.x + n.geometry.w && x + w > n.geometry.x && y < n.geometry.y + n.geometry.h && y + h > n.geometry.y)) return { x, y, w, h };
     }
-    return { x, y: anchor.geometry.y + 40 * (h + 30), w, h };
+    return { x, y: anchor.geometry.y + 80 * (anchor.geometry.h + 30), w, h };
   }
   /** Recruta um terminal (por preset ou comando), liga ao condutor, opcionalmente com papel e numa banda. */
   recruit(maestroId: string, input: MaestroRecruit): Result<{ node: Node; bandId?: string }> {

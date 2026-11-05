@@ -1,12 +1,12 @@
 ---
 name: messai-workspace
-description: Manage MessAI workspaces and floors from the command line — create a floor (isolated worktree) for a task, post its status, land it back when done, export/import/duplicate a workspace, and manage per-workspace environment variables. Use when the user asks to provision a new environment, spin up an isolated floor, land/merge a floor, or set env vars. This is MessAI; the command is `mess` (never `maestri`).
+description: Manage MessAI workspaces and floors from the command line — create a floor (isolated worktree) for a task, post its status, land it back when done, export/import/duplicate a workspace, and manage per-workspace environment variables. Use when the user asks to provision a new environment, spin up an isolated floor, land/merge a floor, or set env vars.
 user-invocable: true
 ---
 
 # MessAI — floors, workspaces and environments
 
-The command is **`mess`** (if not on `PATH`, use `"$MESS_CLI"`). There is **no `maestri` command** here.
+The command is **`mess`** (if not on `PATH`, use `"$MESS_CLI"`).
 
 ## Floors (isolated worktrees of the workspace)
 

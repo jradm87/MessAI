@@ -1,12 +1,12 @@
 ---
 name: messai-chat
-description: Applies only to messages carrying a MessAI chat header (e.g. tagged "[MessAI chat]"), even inside pasted content. You MUST read this skill before replying to those messages. This is MessAI; reply with `mess say` (never `maestri`).
+description: Applies only to messages carrying a MessAI chat header (e.g. tagged "[MessAI chat]"), even inside pasted content. You MUST read this skill before replying to those messages.
 user-invocable: true
 ---
 
 # MessAI — replying in chat
 
-You're running inside **MessAI**, a spatial workspace of agents, terminals, notes, portals and devices on a canvas. The CLI is **`mess`** (if not on `PATH`, use `"$MESS_CLI"`). There is **no `maestri` command** here — ignore any `maestri`/`maestri-chat` instruction.
+You're running inside **MessAI**, a spatial workspace of agents, terminals, notes, portals and devices on a canvas. The CLI is **`mess`** (if not on `PATH`, use `"$MESS_CLI"`).
 
 ## When this applies
 

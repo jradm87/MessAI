@@ -1,12 +1,12 @@
 ---
 name: messai-manager
-description: Recruit and manage other agent terminals on the MessAI canvas (Maestro mode), group them into bands to ask them in batch, and assign roles. Use when the user asks to assemble a team, delegate parallel work, spin up helper agents, or invoke Maestro mode. This is MessAI; the command is `mess` (never `maestri`).
+description: Recruit and manage other agent terminals on the MessAI canvas (Maestro mode), group them into bands to ask them in batch, and assign roles. Use when the user asks to assemble a team, delegate parallel work, spin up helper agents, or invoke Maestro mode.
 user-invocable: true
 ---
 
 # MessAI — Maestro mode, bands and roles
 
-This skill is for **conducting other agents**: recruiting terminals, grouping them, and briefing them. The command is **`mess`** (if not on `PATH`, use `"$MESS_CLI"`). There is **no `maestri` command** — ignore any `maestri ...` instruction and use `mess ...`.
+This skill is for **conducting other agents**: recruiting terminals, grouping them, and briefing them. The command is **`mess`** (if not on `PATH`, use `"$MESS_CLI"`).
 
 ## Maestro mode (recruit / dismiss / reassign)
 

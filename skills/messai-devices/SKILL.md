@@ -1,12 +1,12 @@
 ---
 name: messai-devices
-description: Drive an Android phone or emulator on the MessAI canvas — tap, swipe, type, read the accessibility tree, launch apps, and take screenshots. Use when the user asks to run or test a mobile app, automate an Android device, or inspect an app's screen rather than a web page. This is MessAI; the command is `mess device` (never `maestri`).
+description: Drive an Android phone or emulator on the MessAI canvas — tap, swipe, type, read the accessibility tree, launch apps, and take screenshots. Use when the user asks to run or test a mobile app, automate an Android device, or inspect an app's screen rather than a web page.
 user-invocable: true
 ---
 
 # MessAI — Android device portals
 
-A **device** node drives an Android phone/emulator over `adb`, shown live on the canvas. The command is **`mess device`** (if `mess` is not on `PATH`, use `"$MESS_CLI" device ...`). There is **no `maestri` command** here.
+A **device** node drives an Android phone/emulator over `adb`, shown live on the canvas. The command is **`mess device`** (if `mess` is not on `PATH`, use `"$MESS_CLI" device ...`).
 
 ## Find and attach a device
 

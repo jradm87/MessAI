@@ -1,12 +1,12 @@
 ---
 name: messai-routines
-description: Schedule recurring or one-off routines on the MessAI canvas — a prompt delivered to an agent terminal, or a shell command, on an interval. Use when the user asks to schedule a task, set a reminder, run something every N seconds/minutes, or automate a timed job. This is MessAI; the command is `mess routine` (never `maestri`).
+description: Schedule recurring or one-off routines on the MessAI canvas — a prompt delivered to an agent terminal, or a shell command, on an interval. Use when the user asks to schedule a task, set a reminder, run something every N seconds/minutes, or automate a timed job.
 user-invocable: true
 ---
 
 # MessAI — scheduled routines
 
-Routines run a **prompt** (delivered to a terminal) or a **shell command** on a schedule. The command is **`mess routine`** (if `mess` is not on `PATH`, use `"$MESS_CLI" routine ...`). There is **no `maestri` command** here.
+Routines run a **prompt** (delivered to a terminal) or a **shell command** on a schedule. The command is **`mess routine`** (if `mess` is not on `PATH`, use `"$MESS_CLI" routine ...`).
 
 ## Manage routines
 
