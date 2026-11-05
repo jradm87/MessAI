@@ -2,7 +2,7 @@ import { Type, type Static } from "@sinclair/typebox";
 
 export const PROTOCOL_VERSION = 1 as const;
 /** Incrementar a cada mudança de snapshot/rotas; o cliente avisa quando o runtime está atrás. */
-export const BUILD_VERSION = 34 as const;
+export const BUILD_VERSION = 37 as const;
 
 // ---------- Identidades ----------
 export const Id = Type.String({ minLength: 8, maxLength: 64 });
@@ -54,7 +54,7 @@ export const Geometry = Type.Object({
 });
 export type Geometry = Static<typeof Geometry>;
 
-export const NodeKind = Type.Union([Type.Literal("terminal"), Type.Literal("note"), Type.Literal("text"), Type.Literal("tree"), Type.Literal("binder"), Type.Literal("portal"), Type.Literal("device")]); // binder = fichário (#74); portal = navegador embutido (#26); device = Android/emulador (#73)
+export const NodeKind = Type.Union([Type.Literal("terminal"), Type.Literal("note"), Type.Literal("text"), Type.Literal("tree"), Type.Literal("binder"), Type.Literal("portal"), Type.Literal("device"), Type.Literal("stack")]); // binder = fichário (#74); portal = navegador embutido (#26); device = Android/emulador (#73); stack = banda agrupada em abas (#70)
 export type NodeKind = Static<typeof NodeKind>;
 
 // #93 [MESS-09] Modo isolado: worktree separa código, não processos/rede/filesystem. Um terminal "isolado" roda sob bubblewrap:

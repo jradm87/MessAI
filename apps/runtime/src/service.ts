@@ -9,7 +9,7 @@ import { ISOLATED_APPROVABLE_CAPS, ISOLATED_DEFAULT_CAPS, validateIsolation, nor
 import { PortalManager, type PortalFrame } from "./portal.js";
 import { DeviceManager, listDevices, type DeviceFrame } from "./device.js";
 import type { DeviceList, DeviceState, DeviceAct, DeviceActResult, DeviceUiTree, DeviceScreenshot } from "@messai/contracts";
-import { isAdbSerial, isAvdName } from "@messai/domain";
+import { isAdbSerial, isAvdName, treeLayout } from "@messai/domain";
 import type { PortalState, PortalAct, PortalActResult, PortalSnapshot, PortalScreenshot } from "@messai/contracts";
 import { buildIsolatedPlan, probeIsolation } from "./isolation.js";
 import { readProcTree } from "./procs.js";
@@ -1915,13 +1915,14 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     }
     const node: Node = {
       nodeId: newId(), workspaceId, kind: input.kind,
-      title: input.title ?? (input.kind === "terminal" ? "Terminal" : input.kind === "text" ? "Texto" : input.kind === "tree" ? "Arquivos" : input.kind === "binder" ? "Fichário" : input.kind === "portal" ? "Portal" : input.kind === "device" ? "Dispositivo" : "Nota"),
+      title: input.title ?? (input.kind === "terminal" ? "Terminal" : input.kind === "text" ? "Texto" : input.kind === "tree" ? "Arquivos" : input.kind === "binder" ? "Fichário" : input.kind === "portal" ? "Portal" : input.kind === "device" ? "Dispositivo" : input.kind === "stack" ? "Grupo" : "Nota"),
       geometry: input.autoPlace ? this.placeFree(this.store.listNodes(workspaceId), input.geometry.w, input.geometry.h) : normalizeGeometry(input.geometry), createdAt: nowIso(),
       ...(input.kind === "note" || input.kind === "text" ? { content: input.content ?? "" } : {}),
       ...(input.kind === "tree" ? { content: input.content ?? JSON.stringify({ root: "", mode: "list" }) } : {}),
       ...(input.kind === "portal" ? { content: portalContent } : {}),
       ...(input.kind === "device" ? { content: deviceContent } : {}),
       ...(input.kind === "binder" ? { content: input.content ?? JSON.stringify({ pages: [{ id: "p1", title: "Página 1", content: "" }], active: "p1", color: "" }) } : {}),
+      ...(input.kind === "stack" ? { content: input.content ?? JSON.stringify({ childIds: [], active: "" }) } : {}),
       ...(input.kind === "terminal" && input.roleId ? { roleId: input.roleId } : {}),
       // #56 aparência do terminal (vinda do preset)
       ...(input.kind === "terminal" && input.color ? { color: input.color } : {}),
@@ -2752,7 +2753,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     this.publishConnectionEndpoints(c);
     return succeed(this.store.getConnection(id)!);
   }
-  createConnection(workspaceId: string, input: CreateConnection): Result<Connection> {
+  createConnection(workspaceId: string, input: CreateConnection, byAgent = false): Result<Connection> {
     const w = this.store.getWorkspace(workspaceId);
     if (!w) return fail("NOT_FOUND", "espaço não encontrado");
     const rev = checkRevision(w, input.expectedRevision);
@@ -2777,6 +2778,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const c: Connection = { connectionId: newId(), workspaceId, sourceNodeId: a.nodeId, targetNodeId: b.nodeId, createdAt: nowIso(), ...(input.label ? { label: input.label } : {}) };
     this.store.transaction(() => { this.store.insertConnection(c); this.store.bumpRevision(workspaceId, rev.value); });
     this.publishConnectionEndpoints(c);
+    if (byAgent && a.workspaceId === workspaceId && b.workspaceId === workspaceId) this.relayoutTree(workspaceId, a.nodeId); // #37 agente conectou → re-arruma a árvore (portal/nota alinhado abaixo de quem criou)
     return succeed(c);
   }
 
@@ -3173,6 +3175,27 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const bottom = Math.max(...nodes.map((n) => n.geometry.y + n.geometry.h));
     return { x: left, y: bottom + 40, w: norm.w, h: norm.h }; // empilha de cima para baixo (mesma coluna à esquerda)
   }
+  /** Re-organiza em árvore (de cima para baixo) o componente conectado do nó-semente: raiz no topo, filhos numa linha abaixo, netos abaixo deles.
+   *  Ancorado no canto atual do componente para não pular. Chamado quando um agente recruta ou conecta (mantém o canvas arrumado sozinho). */
+  private relayoutTree(workspaceId: string, seedId: string): void {
+    const nodes = this.store.listNodes(workspaceId);
+    const conns = this.store.listConnections(workspaceId).filter((c) => c.sourceNodeId && c.targetNodeId);
+    const adj = new Map<string, Set<string>>(); nodes.forEach((n) => adj.set(n.nodeId, new Set()));
+    for (const c of conns) { if (adj.has(c.sourceNodeId) && adj.has(c.targetNodeId)) { adj.get(c.sourceNodeId)!.add(c.targetNodeId); adj.get(c.targetNodeId)!.add(c.sourceNodeId); } }
+    if (!adj.has(seedId)) return;
+    const comp = new Set<string>([seedId]); const stack = [seedId];
+    while (stack.length) { const u = stack.pop()!; for (const v of adj.get(u)!) if (!comp.has(v)) { comp.add(v); stack.push(v); } }
+    if (comp.size < 2) return;
+    const items = nodes.filter((n) => comp.has(n.nodeId)).map((n) => ({ id: n.nodeId, geometry: n.geometry }));
+    const edges = conns.filter((c) => comp.has(c.sourceNodeId) && comp.has(c.targetNodeId)).map((c) => ({ source: c.sourceNodeId, target: c.targetNodeId }));
+    const originX = Math.min(...items.map((i) => i.geometry.x)), originY = Math.min(...items.map((i) => i.geometry.y));
+    const moves = treeLayout(items, edges, { originX, originY });
+    const changed = moves.filter((m) => { const o = items.find((i) => i.id === m.id)!.geometry; return o.x !== m.geometry.x || o.y !== m.geometry.y; });
+    if (!changed.length) return;
+    const w = this.store.getWorkspace(workspaceId)!;
+    this.store.transaction(() => { for (const m of changed) this.store.updateNode(m.id, { geometry: m.geometry }); this.store.bumpRevision(workspaceId, w.revision + 1); });
+    this.publish(workspaceId);
+  }
   private freeSpotNear(anchor: Node, nodes: Node[], w: number, h: number): Node["geometry"] {
     const x = anchor.geometry.x; // mesma coluna do condutor
     for (let k = 1; k < 80; k++) {
@@ -3203,6 +3226,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const node = made.value.node;
     const link = this.createConnection(w.workspaceId, { expectedRevision: this.store.getWorkspace(w.workspaceId)!.revision, sourceNodeId: maestro.nodeId, targetNodeId: node.nodeId });
     if (!link.ok) return link;
+    this.relayoutTree(w.workspaceId, maestro.nodeId); // #37 recrutados numa linha abaixo do Maestro (árvore), sem sobrepor
     let bandId: string | undefined;
     if (input.band) {
       let b = this.findBand(w.workspaceId, input.band);

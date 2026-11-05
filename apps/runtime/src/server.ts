@@ -406,7 +406,7 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
   });
   app.post<{ Params: { id: string } }>("/v1/workspaces/:id/connections", async (req, reply) => {
     const b = body<CreateConnection>(CreateConnection, req.body); if ("code" in b) return invalid(reply, b);
-    return send(reply, svc.createConnection(req.params.id, b), 201);
+    return send(reply, svc.createConnection(req.params.id, b, !!opts.unix || isAgent(req)), 201);
   });
   app.patch<{ Params: { id: string } }>("/v1/connections/:id", async (req, reply) => {
     const b = body<PatchConnection>(PatchConnection, req.body); if ("code" in b) return invalid(reply, b);

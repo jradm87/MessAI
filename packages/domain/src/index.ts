@@ -529,6 +529,27 @@ export function binderRemovePage(b: Binder, id: string): { binder: Binder; page:
 /** Move a página para frente (primeira posição) e a ativa. */
 export function binderBringToFront(b: Binder, id: string): Binder { const p = b.pages.find((x) => x.id === id); return p ? { ...b, pages: [p, ...b.pages.filter((x) => x.id !== id)], active: id } : b; }
 
+// ---------- #70 Pilha (banda agrupada em abas) ----------
+/** Conteúdo de um nó "stack": IDs dos terminais-membros (ordem das abas), qual está ativa e, opcionalmente, a banda de origem. */
+export type Stack = { childIds: string[]; active: string; bandId?: string };
+export const emptyStack = (): Stack => ({ childIds: [], active: "" });
+/** Conteúdo salvo → pilha válida (sem IDs repetidos; `active` sempre existente quando há membros). Lixo vira pilha vazia. */
+export function parseStack(raw: string | null | undefined): Stack {
+  try {
+    const j = JSON.parse(raw ?? "") as Partial<Stack>;
+    const childIds = Array.isArray(j.childIds) ? [...new Set(j.childIds.filter((x): x is string => typeof x === "string"))] : [];
+    const active = childIds.includes(j.active as string) ? (j.active as string) : (childIds[0] ?? "");
+    return { childIds, active, ...(typeof j.bandId === "string" ? { bandId: j.bandId } : {}) };
+  } catch { return emptyStack(); }
+}
+export const serializeStack = (s: Stack): string => JSON.stringify(s);
+export function stackSetActive(s: Stack, id: string): Stack { return s.childIds.includes(id) ? { ...s, active: id } : s; }
+/** Remove um membro da pilha; reescolhe o ativo se era ele. */
+export function stackRemoveChild(s: Stack, id: string): Stack {
+  const childIds = s.childIds.filter((x) => x !== id);
+  return { ...s, childIds, active: s.active === id ? (childIds[0] ?? "") : s.active };
+}
+
 // ---------- #72 Ambientes: variáveis de ambiente por espaço/global ----------
 const ENV_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const SECRET_KEY_RE = /SECRET|TOKEN|PASSWORD|PASSWD|API_KEY|PRIVATE_KEY|AUTH|CREDENTIAL|BEARER/i;
@@ -906,4 +927,16 @@ export function treeLayout(items: LayoutItem[], edges: LayoutEdge[], opts: { gap
     compX += subW.get(root)! + gapX * 2;
   }
   return out;
+}
+
+/** Colisão ponto×retângulo: se (px,py) está DENTRO do retângulo inflado por `margin`, empurra para a borda mais próxima; senão devolve igual. */
+export function pushOutsideRect(px: number, py: number, rect: Rect, margin = 8): { x: number; y: number } {
+  const x1 = rect.x - margin, y1 = rect.y - margin, x2 = rect.x + rect.w + margin, y2 = rect.y + rect.h + margin;
+  if (px <= x1 || px >= x2 || py <= y1 || py >= y2) return { x: px, y: py }; // fora: nada a fazer
+  const dl = px - x1, dr = x2 - px, dt = py - y1, db = y2 - py; // distâncias até cada lado
+  const m = Math.min(dl, dr, dt, db);
+  if (m === dl) return { x: x1, y: py };
+  if (m === dr) return { x: x2, y: py };
+  if (m === dt) return { x: px, y: y1 };
+  return { x: px, y: y2 };
 }

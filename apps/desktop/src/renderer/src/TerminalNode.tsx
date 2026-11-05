@@ -2,20 +2,13 @@ import { useEffect, useRef, useState, type CSSProperties, memo } from "react";
 import { useAtomValue } from "jotai";
 import { Search, Eraser, Lock, Eye, Folder, SquareTerminal, Crown, Activity, Link2, ShieldCheck } from "lucide-react";
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
-import { Terminal } from "@xterm/xterm";
-import { FitAddon } from "@xterm/addon-fit";
-import { Unicode11Addon } from "@xterm/addon-unicode11";
-import { SearchAddon } from "@xterm/addon-search";
-import "@xterm/xterm/css/xterm.css";
 import type { NodeIsolation, Session, TermTheme } from "@messai/contracts";
-import { usePref } from "./prefs.js";
 import { countRender } from "./perf.js";
-import { effectiveScrollback, fontStack, parseCustomPalette, resolveTermTheme } from "./term-theme.js";
 import { WS_COLORS, WS_ICONS, WsIcon } from "./wsicons.js";
 import { AgentIcon, agentKind } from "./agentIcons.js";
 import type { Api, Stream } from "./api.js";
-import { unreadAtom, attentionAtom, finishedAtom, finishedMapAtom, summaryAtom, summaryMapAtom, store } from "./atoms.js";
-import { onTheme, cssVar } from "./theme.js";
+import { unreadAtom, attentionAtom, finishedAtom, summaryAtom } from "./atoms.js";
+import { TerminalView, type TerminalViewHandle } from "./TerminalView.js";
 import { EditableTitle } from "./EditableTitle.js";
 import { Composer, type MentionTarget } from "./Composer.js";
 import { ChatLayer } from "./ChatLayer.js";
@@ -30,33 +23,13 @@ const THEMES: { id: TermTheme; label: string }[] = [{ id: "system", label: "Sist
 
 function TerminalNodeImpl({ id, data, selected }: NodeProps & { data: TerminalData }) {
   countRender(id);
-  const host = useRef<HTMLDivElement>(null);
-  const termRef = useRef<Terminal>(null);
-  const searchRef = useRef<SearchAddon>(null);
-  const [find, setFind] = useState<string | null>(null); // null = fechado; string = busca aberta
+  const viewRef = useRef<TerminalViewHandle>(null);
   const [session, setSession] = useState<Session | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const resumedRef = useRef(false);
-  const stateRef = useRef<string>("");
   const { sessionId, stream, api } = data;
   const unread = useAtomValue(unreadAtom(id)); // só este nó re-renderiza quando a sua contagem muda
   const attention = useAtomValue(attentionAtom(id));
   const finishedAt = useAtomValue(finishedAtom(id)); // #65: agente concluiu um turno e espera você
   const summary = useAtomValue(summaryAtom(id)); // #66: resumo do turno pelo modelo local (quando houver)
-  // #56 — aparência do xterm: prefs globais (Preferências → Terminal) + tema do nó (vence). Refs para o efeito principal ler o valor atual.
-  const pTheme = usePref("termTheme"); const pCustom = usePref("termCustom"); const pFont = usePref("termFont"); const pSize = usePref("termFontSize");
-  const pPadX = usePref("termPadX"); const pPadY = usePref("termPadY"); const pMem = usePref("termMemLimit"); const pScroll = usePref("termScrollback"); const pCopy = usePref("termCopyOnSelect");
-  const themeRef = useRef({ node: data.termTheme, pref: pTheme, custom: pCustom }); themeRef.current = { node: data.termTheme, pref: pTheme, custom: pCustom };
-  const copyRef = useRef(pCopy); copyRef.current = pCopy;
-  const fitNow = useRef<() => void>(null);
-  const xtermTheme = () => resolveTermTheme(themeRef.current.node, themeRef.current.pref, parseCustomPalette(themeRef.current.custom),
-    { background: cssVar("--term-bg") || "#0a0a0b", foreground: cssVar("--term-fg") || "#e4e4e7", cursor: cssVar("--acc") || "#4a9eff", selectionBackground: cssVar("--term-sel") || "rgba(74,158,255,.35)" });
-  // O xterm (renderer DOM) só pinta fundo por célula; o fundo "de verdade" do terminal é o do host — pintado aqui com a mesma paleta.
-  const applyTheme = () => { const t = xtermTheme(); if (termRef.current) termRef.current.options.theme = t; if (host.current) { host.current.style.backgroundColor = t.background; host.current.style.color = t.foreground; } };
-  useEffect(() => { applyTheme(); }, [data.termTheme, pTheme, pCustom]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { const t = termRef.current; if (!t) return; t.options.fontSize = pSize; t.options.fontFamily = fontStack(pFont); fitNow.current?.(); }, [pSize, pFont]);
-  useEffect(() => { fitNow.current?.(); }, [pPadX, pPadY]);
-  useEffect(() => { const t = termRef.current; if (t) t.options.scrollback = effectiveScrollback(pMem, pScroll); }, [pMem, pScroll]);
   const [appear, setAppear] = useState(false);
   // #80 monitor de processos e métrica de memória ao vivo
   const [procsOpen, setProcsOpen] = useState(false);
@@ -78,72 +51,6 @@ function TerminalNodeImpl({ id, data, selected }: NodeProps & { data: TerminalDa
     if (crossOpen) void api.crossCandidates(id).then(setCandidates).catch(() => {});
   };
   useEffect(() => { loadCross(); }, [id, data.linkCount, crossOpen]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    // Tema do xterm: tokens do app (#54) ou tema do nó/prefs (#56); re-aplicado quando qualquer um muda.
-    const p0 = { font: fontStack(pFont), size: pSize, scroll: effectiveScrollback(pMem, pScroll) }; // valores do momento; mudanças depois entram pelos efeitos acima
-    const term = new Terminal({ cursorBlink: true, fontSize: p0.size, fontFamily: p0.font, theme: xtermTheme(), scrollback: p0.scroll, allowProposedApi: true });
-    const fit = new FitAddon();
-    const search = new SearchAddon();
-    term.loadAddon(new Unicode11Addon());
-    term.loadAddon(fit);
-    term.loadAddon(search);
-    searchRef.current = search;
-    term.unicode.activeVersion = "11"; // largura correta de glyphs (powerline/CJK) — evita a quebra errada do prompt
-    // Ctrl+F abre a busca sem repassar ao shell (no readline seria forward-char).
-    term.attachCustomKeyEventHandler((e) => { if (e.type === "keydown" && (e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "f") { setFind((v) => v ?? ""); return false; } return true; });
-    term.open(host.current!);
-    // Renderer canvas/DOM (sem WebGL de propósito): o React Flow aplica `transform: scale` no
-    // zoom, e o renderer WebGL ignora esse scale — mede a célula errado, o `fit` calcula colunas
-    // demais e o `ls`/prompt saem embaralhados (timestamps repetidos, conteúdo jogado pra direita).
-    // O canvas respeita o scale do CSS e mede a célula de forma confiável.
-    termRef.current = term;
-    applyTheme();
-    const offTheme = onTheme(() => applyTheme());
-    let lastSeq = 0;
-    let mine = false;
-    const sendResize = () => { if (mine) stream.send({ type: "resize", sessionId, cols: term.cols, rows: term.rows }); };
-    const off = stream.on((m) => {
-      if ("sessionId" in m && m.sessionId !== sessionId) return;
-      if (m.type === "snapshot") { term.reset(); term.write(m.data); lastSeq = m.sequence; mine = m.session.lease?.clientId === stream.clientId; setSession(m.session); stateRef.current = m.session.state; if (m.session.state === "lost" && !resumedRef.current) { resumedRef.current = true; data.onResume(); } }
-      else if (m.type === "output") {
-        if (m.sequence > lastSeq + 1) stream.attach(sessionId); // lacuna: pede snapshot de novo
-        else { term.write(m.data); lastSeq = m.sequence; }
-      }
-      else if (m.type === "session" && m.session.sessionId === sessionId) { const was = mine; mine = m.session.lease?.clientId === stream.clientId; setSession(m.session); stateRef.current = m.session.state; if (m.session.state === "lost" && !resumedRef.current) { resumedRef.current = true; data.onResume(); } if (mine && !was) sendResize(); }
-      else if (m.type === "error" && "sessionId" in m) { if (m.error.code !== "NOT_FOUND") { setErr(m.error.message); setTimeout(() => setErr(null), 2500); } }
-    });
-    stream.attach(sessionId);
-    const onData = term.onData((d) => stream.send({ type: "input", sessionId, data: d }));
-    // Blindagem: só aplica o tamanho proposto se for são. Dimensões absurdas (célula medida ~0
-    // durante uma transição de zoom/layout) deixariam o PTY com centenas de colunas e embaralhariam a saída.
-    const applyFit = () => {
-      try {
-        const d = fit.proposeDimensions();
-        if (!d || !Number.isFinite(d.cols) || !Number.isFinite(d.rows)) return;
-        if (d.cols < 2 || d.rows < 1 || d.cols > 1000 || d.rows > 1000) return;
-        if (d.cols !== term.cols || d.rows !== term.rows) term.resize(d.cols, d.rows);
-        sendResize();
-      } catch { /* ainda sem layout */ }
-    };
-    fitNow.current = applyFit;
-    const ro = new ResizeObserver(applyFit);
-    ro.observe(host.current!);
-    // #56 copiar ao selecionar (pref lida na hora, sem recriar o terminal)
-    const onSel = term.onSelectionChange(() => { if (copyRef.current && term.hasSelection()) void navigator.clipboard.writeText(term.getSelection()).catch(() => {}); });
-    const el = host.current!;
-    const focus = () => {
-      if (stateRef.current === "running") stream.send({ type: "acquireLease", sessionId });
-      // Olhou o terminal: o "concluiu, precisa de você" (#65) deste nó foi atendido.
-      store.set(finishedMapAtom, (p) => { if (!(id in p)) return p; const n = { ...p }; delete n[id]; return n; });
-      store.set(summaryMapAtom, (p) => { if (!(id in p)) return p; const n = { ...p }; delete n[id]; return n; });
-      void window.messai.hudDismiss?.(id); // #67: o cartão some também da janela flutuante
-      void api.seen(id).catch(() => {}); // #69: sai da lista global "esperando você"
-      data.onFocus();
-    };
-    el.addEventListener("focusin", focus);
-    return () => { fitNow.current = null; onSel.dispose(); ro.disconnect(); onData.dispose(); off(); offTheme(); el.removeEventListener("focusin", focus); stream.detach(sessionId); term.dispose(); };
-  }, [sessionId, stream]);
 
   const mine = session?.lease?.clientId === stream.clientId;
   const state = session?.state ?? "…";
@@ -224,15 +131,14 @@ function TerminalNodeImpl({ id, data, selected }: NodeProps & { data: TerminalDa
         {data.onMaestro && <button title={data.maestro ? "Modo Maestro ligado (clique para desligar)" : "Ligar o Modo Maestro (recrutar/dispensar/reatribuir agentes)"} className={`nodrag maestro-toggle ${data.maestro ? "on" : ""}`} data-testid="maestro-toggle" onClick={() => data.onMaestro?.(!data.maestro)}><Crown size={12} /></button>}
         <button title="Conexões entre andares e espaços (Nome @ Espaço)" className={`nodrag ${crossOpen || crossPeers.length > 0 ? "on" : ""}`} data-testid="node-cross-link-btn" onClick={() => setCrossOpen((v) => !v)}><Link2 size={12} /></button>
         <button title="Monitor de processos e limite de memória" className={`nodrag ${procsOpen ? "on" : ""}`} data-testid="term-procs-btn" onClick={() => { setProcsOpen((v) => !v); void loadProcs(); }}><Activity size={12} /></button>
-        <button title="Buscar no terminal (Ctrl+F)" className="nodrag" onClick={() => setFind((v) => (v === null ? "" : null))}><Search size={12} /></button>
-        <button title="Limpar a tela" className="nodrag" onClick={() => termRef.current?.clear()}><Eraser size={12} /></button>
+        <button title="Buscar no terminal (Ctrl+F)" className="nodrag" onClick={() => viewRef.current?.openFind()}><Search size={12} /></button>
+        <button title="Limpar a tela" className="nodrag" onClick={() => viewRef.current?.clear()}><Eraser size={12} /></button>
         {state === "running" && <button title="Descarregar terminal (poupar RAM preservando scrollback)" className="nodrag" data-testid="term-unload-btn" onClick={() => void api.unloadNode(id)}>💤</button>}
         {state === "unloaded" && <button title="Recarregar terminal" className="nodrag" data-testid="term-reload-btn" onClick={() => void api.reloadNode(id)}>▶</button>}
         {state === "running" && <button title="Parar processo" onClick={() => void api.stop(sessionId)}>■</button>}
         {(state === "exited" || state === "lost") && <button title="Reiniciar" onClick={() => void api.restart(id)}>↻</button>}
         <button title="Remover nó" onClick={data.onDelete}>✕</button>
       </div>
-      {err && <div className="err">{err}</div>}
       <div className="term-wrap">
         {crossOpen && (
           <div className="term-procs nodrag nowheel" data-testid="cross-link-panel" onMouseDown={(e) => e.stopPropagation()}>
@@ -324,22 +230,8 @@ function TerminalNodeImpl({ id, data, selected }: NodeProps & { data: TerminalDa
             </div>
           </div>
         )}
-        {find !== null && (
-          <div className="term-find nodrag nowheel">
-            <input autoFocus value={find} placeholder="Buscar no terminal…"
-              onChange={(e) => { setFind(e.target.value); searchRef.current?.findNext(e.target.value, { incremental: true }); }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") { e.preventDefault(); const s = searchRef.current; if (s) { if (e.shiftKey) s.findPrevious(find ?? ""); else s.findNext(find ?? ""); } }
-                else if (e.key === "Escape") { e.preventDefault(); setFind(null); searchRef.current?.clearDecorations(); }
-              }} />
-            <button title="Anterior (Shift+Enter)" onClick={() => searchRef.current?.findPrevious(find ?? "")}>↑</button>
-            <button title="Próximo (Enter)" onClick={() => searchRef.current?.findNext(find ?? "")}>↓</button>
-            <button title="Fechar (Esc)" onClick={() => { setFind(null); searchRef.current?.clearDecorations(); }}>✕</button>
-          </div>
-        )}
-        <div className="term nodrag nowheel" ref={host} tabIndex={0} style={{ padding: `${pPadY}px ${pPadX}px` }}
-          onDragOver={(e) => { if (e.dataTransfer.types.includes("text/mess-path") || e.dataTransfer.types.includes("text/plain")) e.preventDefault(); }}
-          onDrop={(e) => { const p = e.dataTransfer.getData("text/mess-path") || e.dataTransfer.getData("text/plain"); if (!p) return; e.preventDefault(); stream.send({ type: "acquireLease", sessionId }); stream.send({ type: "input", sessionId, data: /\s/.test(p) ? `'${p}' ` : `${p} ` }); }} />
+        <TerminalView ref={viewRef} sessionId={sessionId} nodeId={id} api={api} stream={stream} termTheme={data.termTheme ?? null}
+          onSession={setSession} onResume={data.onResume} onFocus={data.onFocus} />
         {data.chatOpen && <ChatLayer nodeId={id} title={data.title} api={api} thread={thread} setThread={setThread} messages={chat} onClose={data.onChatClose} />}
       </div>
       {session?.cwd && <div className="footbar nodrag" title={session.cwd}><Folder size={11} /><span className="cwd">{session.cwd.replace(/^\/home\/[^/]+/, "~")}</span></div>}

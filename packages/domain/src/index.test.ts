@@ -1,5 +1,5 @@
 import {  describe, expect, it } from "vitest";
-import { canMessage, formatDelivery, resolveNodeRef, parseCrossRef, resolveCrossNodeRef, parseGitRemote, buildPrCompareUrl, canWrite, checkRevision, decideLease, normalizeGeometry, trimBuffer, MAX_BUFFER_BYTES, applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxAttachPlan, shellQuote, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, alignGeometries, gridLayout, agentKind, agentResume, stripAnsi, normalizePortalUrl, parsePortal, portalKey, serializePortal, androidInputText, androidKey, isAdbSerial, isAndroidActivity, isAndroidPackage, isAvdName, parseAdbDevices, parseAndroidFocus, parseAndroidPackages, parseUiDump, parseWmSize, pngSize, uiNodeAt, withIsolatedClaudeAutonomy, rectBorderToward, floatingEnds, borderSide, treeLayout } from "./index.js";
+import { canMessage, formatDelivery, resolveNodeRef, parseCrossRef, resolveCrossNodeRef, parseGitRemote, buildPrCompareUrl, canWrite, checkRevision, decideLease, normalizeGeometry, trimBuffer, MAX_BUFFER_BYTES, applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxAttachPlan, shellQuote, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, alignGeometries, gridLayout, agentKind, agentResume, stripAnsi, normalizePortalUrl, parsePortal, portalKey, serializePortal, androidInputText, androidKey, isAdbSerial, isAndroidActivity, isAndroidPackage, isAvdName, parseAdbDevices, parseAndroidFocus, parseAndroidPackages, parseUiDump, parseWmSize, pngSize, uiNodeAt, withIsolatedClaudeAutonomy, rectBorderToward, floatingEnds, borderSide, treeLayout, pushOutsideRect } from "./index.js";
 
 describe("revisão", () => {
   it("aceita revisão igual e devolve próxima", () => {
@@ -435,5 +435,16 @@ describe("arranjo em árvore (treeLayout)", () => {
     expect(m.r!.w).toBe(200); expect(m.r!.h).toBe(100); // mantém tamanho
     const comp1Right = Math.max(m.r!.x + 200, m.c!.x + 200, m.n!.x + 200);
     expect(m.solo!.x).toBeGreaterThanOrEqual(comp1Right); // componente solto à direita, sem sobrepor
+  });
+});
+
+describe("colisão da corda (pushOutsideRect)", () => {
+  const r = { x: 100, y: 100, w: 100, h: 100 }; // inflado por 8 → [92,92]..[208,208]
+  it("ponto fora não muda", () => { expect(pushOutsideRect(0, 0, r)).toEqual({ x: 0, y: 0 }); expect(pushOutsideRect(300, 150, r)).toEqual({ x: 300, y: 150 }); });
+  it("ponto dentro vai para a borda mais próxima", () => {
+    expect(pushOutsideRect(100, 150, r)).toEqual({ x: 92, y: 150 });   // perto da esquerda → x=92
+    expect(pushOutsideRect(205, 150, r)).toEqual({ x: 208, y: 150 });  // perto da direita → x=208
+    expect(pushOutsideRect(150, 100, r)).toEqual({ x: 150, y: 92 });   // perto do topo → y=92
+    expect(pushOutsideRect(150, 205, r)).toEqual({ x: 150, y: 208 });  // perto da base → y=208
   });
 });

@@ -43,15 +43,17 @@ import { GroupLayer, type Guides } from "./GroupLayer.js";
 import { Palette, type PaletteAction } from "./Palette.js";
 import { ScoresDialog } from "./ScoresDialog.js";
 import { BandsDialog } from "./BandsDialog.js";
+import { BandPanel } from "./BandPanel.js";
 import { RoutinesDialog } from "./RoutinesDialog.js";
 import { ApprovalsDialog } from "./ApprovalsDialog.js";
 import { bandsOfNode } from "./bands.js";
 import { BinderNode } from "./BinderNode.js";
-import { binderAddPage, binderRemovePage, emptyBinder, parseBinder, serializeBinder } from "@messai/domain";
+import { StackNode } from "./StackNode.js";
+import { binderAddPage, binderRemovePage, emptyBinder, parseBinder, serializeBinder, parseStack, serializeStack, stackRemoveChild } from "@messai/domain";
 import type { PaletteItem } from "./palette.js";
 import { useHint, useKeymap } from "./shortcuts.js";
 
-const nodeTypes: NodeTypes = { terminal: TerminalNode as never, note: NoteNode as never, text: TextNode as never, tree: TreeNode as never, binder: BinderNode as never, portal: PortalNode as never, device: DeviceNode as never };
+const nodeTypes: NodeTypes = { terminal: TerminalNode as never, note: NoteNode as never, text: TextNode as never, tree: TreeNode as never, binder: BinderNode as never, portal: PortalNode as never, device: DeviceNode as never, stack: StackNode as never };
 const edgeTypes: EdgeTypes = { rope: RopeEdge as never, circuit: CircuitEdge as never };
 const SIZE = { terminal: { w: 640, h: 380 }, note: { w: 260, h: 160 }, text: { w: 220, h: 48 }, tree: { w: 300, h: 420 }, binder: { w: 420, h: 280 }, portal: { w: 620, h: 440 }, device: { w: 340, h: 680 } } as const;
 
@@ -146,6 +148,7 @@ function Canvas({ conn }: { conn: Connection }) {
   const [paletteOpen, setPaletteOpen] = useState(false); // #69 paleta global
   const [scoresOpen, setScoresOpen] = useState(false); // #71 partituras
   const [bandsOpen, setBandsOpen] = useState(false); // #70 bandas
+  const [stackFocus, setStackFocus] = useState<{ stackId: string; nodeId: string; n: number } | null>(null); // #70 painel → ativa aba da pilha
   const [routinesOpen, setRoutinesOpen] = useState(false); // #27 rotinas agendadas
   const [approvalsOpen, setApprovalsOpen] = useState(false); // #93 pedidos de permissão de agentes isolados
   const [isoSupport, setIsoSupport] = useState<{ available: boolean; reason?: string } | null>(null);
@@ -299,6 +302,35 @@ function Canvas({ conn }: { conn: Connection }) {
     } catch { /* já avisou */ }
     h.endGroup(); bump();
   };
+  // #70 — pilha (banda agrupada num nó com abas)
+  const stackNodeOf = (id: string): Node | undefined => snapRef.current?.nodes.find((x) => x.nodeId === id && x.kind === "stack");
+  /** Agrupa os terminais de uma banda numa pilha (um nó com abas). */
+  const groupBand = async (bandId: string) => {
+    const sn = snapRef.current; if (!sn || !current) return;
+    const band = (sn.bands ?? []).find((b) => b.bandId === bandId); if (!band) return;
+    const childIds = band.nodeIds.filter((id) => sn.nodes.some((o) => o.nodeId === id && o.kind === "terminal"));
+    if (childIds.length < 1) { toast("A banda não tem terminais para agrupar"); return; }
+    if (sn.nodes.some((o) => o.kind === "stack" && parseStack(o.content).bandId === bandId)) { toast("Essa banda já está agrupada"); return; }
+    const content = serializeStack({ childIds, active: childIds[0]!, bandId });
+    // posiciona em espaço livre (à direita dos nós que continuam visíveis — os membros viram a pilha e somem), sem sobrepor nada
+    const others = sn.nodes.filter((o) => !childIds.includes(o.nodeId));
+    const geo = freeSpot(others, { w: 760, h: 460 });
+    await mutate((r) => api.createNode(current, { expectedRevision: r, kind: "stack", title: band.name, content, geometry: geo }));
+  };
+  /** Desfaz a pilha: o nó some e os terminais voltam ao canvas (nas posições que tinham). */
+  const ungroupStack = async (n: Node) => { if (!current) return; await mutate((r) => api.deleteNode(n.nodeId, r)); };
+  const ungroupBand = async (bandId: string) => { const st = snapRef.current?.nodes.find((o) => o.kind === "stack" && parseStack(o.content).bandId === bandId); if (st) await ungroupStack(st); };
+  /** Tira um terminal da pilha (volta a ser nó); se esvaziar, remove a pilha. */
+  const spillFromStack = async (n: Node, childId: string) => {
+    if (!current) return; const cur = stackNodeOf(n.nodeId) ?? n; const next = stackRemoveChild(parseStack(cur.content), childId);
+    if (next.childIds.length === 0) { await mutate((r) => api.deleteNode(n.nodeId, r)); return; }
+    await mutate((r) => api.patchNode(n.nodeId, { expectedRevision: r, content: serializeStack(next) }));
+  };
+  /** Foco vindo do painel: se o terminal está numa pilha, abre a pilha e ativa a aba; senão seleciona o nó. */
+  const focusMember = (nodeId: string) => {
+    const sn = snapRef.current; const st = sn?.nodes.find((o) => o.kind === "stack" && parseStack(o.content).childIds.includes(nodeId));
+    if (st) { setStackFocus({ stackId: st.nodeId, nodeId, n: Date.now() }); selectNode(st.nodeId); } else selectNode(nodeId);
+  };
   /** Empilha as notas selecionadas (≥2) num fichário novo na posição da primeira; as notas somem. Uma etapa de undo. */
   const stackSelectedNotes = async () => {
     const sn = snapRef.current; if (!sn || !current) return;
@@ -423,13 +455,18 @@ function Canvas({ conn }: { conn: Connection }) {
     if (dragging.current) return; // não reconstruir durante arrasto/resize; o snapshot do patch do drop reconstrói logo em seguida
     const prev = new Map(flowRef.current.map((n) => [n.id, n]));
     for (const id of [...nodeKeys.current.keys()]) if (!snap.nodes.some((n) => n.nodeId === id)) nodeKeys.current.delete(id);
-    setFlow(snap.nodes.map((n) => {
+    // #70 pilhas: terminais dentro de uma pilha não aparecem soltos no canvas (a sessão continua rodando no runtime); stackOf = membro → nó-pilha
+    const stacked = new Set<string>(); const stackOf = new Map<string, string>();
+    for (const sn of snap.nodes) if (sn.kind === "stack") for (const cid of parseStack(sn.content).childIds) { stacked.add(cid); stackOf.set(cid, sn.nodeId); }
+    setFlow(snap.nodes.filter((n) => !stacked.has(n.nodeId)).map((n) => {
       const old = prev.get(n.nodeId); const keepLocal = dragging.current && old;
       // #42 render incremental: se nada que este nó consome mudou, reaproveita o MESMO objeto (React Flow/React não re-renderizam
       // o nó, nem o xterm) — antes todo evento de snapshot recriava data/callbacks de todos os nós. Os callbacks só capturam `n`
       // (igual enquanto a chave não muda), refs estáveis e setters; revisão/seleção vêm de refs.
       const linkN = (snap.connections ?? []).filter((c) => c.sourceNodeId === n.nodeId || c.targetNodeId === n.nodeId).length;
+      const stackChildren = n.kind === "stack" ? parseStack(n.content).childIds.flatMap((cid) => { const o = snap.nodes.find((x) => x.nodeId === cid && x.kind === "terminal"); return o ? [{ nodeId: o.nodeId, sessionId: o.sessionId!, title: o.title, ...(o.icon ? { icon: o.icon } : {}), ...(o.color ? { color: o.color } : {}), ...(o.termTheme ? { termTheme: o.termTheme } : {}) }] : []; }) : [];
       const nodeKey = JSON.stringify([n, bandsOfNode(snap.bands, n.nodeId), linkN, composerFor === n.nodeId, chatFor === n.nodeId, renameSig.id === n.nodeId ? renameSig.n : 0, snap.workspace.workspaceId,
+        n.kind === "stack" ? [stackChildren, stackFocus?.stackId === n.nodeId ? stackFocus.n : 0] : 0,
         n.kind === "terminal" ? [roles, skills, composerFor === n.nodeId || chatFor === n.nodeId ? [snap.nodes.filter((o) => o.nodeId !== n.nodeId && o.kind !== "text").map((o) => [o.nodeId, o.kind, o.title]), (snap.connections ?? []).filter((c) => c.sourceNodeId === n.nodeId || c.targetNodeId === n.nodeId).map((c) => [c.sourceNodeId, c.targetNodeId])] : 0] : 0]); // alvos de @menção só importam com o compositor/chat abertos
       if (old && nodeKeys.current.get(n.nodeId) === nodeKey) return old;
       nodeKeys.current.set(n.nodeId, nodeKey);
@@ -473,21 +510,33 @@ function Canvas({ conn }: { conn: Connection }) {
           : n.kind === "tree" ? { title: n.title, content: n.content ?? "", editSignal: renameSig.id === n.nodeId ? renameSig.n : 0, workspaceId: snap.workspace.workspaceId, api, ...(n.groupId ? { groupId: n.groupId } : {}), onChange: change, onDelete: del, onRename: rename, ...extras,
               onOpenNote: (rel: string) => void mutate((r) => api.createNode(snap.workspace.workspaceId, { expectedRevision: r, kind: "note", geometry: { x: n.geometry.x + n.geometry.w + 40, y: n.geometry.y, w: 360, h: 260 }, filePath: `${snap.workspace.cwd}/${rel}` })),
               onPreview: (rel: string) => setPreview(rel), onGit: () => setGitOpen(true), toast }
+          : n.kind === "stack" ? { title: n.title, content: n.content ?? "", children: stackChildren, api, stream, editSignal: renameSig.id === n.nodeId ? renameSig.n : 0,
+              onChange: change, onRename: rename, onDelete: () => void ungroupStack(n), onUngroup: () => void ungroupStack(n), onSpill: (cid: string) => void spillFromStack(n, cid),
+              ...(stackFocus?.stackId === n.nodeId ? { focusChild: { nodeId: stackFocus.nodeId, n: stackFocus.n } } : {}) }
           : { content: n.content ?? "", onChange: change, onDelete: del, onRaise: extras.onRaise, editSignal: renameSig.id === n.nodeId ? renameSig.n : 0 },
       };
     }));
-    setEdges((prevEdges) => (snap.connections ?? []).filter((c) => snap.nodes.some((n) => n.nodeId === c.sourceNodeId) && snap.nodes.some((n) => n.nodeId === c.targetNodeId)).map((c) => {
-      const style = c.style ?? "rope";
-      const wasSelected = prevEdges.find((e) => e.id === c.connectionId)?.selected;
-      const data: EdgeData = {
-        style,
-        onStyle: (st) => { void mutate((r) => api.patchConnection(c.connectionId, { expectedRevision: r, style: st })); rec({ label: "estilo do cabo", forward: [{ type: "patchConnection", id: c.connectionId, patch: { style: st } }], inverse: [{ type: "patchConnection", id: c.connectionId, patch: { style: c.style ?? "rope" } }] }); },
-        onCut: () => { void mutate((r) => api.deleteConnection(c.connectionId, r)); rec({ label: "cortar cabo", forward: [{ type: "deleteConnection", id: c.connectionId }], inverse: [{ type: "createConnection", ref: c.connectionId, spec: connSpec(c) }] }); },
-        onGo: (end) => selectNode(end === "source" ? c.sourceNodeId : c.targetNodeId),
-      };
-      return { id: c.connectionId, type: style, source: c.sourceNodeId, target: c.targetNodeId, deletable: true, data, ...(wasSelected ? { selected: true } : {}) };
-    }));
-  }, [snap, composerFor, chatFor, roles, skills, renameSig]);
+    setEdges((prevEdges) => {
+      const seen = new Set<string>(); // dedup: várias conexões Maestro→membro viram uma só Maestro→pilha
+      return (snap.connections ?? []).flatMap((c) => {
+        if (!snap.nodes.some((n) => n.nodeId === c.sourceNodeId) || !snap.nodes.some((n) => n.nodeId === c.targetNodeId)) return [];
+        // #70 se a ponta está numa pilha, a corda vai para o nó-pilha (não some)
+        const source = stackOf.get(c.sourceNodeId) ?? c.sourceNodeId;
+        const target = stackOf.get(c.targetNodeId) ?? c.targetNodeId;
+        if (source === target) return []; // conexão interna à mesma pilha
+        const key = `${source}->${target}`; if (seen.has(key)) return []; seen.add(key);
+        const style = c.style ?? "rope";
+        const wasSelected = prevEdges.find((e) => e.id === c.connectionId)?.selected;
+        const data: EdgeData = {
+          style,
+          onStyle: (st) => { void mutate((r) => api.patchConnection(c.connectionId, { expectedRevision: r, style: st })); rec({ label: "estilo do cabo", forward: [{ type: "patchConnection", id: c.connectionId, patch: { style: st } }], inverse: [{ type: "patchConnection", id: c.connectionId, patch: { style: c.style ?? "rope" } }] }); },
+          onCut: () => { void mutate((r) => api.deleteConnection(c.connectionId, r)); rec({ label: "cortar cabo", forward: [{ type: "deleteConnection", id: c.connectionId }], inverse: [{ type: "createConnection", ref: c.connectionId, spec: connSpec(c) }] }); },
+          onGo: (end) => focusMember(end === "source" ? c.sourceNodeId : c.targetNodeId),
+        };
+        return [{ id: c.connectionId, type: style, source, target, deletable: true, zIndex: 6, data, ...(wasSelected ? { selected: true } : {}) }];
+      });
+    });
+  }, [snap, composerFor, chatFor, roles, skills, renameSig, stackFocus]);
 
   /** Seleciona um nó e o traz para a vista. */
   const selectNode = (id: string) => {
@@ -500,6 +549,8 @@ function Canvas({ conn }: { conn: Connection }) {
   const focusNode = (workspaceId: string, nodeId: string) => {
     setOverview(null);
     if (flowRef.current.some((n) => n.id === nodeId)) { selectNode(nodeId); return; }
+    const sn = snapRef.current; // #70 terminal dentro de uma pilha: abre a pilha e ativa a aba
+    if (sn?.workspace.workspaceId === workspaceId && sn.nodes.some((o) => o.kind === "stack" && parseStack(o.content).childIds.includes(nodeId))) { focusMember(nodeId); return; }
     pendingFocus.current = nodeId; setCurrent(workspaceId);
   };
   useEffect(() => window.messai.onFocusNode?.((t) => focusNode(t.workspaceId, t.nodeId)), []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -934,6 +985,12 @@ function Canvas({ conn }: { conn: Connection }) {
           });
         }} onContextMenu={(e) => { e.preventDefault(); if (!current || tool !== "select") return; const r = e.currentTarget.getBoundingClientRect(); setMenu({ x: e.clientX - r.left, y: e.clientY - r.top, at: rf.screenToFlowPosition({ x: e.clientX, y: e.clientY }) }); }}>
         <Toolbar tool={tool} setTool={setTool} style={style} setStyle={setStyle} onFileTree={() => {}} onPortal={() => add({ kind: "portal" })} />
+        {current && snap && (snap.bands ?? []).length > 0 && (
+          <BandPanel bands={snap.bands ?? []} terminals={snap.nodes.filter((n) => n.kind === "terminal").map((n) => ({ nodeId: n.nodeId, title: n.title }))}
+            groupedBands={new Set(snap.nodes.filter((n) => n.kind === "stack").map((n) => parseStack(n.content).bandId).filter((b): b is string => !!b))}
+            selectedId={flow.find((n) => n.selected)?.id ?? null} onFocus={focusMember} onManage={() => setBandsOpen(true)}
+            onGroup={(bandId) => void groupBand(bandId)} onUngroup={(bandId) => void ungroupBand(bandId)} />
+        )}
         {(() => {
           const selNodes = flow.filter((n) => n.selected);
           if (selNodes.length !== 1) return null;
