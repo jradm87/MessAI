@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath, type EdgeProps } from "@xyflow/react";
+import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath, useInternalNode, type EdgeProps, type Position } from "@xyflow/react";
+import { floatingEnds, borderSide, type Rect } from "@messai/domain";
 import { Spline, Workflow, Scissors, ArrowLeftToLine, ArrowRightToLine } from "lucide-react";
+
+const nodeRect = (n: ReturnType<typeof useInternalNode>): Rect | null => {
+  const w = n?.measured?.width, h = n?.measured?.height, pos = n?.internals?.positionAbsolute;
+  return (w && h && pos) ? { x: pos.x, y: pos.y, w, h } : null;
+};
+const POS: Record<string, Position> = { top: "top" as Position, bottom: "bottom" as Position, left: "left" as Position, right: "right" as Position };
 
 export type EdgeData = { style: "rope" | "circuit"; onStyle: (s: "rope" | "circuit") => void; onCut: () => void; onGo: (end: "source" | "target") => void };
 
@@ -20,7 +27,9 @@ function EdgeControls({ x, y, data }: { x: number; y: number; data: EdgeData }) 
 }
 
 /** Corda pendurada com física simples: balança quando uma ponta se move e amortece até parar. */
-export function RopeEdge({ id, sourceX, sourceY, targetX, targetY, selected, data }: EdgeProps & { data?: EdgeData }) {
+export function RopeEdge({ id, source, target, sourceX, sourceY, targetX, targetY, selected, data }: EdgeProps & { data?: EdgeData }) {
+  const sr = nodeRect(useInternalNode(source)), tr = nodeRect(useInternalNode(target));
+  if (sr && tr) { const e = floatingEnds(sr, tr); sourceX = e.sx; sourceY = e.sy; targetX = e.tx; targetY = e.ty; }
   const prev = useRef({ sx: sourceX, sy: sourceY, tx: targetX, ty: targetY });
   const phys = useRef({ x: 0, vx: 0, y: 0, vy: 0 }); // deslocamento da barriga (mola amortecida)
   const [, force] = useState(0);
@@ -53,7 +62,9 @@ export function RopeEdge({ id, sourceX, sourceY, targetX, targetY, selected, dat
 }
 
 /** Circuito: caminho ortogonal com cantos arredondados. */
-export function CircuitEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, selected, data }: EdgeProps & { data?: EdgeData }) {
+export function CircuitEdge({ id, source, target, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, selected, data }: EdgeProps & { data?: EdgeData }) {
+  const sr = nodeRect(useInternalNode(source)), tr = nodeRect(useInternalNode(target));
+  if (sr && tr) { const e = floatingEnds(sr, tr); sourceX = e.sx; sourceY = e.sy; targetX = e.tx; targetY = e.ty; sourcePosition = POS[borderSide(sr, e.sx, e.sy)]!; targetPosition = POS[borderSide(tr, e.tx, e.ty)]!; }
   const [path, lx, ly] = getSmoothStepPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, borderRadius: 10, offset: 24 });
   return (<>
     <BaseEdge id={id} path={path} className={`circuit ${selected ? "sel" : ""}`} interactionWidth={16} />

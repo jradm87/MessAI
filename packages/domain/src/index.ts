@@ -822,3 +822,88 @@ export function withIsolatedClaudeAutonomy(command: string, args: string[], isol
   if (args.includes("--dangerously-skip-permissions")) return args;
   return [...args, "--dangerously-skip-permissions"];
 }
+
+// ---------- Canvas: fios flutuantes (ligam no ponto da borda mais próximo) ----------
+export type Rect = { x: number; y: number; w: number; h: number };
+/** Ponto na borda do retângulo (centro cx,cy; tamanho w,h) no raio em direção a (tx,ty). */
+export function rectBorderToward(cx: number, cy: number, w: number, h: number, tx: number, ty: number): { x: number; y: number } {
+  const dx = tx - cx, dy = ty - cy;
+  if (dx === 0 && dy === 0) return { x: cx, y: cy };
+  const hw = Math.max(1, w / 2), hh = Math.max(1, h / 2);
+  const scale = 1 / Math.max(Math.abs(dx) / hw, Math.abs(dy) / hh);
+  return { x: cx + dx * scale, y: cy + dy * scale };
+}
+/** Pontas de um fio entre dois nós: cada ponta no ponto da borda voltado para o outro nó (qualquer lado). */
+export function floatingEnds(a: Rect, b: Rect): { sx: number; sy: number; tx: number; ty: number } {
+  const acx = a.x + a.w / 2, acy = a.y + a.h / 2, bcx = b.x + b.w / 2, bcy = b.y + b.h / 2;
+  const s = rectBorderToward(acx, acy, a.w, a.h, bcx, bcy);
+  const t = rectBorderToward(bcx, bcy, b.w, b.h, acx, acy);
+  return { sx: s.x, sy: s.y, tx: t.x, ty: t.y };
+}
+/** Lado da borda em que o ponto caiu (para rotear o estilo Circuito). */
+export function borderSide(rect: Rect, px: number, py: number): "top" | "bottom" | "left" | "right" {
+  const cx = rect.x + rect.w / 2, cy = rect.y + rect.h / 2;
+  const dx = (px - cx) / Math.max(1, rect.w / 2), dy = (py - cy) / Math.max(1, rect.h / 2);
+  return Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "right" : "left") : (dy > 0 ? "bottom" : "top");
+}
+
+// ---------- Canvas: arranjo automático em árvore (pai em cima, filhos embaixo) ----------
+export type LayoutItem = { id: string; geometry: Geometry };
+export type LayoutEdge = { source: string; target: string };
+/**
+ * Organiza os nós como árvores de cima para baixo a partir das conexões: a raiz (quem puxa mais conexões) fica no topo,
+ * os filhos descem em níveis, irmãos espalhados horizontalmente e centralizados sob o pai. Componentes desconexos ficam lado a lado.
+ * Puro e testável; devolve a nova geometria de cada nó (mantém w/h).
+ */
+export function treeLayout(items: LayoutItem[], edges: LayoutEdge[], opts: { gapX?: number; gapY?: number; originX?: number; originY?: number } = {}): { id: string; geometry: Geometry }[] {
+  const gapX = opts.gapX ?? 60, gapY = opts.gapY ?? 80, originX = opts.originX ?? 40, originY = opts.originY ?? 40;
+  const byId = new Map(items.map((n) => [n.id, n]));
+  // Grafo NÃO-direcionado p/ achar componentes; DIRECIONADO (source→target = pai→filho) p/ a hierarquia.
+  const adj = new Map<string, Set<string>>(); items.forEach((n) => adj.set(n.id, new Set()));
+  const indeg = new Map<string, number>(); const outAdj = new Map<string, Set<string>>();
+  items.forEach((n) => { indeg.set(n.id, 0); outAdj.set(n.id, new Set()); });
+  for (const e of edges) {
+    if (!byId.has(e.source) || !byId.has(e.target) || e.source === e.target) continue;
+    adj.get(e.source)!.add(e.target); adj.get(e.target)!.add(e.source);
+    if (!outAdj.get(e.source)!.has(e.target)) { outAdj.get(e.source)!.add(e.target); indeg.set(e.target, indeg.get(e.target)! + 1); }
+  }
+  const visited = new Set<string>();
+  const out: { id: string; geometry: Geometry }[] = [];
+  let compX = originX;
+  for (const start of [...items].map((n) => n.id).sort()) {
+    if (visited.has(start)) continue;
+    const comp: string[] = []; const stack = [start]; visited.add(start);
+    while (stack.length) { const u = stack.pop()!; comp.push(u); for (const v of adj.get(u)!) if (!visited.has(v)) { visited.add(v); stack.push(v); } }
+    // raiz: quem NÃO recebe conexão (in-degree 0, ex.: o Maestro que recruta); senão, o de maior saída; desempate por id
+    const compSet = new Set(comp);
+    const roots0 = comp.filter((c) => indeg.get(c)! === 0);
+    const root = (roots0.length ? roots0 : comp).slice().sort((a, b) => (outAdj.get(b)!.size - outAdj.get(a)!.size) || a.localeCompare(b))[0]!;
+    // árvore seguindo a DIREÇÃO (pai→filho); BFS evita ciclos e multi-pais
+    const children = new Map<string, string[]>(); comp.forEach((c) => children.set(c, []));
+    const seen = new Set([root]); const q = [root];
+    while (q.length) {
+      const u = q.shift()!;
+      for (const v of [...outAdj.get(u)!].filter((x) => compSet.has(x)).sort()) if (!seen.has(v)) { seen.add(v); children.get(u)!.push(v); q.push(v); }
+    }
+    // nós do componente ainda não alcançados pela direção (ex.: conexão feita no sentido inverso): pendura na raiz
+    for (const c of comp) if (!seen.has(c)) { seen.add(c); children.get(root)!.push(c); }
+    const subW = new Map<string, number>();
+    const widthOf = (id: string) => byId.get(id)!.geometry.w;
+    const computeW = (u: string): number => { const ch = children.get(u)!; if (!ch.length) { subW.set(u, widthOf(u)); return widthOf(u); } const tot = ch.reduce((acc, c) => acc + computeW(c), 0) + gapX * (ch.length - 1); const w = Math.max(widthOf(u), tot); subW.set(u, w); return w; };
+    computeW(root);
+    const xOf = new Map<string, number>(); const depthMaxH: number[] = []; const depthOf = new Map<string, number>();
+    const place = (u: string, left: number, depth: number) => {
+      depthOf.set(u, depth); depthMaxH[depth] = Math.max(depthMaxH[depth] ?? 0, byId.get(u)!.geometry.h);
+      const ch = children.get(u)!; const w = subW.get(u)!;
+      if (!ch.length) { xOf.set(u, left + (w - widthOf(u)) / 2); return; }
+      let cx = left; for (const c of ch) { place(c, cx, depth + 1); cx += subW.get(c)! + gapX; }
+      const first = xOf.get(ch[0]!)! + widthOf(ch[0]!) / 2, last = xOf.get(ch[ch.length - 1]!)! + widthOf(ch[ch.length - 1]!) / 2;
+      xOf.set(u, (first + last) / 2 - widthOf(u) / 2);
+    };
+    place(root, compX, 0);
+    const yAt: number[] = []; let acc = originY; for (let d = 0; d < depthMaxH.length; d++) { yAt[d] = acc; acc += (depthMaxH[d] ?? 0) + gapY; }
+    for (const id of comp) { const g = byId.get(id)!.geometry; out.push({ id, geometry: { x: Math.round(xOf.get(id)!), y: Math.round(yAt[depthOf.get(id)!]!), w: g.w, h: g.h } }); }
+    compX += subW.get(root)! + gapX * 2;
+  }
+  return out;
+}

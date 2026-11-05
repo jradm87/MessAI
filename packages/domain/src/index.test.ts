@@ -1,5 +1,5 @@
 import {  describe, expect, it } from "vitest";
-import { canMessage, formatDelivery, resolveNodeRef, parseCrossRef, resolveCrossNodeRef, parseGitRemote, buildPrCompareUrl, canWrite, checkRevision, decideLease, normalizeGeometry, trimBuffer, MAX_BUFFER_BYTES, applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxAttachPlan, shellQuote, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, alignGeometries, gridLayout, agentKind, agentResume, stripAnsi, normalizePortalUrl, parsePortal, portalKey, serializePortal, androidInputText, androidKey, isAdbSerial, isAndroidActivity, isAndroidPackage, isAvdName, parseAdbDevices, parseAndroidFocus, parseAndroidPackages, parseUiDump, parseWmSize, pngSize, uiNodeAt, withIsolatedClaudeAutonomy } from "./index.js";
+import { canMessage, formatDelivery, resolveNodeRef, parseCrossRef, resolveCrossNodeRef, parseGitRemote, buildPrCompareUrl, canWrite, checkRevision, decideLease, normalizeGeometry, trimBuffer, MAX_BUFFER_BYTES, applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxAttachPlan, shellQuote, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, alignGeometries, gridLayout, agentKind, agentResume, stripAnsi, normalizePortalUrl, parsePortal, portalKey, serializePortal, androidInputText, androidKey, isAdbSerial, isAndroidActivity, isAndroidPackage, isAvdName, parseAdbDevices, parseAndroidFocus, parseAndroidPackages, parseUiDump, parseWmSize, pngSize, uiNodeAt, withIsolatedClaudeAutonomy, rectBorderToward, floatingEnds, borderSide, treeLayout } from "./index.js";
 
 describe("revisão", () => {
   it("aceita revisão igual e devolve próxima", () => {
@@ -389,5 +389,51 @@ describe("Claude autônomo só quando isolado (#29/#93)", () => {
     expect(withIsolatedClaudeAutonomy("codex", [], true)).toEqual([]); // outro agente: não mexe
     expect(withIsolatedClaudeAutonomy("/bin/sh", [], true)).toEqual([]); // shell: não mexe
     expect(withIsolatedClaudeAutonomy("claude", ["--dangerously-skip-permissions"], true)).toEqual(["--dangerously-skip-permissions"]); // não duplica
+  });
+});
+
+describe("fios flutuantes (ponto de borda mais próximo)", () => {
+  it("rectBorderToward: sai pelo lado certo conforme a direção", () => {
+    // retângulo centro (0,0), 100x100 → bordas em ±50
+    expect(rectBorderToward(0, 0, 100, 100, 1000, 0)).toEqual({ x: 50, y: 0 });   // direita
+    expect(rectBorderToward(0, 0, 100, 100, -1000, 0)).toEqual({ x: -50, y: 0 }); // esquerda
+    expect(rectBorderToward(0, 0, 100, 100, 0, 1000)).toEqual({ x: 0, y: 50 });   // baixo
+    expect(rectBorderToward(0, 0, 100, 100, 0, -1000)).toEqual({ x: 0, y: -50 }); // cima
+  });
+  it("floatingEnds: nó de baixo liga por baixo do de cima e por cima do de baixo", () => {
+    const a = { x: 0, y: 0, w: 100, h: 100 };      // centro (50,50)
+    const b = { x: 0, y: 300, w: 100, h: 100 };    // centro (50,350), direto abaixo
+    const e = floatingEnds(a, b);
+    expect(e.sx).toBe(50); expect(e.sy).toBe(100);  // ponta sai pela BASE de a
+    expect(e.tx).toBe(50); expect(e.ty).toBe(300);  // chega no TOPO de b
+  });
+  it("borderSide classifica o lado do ponto", () => {
+    const r = { x: 0, y: 0, w: 100, h: 100 };
+    expect(borderSide(r, 50, 0)).toBe("top"); expect(borderSide(r, 50, 100)).toBe("bottom");
+    expect(borderSide(r, 0, 50)).toBe("left"); expect(borderSide(r, 100, 50)).toBe("right");
+  });
+});
+
+describe("arranjo em árvore (treeLayout)", () => {
+  const g = (w = 200, h = 100) => ({ x: 0, y: 0, w, h });
+  it("pai em cima, filhos embaixo no nível seguinte, centralizados", () => {
+    const items = [{ id: "root", geometry: g() }, { id: "a", geometry: g() }, { id: "b", geometry: g() }];
+    const edges = [{ source: "root", target: "a" }, { source: "root", target: "b" }];
+    const out = treeLayout(items, edges);
+    const m = Object.fromEntries(out.map((o) => [o.id, o.geometry]));
+    expect(m.a!.y).toBeGreaterThan(m.root!.y); expect(m.b!.y).toBe(m.a!.y); // filhos no mesmo nível, abaixo da raiz
+    expect(m.a!.x).not.toBe(m.b!.x); // irmãos lado a lado
+    const rootCx = m.root!.x + 100, mid = (m.a!.x + m.b!.x + 200) / 2;
+    expect(Math.abs(rootCx - mid)).toBeLessThan(2); // raiz centralizada sobre os filhos
+  });
+  it("neto desce mais um nível; mantém w/h; componentes desconexos não se sobrepõem", () => {
+    const items = [{ id: "r", geometry: g() }, { id: "c", geometry: g() }, { id: "n", geometry: g() }, { id: "solo", geometry: g() }];
+    const edges = [{ source: "r", target: "c" }, { source: "c", target: "n" }];
+    const out = treeLayout(items, edges);
+    const m = Object.fromEntries(out.map((o) => [o.id, o.geometry]));
+    expect(m.c!.y).toBeGreaterThan(m.r!.y); expect(m.n!.y).toBeGreaterThan(m.c!.y); // 3 níveis
+    expect(m.r!.w).toBe(200); expect(m.r!.h).toBe(100); // mantém tamanho
+    const comp1Right = Math.max(m.r!.x + 200, m.c!.x + 200, m.n!.x + 200);
+    expect(m.solo!.x).toBeGreaterThanOrEqual(comp1Right); // componente solto à direita, sem sobrepor
   });
 });

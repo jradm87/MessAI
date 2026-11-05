@@ -6,7 +6,7 @@ import { useAtomValue } from "jotai";
 import { themeAtom } from "./atoms.js";
 import { getThemePref, setThemePref, nextTheme, THEME_LABEL, cssVar } from "./theme.js";
 import { BUILD_VERSION, type Role, type Drawing, type Folder, type Geometry, type Node, type NodeGroup, type NodeIsolation, type Preset, type Sidebar as SidebarData, type Skill, type TermTheme, type Workspace, type WorkspaceSnapshot } from "@messai/contracts";
-import { gridLayout, alignGeometries, type AlignMode, snapGeometry } from "@messai/domain";
+import { gridLayout, alignGeometries, treeLayout, type AlignMode, snapGeometry } from "@messai/domain";
 import { Sidebar } from "./Sidebar.js";
 import { WorkspaceDialog, type WorkspaceInput } from "./WorkspaceDialog.js";
 import { WorkspaceTransferDialog } from "./WorkspaceTransferDialog.js";
@@ -509,6 +509,7 @@ function Canvas({ conn }: { conn: Connection }) {
     { id: "note.new", label: "Nova nota", detail: "Ctrl+Shift+D", keywords: "criar markdown" },
     { id: "binder.new", label: "Novo fichário", detail: "várias notas com abas num só nó", keywords: "caderno páginas abas pilha" },
     { id: "binder.stack", label: "Empilhar notas selecionadas em um fichário", keywords: "juntar notas fichário" },
+    { id: "arrange.tree", label: "Organizar em árvore (pelas conexões)", keywords: "organizar arranjo arvore layout alinhar fios auto" },
     { id: "ws.new", label: "Novo espaço", detail: "Ctrl+Shift+N", keywords: "workspace projeto" },
     { id: "scores", label: "Partituras…", detail: "salvar/colocar arranjos", keywords: "template time arranjo salvar colocar" },
     { id: "prefs", label: "Preferências", detail: "Ctrl+,", keywords: "configurações tema atalhos" },
@@ -536,6 +537,7 @@ function Canvas({ conn }: { conn: Connection }) {
       case "ws.new": setWsDialog({}); return;
       case "binder.new": if (current) { const c = viewCenter(); createSimple("binder", { x: c.x - 210, y: c.y - 140, ...SIZE.binder }); } return;
       case "binder.stack": void stackSelectedNotes(); return;
+      case "arrange.tree": arrangeTree(); return;
       case "prefs": setPrefsOpen(true); return;
       case "scores": setScoresOpen(true); return;
       case "bands": if (current) setBandsOpen(true); return;
@@ -753,6 +755,22 @@ function Canvas({ conn }: { conn: Connection }) {
     rec({ label: `organizar ${plural(moves.length, "nó", "nós")}`, forward: [{ type: "layout", moves: moves.map((m) => ({ nodeId: m.id, geometry: m.geometry })) }], inverse: [{ type: "layout", moves: before }] });
   };
   const arrangeGrid = () => layoutSelected((items) => gridLayout(items, 40), true);
+  // Organiza em árvore de cima para baixo seguindo as conexões (pai → filhos). Usa seleção (2+) ou o espaço todo.
+  const arrangeTree = () => {
+    if (!current || !snapRef.current) return;
+    const all = flowRef.current; const sel = all.filter((n) => n.selected);
+    const pool = sel.length >= 2 ? sel : all;
+    if (pool.length < 2) { toast("Nada para organizar"); return; }
+    const ids = new Set(pool.map((n) => n.id));
+    const items = pool.map((n) => ({ id: n.id, geometry: geoOf(n) }));
+    const edges = (snapRef.current.connections ?? []).filter((c) => ids.has(c.sourceNodeId) && ids.has(c.targetNodeId)).map((c) => ({ source: c.sourceNodeId, target: c.targetNodeId }));
+    const moves = treeLayout(items, edges).filter((m) => { const o = items.find((i) => i.id === m.id)!.geometry; return o.x !== m.geometry.x || o.y !== m.geometry.y; });
+    if (!moves.length) { toast("Já está organizado"); return; }
+    void mutate((r) => api.applyLayout(current, r, moves.map((m) => ({ nodeId: m.id, geometry: m.geometry }))));
+    const before = moves.map((m) => ({ nodeId: m.id, geometry: items.find((i) => i.id === m.id)!.geometry }));
+    rec({ label: `organizar em árvore ${plural(moves.length, "nó", "nós")}`, forward: [{ type: "layout", moves: moves.map((m) => ({ nodeId: m.id, geometry: m.geometry })) }], inverse: [{ type: "layout", moves: before }] });
+    setTimeout(() => void rf.fitView({ padding: 0.15, duration: 300 }), 120);
+  };
   const alignSelected = (mode: AlignMode) => layoutSelected((items) => alignGeometries(items, mode), false);
 
   // Atalhos (iguais ao Maestri onde já existe a função)
