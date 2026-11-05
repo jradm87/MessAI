@@ -1,6 +1,6 @@
 {
   "name": "@messai/desktop",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "private": true,
   "type": "module",
   "description": "Many agents. One organized mess.",
