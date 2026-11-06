@@ -151,7 +151,7 @@ export function formatDelivery(m: { messageId: string; fromTitle: string; text: 
 }
 
 /**
- * Identidade do terminal: é um CLI de IA ou um shell cru? (paridade com o Maestri, que
+ * Identidade do terminal: é um CLI de IA ou um shell cru? (o que
  * carrega isAgent/agentType por terminal). Derivado do comando ORIGINAL da sessão — robusto
  * porque o wrap do tmux e o cwd não entram no command/args salvos.
  * Importa para a resposta implícita do `ask`: shell assenta rápido (prompt volta); agente
@@ -836,7 +836,7 @@ export function pngSize(buf: Uint8Array): { w: number; h: number } | null {
   const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength); return { w: dv.getUint32(16), h: dv.getUint32(20) };
 }
 
-/** #29 — Claude Code autônomo (igual ao Codex e ao Maestri): roda sem as perguntas de permissão, MESMO fora do modo isolado.
+/** #29 — Claude Code autônomo (igual ao Codex): roda sem as perguntas de permissão, MESMO fora do modo isolado.
  * A autonomia vem da flag, não do sandbox — assim o Claude recrutado trabalha sozinho e online (o isolado quebrava a rede/credencial). */
 export function withClaudeAutonomy(command: string, args: string[]): string[] {
   if (agentKind(command, args).agentType !== "claudeCode") return args;

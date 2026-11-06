@@ -54,7 +54,7 @@ function smoothPath(pts: P[]): string {
 
 /**
  * Corda física (Verlet): cadeia de pontos com gravidade e comprimento folgado que PENDURA entre os dois nós, encosta no ponto da borda mais
- * próximo e COLIDE com os demais nós — nunca passa por dentro deles, descansa/contorna a borda (como a corda do Maestri). Renderizada por cima.
+ * próximo e COLIDE com os demais nós — nunca passa por dentro deles, descansa/contorna a borda. Renderizada por cima.
  */
 export function RopeEdge({ id, source, target, sourceX, sourceY, targetX, targetY, selected, data }: EdgeProps & { data?: EdgeData }) {
   const sR = nodeRect(useInternalNode(source)), tR = nodeRect(useInternalNode(target));

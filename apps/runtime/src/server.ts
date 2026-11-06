@@ -72,6 +72,10 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
       const from = (req.body as { fromNodeId?: string } | undefined)?.fromNodeId;
       if (from !== who.nodeId) return reply.status(403).send({ error: { code: "FORBIDDEN", message: "um agente só pergunta à banda em nome do próprio nó" } });
     }
+    // #73 abrir o scrcpy é ação do humano (abre uma janela nativa no host) — agente não pode.
+    if (req.method === "POST" && url === "/v1/devices/:id/act" && (req.body as { action?: string } | undefined)?.action === "scrcpy") {
+      return reply.status(403).send({ error: { code: "FORBIDDEN", message: "só o usuário abre o scrcpy" } });
+    }
     // #93 agente ISOLADO não cria processos fora do sandbox: nada de terminal novo (nem por cópia ou partitura).
     if (svc.isNodeIsolated(who.nodeId)) {
       const nope = (m: string) => reply.status(403).send({ error: { code: "FORBIDDEN", message: `${m} — um agente isolado não cria terminais (escaparia do sandbox). Peça ao usuário.` } });

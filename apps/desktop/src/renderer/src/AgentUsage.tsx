@@ -7,7 +7,7 @@ type Limit = { label: string; pct: number; resets: string };
 type Agent = { id: string; label: string; available: boolean; note?: string; plan?: string; limits?: Limit[]; metrics: { label: string; value: string }[]; models: { name: string; input: number; output: number }[] };
 const fmt = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n));
 
-/** Barra em tracinhos, como no Maestri. */
+/** Barra em tracinhos. */
 function Ticks({ pct, color }: { pct: number; color: string }) {
   const N = 34, on = Math.round((pct / 100) * N);
   return <div className="au-ticks">{Array.from({ length: N }).map((_, i) => <span key={i} style={i < on ? { background: color } : undefined} />)}</div>;
@@ -22,7 +22,7 @@ function resetsLabel(resets: string): string {
   return `Reseta em ${Math.round(h / 24)}d`;
 }
 
-/** Painel "Agent Usage" no estilo Maestri: plano, limites de sessão/semanal em tracinhos, e atividade. */
+/** Painel "Agent Usage": plano, limites de sessão/semanal em tracinhos, e atividade. */
 export function AgentUsage({ api, onClose }: { api: Api; onClose: () => void }) {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);

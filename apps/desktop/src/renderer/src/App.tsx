@@ -44,6 +44,7 @@ import { Palette, type PaletteAction } from "./Palette.js";
 import { ScoresDialog } from "./ScoresDialog.js";
 import { BandsDialog } from "./BandsDialog.js";
 import { BandPanel } from "./BandPanel.js";
+import { ConfirmDialog, type ConfirmReq } from "./ConfirmDialog.js";
 import { RoutinesDialog } from "./RoutinesDialog.js";
 import { ApprovalsDialog } from "./ApprovalsDialog.js";
 import { bandsOfNode } from "./bands.js";
@@ -54,6 +55,7 @@ import type { PaletteItem } from "./palette.js";
 import { useHint, useKeymap } from "./shortcuts.js";
 
 const nodeTypes: NodeTypes = { terminal: TerminalNode as never, note: NoteNode as never, text: TextNode as never, tree: TreeNode as never, binder: BinderNode as never, portal: PortalNode as never, device: DeviceNode as never, stack: StackNode as never };
+const KIND_LABEL: Record<string, string> = { terminal: "terminal", note: "nota", text: "texto", tree: "árvore de arquivos", binder: "fichário", portal: "portal", device: "dispositivo", stack: "pilha" };
 const edgeTypes: EdgeTypes = { rope: RopeEdge as never, circuit: CircuitEdge as never };
 const SIZE = { terminal: { w: 640, h: 380 }, note: { w: 260, h: 160 }, text: { w: 220, h: 48 }, tree: { w: 300, h: 420 }, binder: { w: 420, h: 280 }, portal: { w: 620, h: 440 }, device: { w: 340, h: 680 } } as const;
 
@@ -149,6 +151,8 @@ function Canvas({ conn }: { conn: Connection }) {
   const [scoresOpen, setScoresOpen] = useState(false); // #71 partituras
   const [bandsOpen, setBandsOpen] = useState(false); // #70 bandas
   const [stackFocus, setStackFocus] = useState<{ stackId: string; nodeId: string; n: number } | null>(null); // #70 painel → ativa aba da pilha
+  const [confirmReq, setConfirmReq] = useState<(ConfirmReq & { resolve: (ok: boolean) => void }) | null>(null); // confirmação antes de deletar
+  const askConfirm = (req: ConfirmReq): Promise<boolean> => new Promise((resolve) => setConfirmReq({ ...req, resolve }));
   const [routinesOpen, setRoutinesOpen] = useState(false); // #27 rotinas agendadas
   const [approvalsOpen, setApprovalsOpen] = useState(false); // #93 pedidos de permissão de agentes isolados
   const [isoSupport, setIsoSupport] = useState<{ available: boolean; reason?: string } | null>(null);
@@ -479,7 +483,7 @@ function Canvas({ conn }: { conn: Connection }) {
         n.kind === "terminal" ? [roles, skills, composerFor === n.nodeId || chatFor === n.nodeId ? [snap.nodes.filter((o) => o.nodeId !== n.nodeId && o.kind !== "text").map((o) => [o.nodeId, o.kind, o.title]), (snap.connections ?? []).filter((c) => c.sourceNodeId === n.nodeId || c.targetNodeId === n.nodeId).map((c) => [c.sourceNodeId, c.targetNodeId])] : 0] : 0]); // alvos de @menção só importam com o compositor/chat abertos
       if (old && nodeKeys.current.get(n.nodeId) === nodeKey) return old;
       nodeKeys.current.set(n.nodeId, nodeKey);
-      const del = () => void deleteNodes([n.nodeId]);
+      const del = () => void (async () => { if (await askConfirm({ title: `Apagar ${KIND_LABEL[n.kind] ?? "nó"} "${n.title}"?`, ...(n.kind === "terminal" ? { body: "O processo/terminal será encerrado." } : {}), confirmLabel: "Apagar", danger: true })) deleteNodes([n.nodeId]); })();
       const rename = (title: string) => patchRec(n, { title }, "renomear", `title:${n.nodeId}`);
       const change = (content: string) => patchRec(n, { content }, "editar conteúdo", `content:${n.nodeId}`);
       const linkCount = (snap.connections ?? []).filter((c) => c.sourceNodeId === n.nodeId || c.targetNodeId === n.nodeId).length;
@@ -781,6 +785,12 @@ function Canvas({ conn }: { conn: Connection }) {
   const viewCenter = (): { x: number; y: number } => { const m = document.querySelector("main.canvas")!.getBoundingClientRect(); return rf.screenToFlowPosition({ x: m.left + m.width / 2, y: m.top + m.height / 2 }); };
   const deleteSelected = async () => {
     const sel = flowRef.current.filter((n) => n.selected);
+    const drwSel = [...selDrawingsRef.current];
+    const total = sel.length + drwSel.length;
+    if (total === 0) return;
+    const hasTerm = sel.some((n) => n.type === "terminal");
+    const label = total === 1 && sel.length === 1 ? `Apagar ${KIND_LABEL[sel[0]!.type as string] ?? "nó"} "${(sel[0]!.data as { title?: string }).title ?? ""}"?` : `Apagar ${plural(total, "item selecionado", "itens selecionados")}?`;
+    if (!(await askConfirm({ title: label, ...(hasTerm ? { body: "Terminais selecionados serão encerrados." } : {}), confirmLabel: "Apagar", danger: true }))) return;
     await deleteNodes(sel.map((n) => n.id)); // sequencial + uma etapa de undo
     const drw = [...selDrawingsRef.current];
     if (drw.length > 1) hist().beginGroup(`apagar ${plural(drw.length, "desenho", "desenhos")}`);
@@ -833,7 +843,7 @@ function Canvas({ conn }: { conn: Connection }) {
   };
   const alignSelected = (mode: AlignMode) => layoutSelected((items) => alignGeometries(items, mode), false);
 
-  // Atalhos (iguais ao Maestri onde já existe a função)
+  // Atalhos
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const ctrl = e.ctrlKey || e.metaKey;
@@ -931,11 +941,11 @@ function Canvas({ conn }: { conn: Connection }) {
     settings: () => setPrefsOpen(true),
     newWorkspace: (folderId?: string) => setWsDialog(folderId ? { folderId } : {}),
     editWorkspace: (w: Workspace) => setWsDialog({ edit: w }),
-    deleteWorkspace: (w: Workspace) => { if (confirm(`Apagar "${w.name}" e encerrar seus processos?`)) void run(api.deleteWorkspace(w.workspaceId).then(() => { if (current === w.workspaceId) setCurrent(null); })); },
+    deleteWorkspace: (w: Workspace) => void (async () => { if (await askConfirm({ title: `Apagar o espaço "${w.name}"?`, body: "Encerra os processos dele e remove o espaço.", confirmLabel: "Apagar", danger: true })) void run(api.deleteWorkspace(w.workspaceId).then(() => { if (current === w.workspaceId) setCurrent(null); })); })(),
     moveWorkspace: (w: Workspace, folderId: string | null) => void run(api.patchWorkspace(w.workspaceId, { expectedRevision: w.revision, folderId })),
     newFolder: (kind: "folder" | "group", parentId?: string) => void askText(kind === "group" ? "Nome do grupo" : "Nome da pasta").then((name) => { if (name) void run(api.createFolder({ name, kind, ...(parentId ? { parentId } : {}) })); }),
     renameFolder: (f: Folder) => void askText("Novo nome", f.name).then((name) => { if (name && name !== f.name) void run(api.patchFolder(f.folderId, { name })); }),
-    deleteFolder: (f: Folder) => { if (confirm(`Apagar "${f.name}"? Os espaços dentro ficam soltos.`)) void run(api.deleteFolder(f.folderId)); },
+    deleteFolder: (f: Folder) => void (async () => { if (await askConfirm({ title: `Apagar ${f.kind === "group" ? "o grupo" : "a pasta"} "${f.name}"?`, body: "Os espaços dentro ficam soltos (não são apagados).", confirmLabel: "Apagar", danger: true })) void run(api.deleteFolder(f.folderId)); })(),
     toggleFolder: (f: Folder) => void run(api.patchFolder(f.folderId, { collapsed: !f.collapsed })),
     moveFolder: (f: Folder, parentId: string | null) => void run(api.patchFolder(f.folderId, { parentId })),
     newFloor: (g: Workspace) => setFloorDialog(g),
@@ -1056,6 +1066,7 @@ function Canvas({ conn }: { conn: Connection }) {
           onSave={async (name, description) => { const ids = flowRef.current.filter((n) => n.selected).map((n) => n.id); await runOp((rev) => api.saveScore(current, { expectedRevision: rev, name, ...(description ? { description } : {}), ...(ids.length ? { nodeIds: ids } : {}) })); }}
           onPlace={async (sc) => { const c = viewCenter(); const r = await runOp((rev) => api.placeScore(current, sc.scoreId, { expectedRevision: rev, at: { x: Math.round(c.x - 200), y: Math.round(c.y - 120) } })); rec({ label: `partitura "${sc.name}"`, forward: [], inverse: r.nodeIds.map((id): Op => ({ type: "deleteNode", id })) }); toast(`Partitura "${sc.name}" colocada: ${plural(r.nodeIds.length, "nó", "nós")}`, "ok"); return r.warnings; }} />}
         {paletteOpen && <Palette api={api} workspaces={side.workspaces} currentId={current} currentNodes={(snap?.nodes ?? []).map((n) => ({ nodeId: n.nodeId, kind: n.kind, title: n.title }))} actions={paletteActions} onClose={() => setPaletteOpen(false)} onPick={onPalettePick} />}
+        {confirmReq && <ConfirmDialog req={confirmReq} onResolve={(ok) => { const r = confirmReq.resolve; setConfirmReq(null); r(ok); }} />}
         {prefsOpen && <Preferences api={api} onClose={() => setPrefsOpen(false)} onPresetsChanged={() => void api.presets().then(setPresets).catch(() => {})}
           {...(current ? { workspaceId: current } : {})} workspaceCwd={snap?.workspace.cwd ?? ""} onRolesChanged={() => { void loadRoles(); void loadSkills(); }} onOpenUsage={() => { setPrefsOpen(false); setUsage(true); }}
           onOpenTerminal={(t) => { if (!current) { toast("Abra um espaço para criar o terminal de login"); return; } setPrefsOpen(false); createTerminal(freeSpot(snap?.nodes ?? [], SIZE.terminal), { title: t.title, command: t.command }); }} />}

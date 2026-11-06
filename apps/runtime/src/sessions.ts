@@ -207,12 +207,19 @@ export class SessionManager extends EventEmitter<SessionEvents> {
     const l = this.live.get(sessionId); const s = this.get(sessionId);
     if (!l || !s) return fail("NOT_FOUND", "sessão não encontrada");
     if (s.state !== "running") return fail("SESSION_NOT_RUNNING", `sessão está ${s.state}`);
-    // Separa o Enter final: TUIs com detecção de paste (Claude Code etc.) tratam o \r do mesmo bloco
-    // como quebra de linha do paste, não como submit. Mandando o Enter sozinho depois, ele submete.
+    // Separa o Enter final: TUIs com detecção de paste (Claude Code, Codex…) tratam o \r do mesmo bloco
+    // como quebra de linha do paste, não como submit. Mandamos o texto como BRACKETED PASTE (bloco atômico:
+    // a TUI nunca o submete sozinho, mesmo em briefing longo/multilinha) e o Enter sozinho depois — aí submete.
+    // O atraso escala com o tamanho (briefing grande leva mais pra ser processado antes do Enter chegar).
     const submit = /[\r\n]$/.test(data);
     l.turnOpen = true; l.turnBytes = 0; // mensagem de outro agente também abre um turno (#65)
-    l.proc.write(submit ? data.replace(/[\r\n]+$/, "") : data);
-    if (submit) setTimeout(() => { try { this.live.get(sessionId)?.proc.write("\r"); } catch { /* sessão encerrou */ } }, 120);
+    if (!submit) { l.proc.write(data); return succeed(undefined); }
+    const text = data.replace(/[\r\n]+$/, "");
+    l.proc.write(`\x1b[200~${text}\x1b[201~`); // bracketed paste: texto entra inteiro no campo, sem enviar
+    const delay = Math.min(150 + Math.floor(Buffer.byteLength(text) / 16), 900);
+    const enter = () => { try { this.live.get(sessionId)?.proc.write("\r"); } catch { /* sessão encerrou */ } };
+    setTimeout(enter, delay);
+    setTimeout(enter, delay + 350); // reforço: alguns TUIs (Codex) ignoram o 1º Enter durante o redraw do paste; no campo já vazio o 2º é inócuo
     return succeed(undefined);
   }
 
@@ -232,7 +239,7 @@ export class SessionManager extends EventEmitter<SessionEvents> {
   }
 
   /**
-   * Resposta implícita do `ask` (modo "última tela" do Maestri): dispara a entrega e coleta o
+   * Resposta implícita do `ask` (modo "última tela"): dispara a entrega e coleta o
    * output até o terminal assentar (quiescência `idleMs`) ou estourar `timeoutMs`. O `trigger`
    * roda só depois do listener ligado — sem corrida de perder os primeiros bytes.
    */

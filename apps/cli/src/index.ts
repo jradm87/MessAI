@@ -60,8 +60,8 @@ try {
   mess band create <nome> [nó...]   cria uma banda · add/remove <banda> <nó> · delete <banda>
   mess band ask <banda> <texto>     pergunta a TODOS os membros e espera as respostas [--timeout seg]
   mess band say <banda> <texto>     transmite (broadcast) sem esperar resposta
-  mess maestro recruit (--preset p | --command c [--arg a]...) [--name n] [--role r] [--band b] [--cwd d]
-                                    (só condutor) recruta um terminal ligado a você
+  mess maestro recruit (--preset p | --command c [--arg a]...) [--name n] [--role r] [--band b] [--cwd d] [--persist]
+                                    (só condutor) recruta um terminal ligado a você · --persist = tmux (sobrevive a fechar/reabrir o app)
   mess maestro dismiss <nó>         (só condutor) encerra e remove um terminal ligado a você
   mess maestro assign <nó> <papel|->  (só condutor) reatribui o papel (- remove)
   mess portal list|new [url] [--name n]   portais (navegador no canvas) do espaço · cria um
@@ -350,7 +350,7 @@ try {
       console.log(`portal criado [${short(r.node.nodeId)}] "${r.node.title}"${url ? ` → ${url}` : ""}${nodeId ? " e ligado ao seu nó" : ""}`);
     } else {
       const OPS = ["open", "navigate", "back", "forward", "reload", "state", "close", "snapshot", "click", "type", "key", "scroll", "eval", "wait-text", "screenshot"];
-      if (OPS.includes(args[0]!) && args[1] && !OPS.includes(args[1])) [args[0], args[1]] = [args[1]!, args[0]!]; // aceita também `mess portal snapshot <portal>` (ordem da skill do Maestri)
+      if (OPS.includes(args[0]!) && args[1] && !OPS.includes(args[1])) [args[0], args[1]] = [args[1]!, args[0]!]; // aceita também `mess portal snapshot <portal>` (ordem alternativa aceita)
       const ref = args.shift()!; const op = args.shift();
       const s = await snapshot(); const n = findNode(s.nodes.filter((x) => x.kind === "portal"), ref);
       if (!n) throw new Error("portal não encontrado (veja `mess portal list`)");
@@ -444,9 +444,10 @@ try {
     const op = args.shift();
     const flags = (f: string) => { const out: string[] = []; for (let i = args.indexOf(f); i >= 0; i = args.indexOf(f)) { const v = args[i + 1]; args.splice(i, 2); if (v !== undefined) out.push(v); } return out; };
     if (op === "recruit") {
+      const persist = (() => { const i = args.indexOf("--persist"); if (i < 0) return false; args.splice(i, 1); return true; })();
       const [preset] = flags("--preset"), [command] = flags("--command"), [name] = flags("--name"), [roleName] = flags("--role"), [band] = flags("--band"), [cwd] = flags("--cwd"); const a = flags("--arg");
-      if (!preset && !command) throw new Error("uso: mess maestro recruit (--preset <id> | --command <cmd> [--arg a]...) [--name n] [--role r] [--band b] [--cwd d]");
-      const r = await call<{ node: Node; bandId?: string }>("POST", `/v1/nodes/${nodeId}/maestro/recruit`, { ...(preset ? { preset } : {}), ...(command ? { command } : {}), ...(a.length ? { args: a } : {}), ...(name ? { name } : {}), ...(roleName ? { roleName } : {}), ...(band ? { band } : {}), ...(cwd ? { cwd } : {}) });
+      if (!preset && !command) throw new Error("uso: mess maestro recruit (--preset <id> | --command <cmd> [--arg a]...) [--name n] [--role r] [--band b] [--cwd d] [--persist]");
+      const r = await call<{ node: Node; bandId?: string }>("POST", `/v1/nodes/${nodeId}/maestro/recruit`, { ...(preset ? { preset } : {}), ...(command ? { command } : {}), ...(a.length ? { args: a } : {}), ...(name ? { name } : {}), ...(roleName ? { roleName } : {}), ...(band ? { band } : {}), ...(cwd ? { cwd } : {}), ...(persist ? { persistent: true } : {}) });
       console.log(`recrutado "${r.node.title}" [${short(r.node.nodeId)}]${r.bandId ? ` na banda ${band}` : ""}`);
     } else if (op === "dismiss") {
       const [ref] = args; if (!ref) throw new Error("uso: mess maestro dismiss <nó>");

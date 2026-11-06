@@ -4,7 +4,7 @@ import type { Band } from "@messai/contracts";
 import { bandColor } from "./bands.js";
 
 /**
- * #70 — Painel de bandas no canto do canvas: cada banda é um grupo recolhível com seus membros (como o "RECON" do Maestri).
+ * #70 — Painel de bandas no canto do canvas: cada banda é um grupo recolhível com seus membros (estilo painel "RECON").
  * Clicar num membro foca o nó (ou abre a pilha e ativa a aba, se agrupada); dá pra agrupar/desagrupar os terminais num só nó.
  */
 type Term = { nodeId: string; title: string };

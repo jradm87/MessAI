@@ -746,10 +746,10 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     this.publish(node.workspaceId);
     return succeed(updated);
   }
-  /** Lê role.json em `<dir>/.messai/roles/<slug>/` (e `.maestri/roles/` por compatibilidade) e cria/atualiza papéis pelo nome. */
+  /** Lê role.json em `<dir>/.messai/roles/<slug>/` e cria/atualiza papéis pelo nome. */
   discoverRoles(dir: string): Result<{ imported: Role[] }> {
     const imported: Role[] = [];
-    for (const base of [".messai", ".maestri"]) {
+    for (const base of [".messai"]) {
       const root = join(dir, base, "roles");
       if (!existsSync(root)) continue;
       for (const e of readdirSync(root, { withFileTypes: true })) {
@@ -1186,6 +1186,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
         }
         case "shutdown": await this.devices.shutdown(nodeId); return succeed({ ok: true, state: st() });
         case "disconnect": this.devices.disconnect(nodeId); return succeed({ ok: true, state: st() });
+        case "scrcpy": await this.devices.scrcpy(nodeId); return succeed({ ok: true, state: st() });
       }
       const c = await this.deviceConn(nodeId); if (!c.ok) return c; const d = c.value;
       switch (act.action) {
@@ -1509,7 +1510,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const w = this.store.getWorkspace(workspaceId);
     if (w?.parentId) return this.readHooksConfig(w.parentId);
     if (w) {
-      for (const rel of [".messai/hooks.json", ".maestri/hooks.json"]) {
+      for (const rel of [".messai/hooks.json"]) {
         const p = join(w.cwd, rel);
         if (!existsSync(p)) continue;
         try {
@@ -2883,7 +2884,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
   }
 
   /**
-   * `ask` bloqueante (paridade com o Maestri): entrega o prompt no destino e espera ele assentar,
+   * `ask` bloqueante: entrega o prompt no destino e espera ele assentar,
    * devolvendo a "última tela" como resposta. Para shell cru isso traz a saída do comando; para
    * agente de IA, a resposta dele. Timeout/quiescência dependem do tipo (agente anima enquanto pensa).
    */
@@ -2928,7 +2929,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     return out.join("\n").trim();
   }
 
-  /** Lê a tela atual de um terminal conectado, sem enviar nada (paridade com `maestri check`). */
+  /** Lê a tela atual de um terminal conectado, sem enviar nada. */
   checkPeer(fromNodeId: string, ref: string): Result<{ agentType: string; screen: string }> {
     const from = this.store.getNode(fromNodeId);
     if (!from) return fail("NOT_FOUND", "nó de origem não encontrado");
@@ -3221,7 +3222,9 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     let roleId: string | undefined;
     if (input.roleName) { const r = this.store.listRoles().find((x) => x.name.toLowerCase() === input.roleName!.toLowerCase()); if (!r) return fail("NOT_FOUND", `papel não encontrado: ${input.roleName}`); roleId = r.roleId; }
     const geometry = this.freeSpotNear(maestro, this.store.listNodes(w.workspaceId), 560, 340);
-    const made = this.createNode(w.workspaceId, { expectedRevision: w.revision, kind: "terminal", title: input.name ?? preset?.label ?? "Agente", geometry, command, args, ...(input.cwd ? { cwd: input.cwd } : {}), ...(roleId ? { roleId } : {}), ...(preset?.color ? { color: preset.color } : {}), ...(preset?.icon ? { icon: preset.icon } : {}), ...(preset && preset.theme !== "system" ? { termTheme: preset.theme } : {}), ...(input.persistent ? { persistent: true } : {}) });
+    // `--persist` → recrutado PERSISTENTE (tmux): sobrevive a fechar/reabrir o app, como o condutor. Sem tmux, ignora (não falha o recruit).
+    const persist = !!input.persistent && SessionManager.tmuxAvailable();
+    const made = this.createNode(w.workspaceId, { expectedRevision: w.revision, kind: "terminal", title: input.name ?? preset?.label ?? "Agente", geometry, command, args, ...(input.cwd ? { cwd: input.cwd } : {}), ...(roleId ? { roleId } : {}), ...(preset?.color ? { color: preset.color } : {}), ...(preset?.icon ? { icon: preset.icon } : {}), ...(preset && preset.theme !== "system" ? { termTheme: preset.theme } : {}), ...(persist ? { persistent: true } : {}) });
     if (!made.ok) return made;
     const node = made.value.node;
     const link = this.createConnection(w.workspaceId, { expectedRevision: this.store.getWorkspace(w.workspaceId)!.revision, sourceNodeId: maestro.nodeId, targetNodeId: node.nodeId });

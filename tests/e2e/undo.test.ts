@@ -92,6 +92,7 @@ describe("Desfazer/refazer (#77)", () => {
     await canvasClick(); await page.keyboard.press("Control+\\"); await sleep(400); // enquadra
     await node.locator(".bar .title").click();
     await page.keyboard.press("Delete");
+    await page.click('[data-testid="confirm-ok"]'); // confirmação antes de deletar
     await node.waitFor({ state: "detached", timeout: 10_000 });
     expect((await snap()).connections).toHaveLength(0);
     await canvasClick(); await page.keyboard.press("Control+z");

@@ -2,7 +2,7 @@ import { Type, type Static } from "@sinclair/typebox";
 
 export const PROTOCOL_VERSION = 1 as const;
 /** Incrementar a cada mudança de snapshot/rotas; o cliente avisa quando o runtime está atrás. */
-export const BUILD_VERSION = 39 as const;
+export const BUILD_VERSION = 43 as const;
 
 // ---------- Identidades ----------
 export const Id = Type.String({ minLength: 8, maxLength: 64 });
@@ -746,6 +746,7 @@ export const DeviceAct = Type.Union([
   Type.Object({ action: Type.Literal("text"), text: Type.String({ minLength: 1, maxLength: 2000 }) }),
   Type.Object({ action: Type.Literal("launch"), package: Type.String({ minLength: 1, maxLength: 200 }), activity: Type.Optional(Type.String({ minLength: 1, maxLength: 300 })) }),
   Type.Object({ action: Type.Literal("stop"), package: Type.String({ minLength: 1, maxLength: 200 }) }),
+  Type.Object({ action: Type.Literal("scrcpy") }), // #73 abre o scrcpy (janela nativa) conectado neste aparelho — controle manual de verdade
 ]);
 export type DeviceAct = Static<typeof DeviceAct>;
 export const DeviceActResult = Type.Object({ ok: Type.Boolean(), state: DeviceState, message: Type.Optional(Type.String()) });

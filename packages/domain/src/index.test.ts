@@ -382,7 +382,7 @@ describe("dispositivos Android (#73)", () => {
   });
 });
 
-describe("Claude autônomo sempre (#29, igual Maestri)", () => {
+describe("Claude autônomo sempre (#29)", () => {
   it("adiciona --dangerously-skip-permissions p/ claude (mesmo fora do isolado); nunca p/ outros agentes", () => {
     expect(withClaudeAutonomy("claude", ["--append-system-prompt", "x"])).toContain("--dangerously-skip-permissions");
     expect(withClaudeAutonomy("claude", [])).toEqual(["--dangerously-skip-permissions"]); // autônomo mesmo fora do isolado

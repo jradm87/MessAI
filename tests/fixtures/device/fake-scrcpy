@@ -1,0 +1,5 @@
+#!/bin/bash
+# scrcpy FALSO para os testes (#73): registra a invocação e fica de pé (não encerra cedo), simulando o scrcpy aberto.
+D="${FAKE_ADB_DIR:?}"
+echo "$*" >> "$D/scrcpy.log"
+sleep 5

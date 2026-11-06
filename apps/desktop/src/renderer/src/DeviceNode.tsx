@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useState, type KeyboardEvent as RKeyboardEvent, type MouseEvent as RMouseEvent } from "react";
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
-import { AppWindow, ArrowLeft, Circle, Crosshair, Loader, Power, RefreshCw, Smartphone, Square, Unplug } from "lucide-react";
+import { AppWindow, ArrowLeft, Cast, Circle, Crosshair, Loader, Power, RefreshCw, Smartphone, Square, Unplug } from "lucide-react";
 import { uiNodeAt } from "@messai/domain";
 import type { DeviceAct, DeviceList, DeviceState, DeviceUiNode } from "@messai/contracts";
 import type { Api, Stream } from "./api.js";
@@ -27,7 +27,8 @@ function DeviceNodeImpl({ id, data, selected }: NodeProps & { data: DeviceData }
   const [err, setErr] = useState<string | null>(null);
   const [tree, setTree] = useState<DeviceUiNode[] | null>(null); const [inspect, setInspect] = useState(false); const [hover, setHover] = useState<DeviceUiNode | null>(null); const [picked, setPicked] = useState<DeviceUiNode | null>(null); const [loadingUi, setLoadingUi] = useState(false);
   const [apps, setApps] = useState<string[] | null>(null); const [textBox, setTextBox] = useState("");
-  const img = useRef<HTMLImageElement>(null); const view = useRef<HTMLDivElement>(null);
+  const canvas = useRef<HTMLCanvasElement>(null); const view = useRef<HTMLDivElement>(null);
+  const pendFrame = useRef<string | null>(null); const decoding = useRef(false);
   const [dims, setDims] = useState({ w: 0, h: 0 }); const dimsRef = useRef(dims); dimsRef.current = dims;
   const queue = useRef<Promise<unknown>>(Promise.resolve()); const down = useRef<{ x: number; y: number; t: number } | null>(null);
   const typed = useRef(""); const typeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined); const wheelBusy = useRef(false);
@@ -39,6 +40,26 @@ function DeviceNodeImpl({ id, data, selected }: NodeProps & { data: DeviceData }
     return queue.current as Promise<{ state: DeviceState } | null>;
   }, [api, id]);
   const refreshList = useCallback(() => { void api.deviceList().then(setList).catch(() => {}); }, [api]);
+  // Desenha o quadro num canvas (decode completo via createImageBitmap antes de pintar → troca atômica, SEM piscar como no <img>).
+  // Mantém só o último quadro; se um decode está em andamento, o próximo substitui o pendente (drop de quadros atrasados).
+  const drawFrame = useCallback((b64: string) => {
+    pendFrame.current = b64;
+    if (decoding.current) return;
+    decoding.current = true;
+    void (async () => {
+      while (pendFrame.current) {
+        const data = pendFrame.current; pendFrame.current = null;
+        try {
+          const bin = atob(data); const arr = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+          const bmp = await createImageBitmap(new Blob([arr], { type: "image/png" }));
+          const c = canvas.current;
+          if (c) { if (c.width !== bmp.width || c.height !== bmp.height) { c.width = bmp.width; c.height = bmp.height; } c.getContext("2d")?.drawImage(bmp, 0, 0); }
+          bmp.close?.();
+        } catch { /* quadro ruim: ignora */ }
+      }
+      decoding.current = false;
+    })();
+  }, []);
 
   useEffect(() => { let alive = true; void api.deviceState(id).then((s) => { if (alive) setSt(s); }).catch(() => {}); refreshList(); return () => { alive = false; }; }, [api, id, refreshList]);
   // assiste sempre (barato: sem aparelho ligado não há captura); o servidor reconecta ao aparelho salvo
@@ -47,12 +68,12 @@ function DeviceNodeImpl({ id, data, selected }: NodeProps & { data: DeviceData }
     watch();
     const off = stream.on((m) => {
       if (m.type === "hello") watch();
-      else if (m.type === "deviceFrame" && m.nodeId === id) { if (img.current) img.current.src = `data:image/png;base64,${m.data}`; setDims((d) => (d.w === m.width && d.h === m.height ? d : { w: m.width, h: m.height })); }
+      else if (m.type === "deviceFrame" && m.nodeId === id) { drawFrame(m.data); setDims((d) => (d.w === m.width && d.h === m.height ? d : { w: m.width, h: m.height })); }
       else if (m.type === "deviceState" && m.state.nodeId === id) setSt(m.state);
       else if (m.type === "error" && !("sessionId" in m && m.sessionId)) setErr(m.error.message);
     });
     return () => { off(); stream.send({ type: "deviceUnwatch", nodeId: id }); };
-  }, [stream, id]);
+  }, [stream, id, drawFrame]);
 
   const pick = (value: string) => {
     if (!value) return; setErr(null);
@@ -61,7 +82,7 @@ function DeviceNodeImpl({ id, data, selected }: NodeProps & { data: DeviceData }
   };
   /** posição em coordenadas do APARELHO a partir do clique (considera o letterbox do object-fit: contain) */
   const pos = (e: { clientX: number; clientY: number }) => {
-    const el = img.current; const d = dimsRef.current; if (!el || !d.w) return null;
+    const el = canvas.current; const d = dimsRef.current; if (!el || !d.w) return null;
     const r = el.getBoundingClientRect(); const sc = Math.min(r.width / d.w, r.height / d.h); if (!sc) return null;
     const x = (e.clientX - r.left - (r.width - d.w * sc) / 2) / sc; const y = (e.clientY - r.top - (r.height - d.h * sc) / 2) / sc;
     return x < 0 || y < 0 || x >= d.w || y >= d.h ? null : { x, y };
@@ -108,6 +129,7 @@ function DeviceNodeImpl({ id, data, selected }: NodeProps & { data: DeviceData }
         <EditableTitle value={data.title} onSave={data.onRename} editSignal={data.editSignal ?? 0} />
         <span className="sp" />
         {st?.watchers ? <span className="mut" style={{ fontSize: 10 }}>{st.watchers}👁</span> : null}
+        <button className="ib nodrag" title="Abrir no scrcpy (controle manual numa janela nativa, na mesma sessão)" data-testid="device-scrcpy" disabled={status !== "connected"} onClick={() => void act({ action: "scrcpy" })}><Cast size={13} /></button>
         <button className={`ib nodrag ${inspect ? "on" : ""}`} title="Inspecionar elementos (árvore de acessibilidade)" data-testid="device-inspect" disabled={status !== "connected"} onClick={toggleInspect}><Crosshair size={13} /></button>
         <button className="ib nodrag" title="Desligar o nó do aparelho (não o desliga)" data-testid="device-disconnect" disabled={status !== "connected"} onClick={() => void act({ action: "disconnect" })}><Unplug size={13} /></button>
         <button className="ib nodrag" title="Encerrar o emulador (só os iniciados por este app)" data-testid="device-shutdown" disabled={status !== "connected"} onClick={() => void act({ action: "shutdown" })}><Power size={13} /></button>
@@ -127,7 +149,7 @@ function DeviceNodeImpl({ id, data, selected }: NodeProps & { data: DeviceData }
         onMouseDown={onDown} onMouseUp={onUp} onMouseMove={onMove} onMouseLeave={() => { setHover(null); down.current = null; }} onWheel={onWheel} onKeyDown={onKey} onPaste={onPaste} onContextMenu={(e) => e.preventDefault()}>
         {status === "connected" ? (
           <div className="dev-screen">
-            <img ref={img} alt="" draggable={false} data-testid="device-img" />
+            <canvas ref={canvas} data-testid="device-img" />
             {inspect && dims.w > 0 && <div className="dev-overlay" style={{ aspectRatio: `${dims.w} / ${dims.h}` }}>{box(hover, "hover")}{box(picked, "pick")}</div>}
           </div>
         ) : (

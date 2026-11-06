@@ -14,8 +14,8 @@ const api = async (method: string, path: string, body?: unknown) => {
 const wait = async (pred: () => Promise<boolean>, ms = 8000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pred()) return true; await new Promise((r) => setTimeout(r, 150)); } return false; };
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "mess-roles-"));
-  mkdirSync(join(dir, "proj/.maestri/roles/revisor"), { recursive: true });
-  writeFileSync(join(dir, "proj/.maestri/roles/revisor/role.json"), JSON.stringify({ name: "Revisor", badge: "RV", prompt: "Revise sem alterar código." }));
+  mkdirSync(join(dir, "proj/.messai/roles/revisor"), { recursive: true });
+  writeFileSync(join(dir, "proj/.messai/roles/revisor/role.json"), JSON.stringify({ name: "Revisor", badge: "RV", prompt: "Revise sem alterar código." }));
   rt = spawn("node", [join(ROOT, "apps/runtime/dist/index.js")], { env: { ...process.env, MESS_DATA_DIR: dir, MESS_PORT: String(PORT), SHELL: "/bin/sh" }, stdio: "ignore" });
   for (let i = 0; i < 40; i++) { await new Promise((r) => setTimeout(r, 200)); try { token = readFileSync(join(dir, "runtime.token"), "utf8").trim(); if ((await fetch(`http://127.0.0.1:${PORT}/v1/health`, { headers: { authorization: `Bearer ${token}` } })).ok) break; } catch { /* subindo */ } }
 }, 30_000);
@@ -30,7 +30,7 @@ describe("papéis (responsabilidades)", () => {
     expect((await api("POST", "/v1/roles", { name: "dev BACKEND", instructions: "" })).status).toBe(409);
     expect((await api("PATCH", `/v1/roles/${role.roleId}`, { badge: "api" })).json).toMatchObject({ badge: "API" });
   });
-  it("descobre role.json do projeto (compatível com .maestri) e exporta como .messai", async () => {
+  it("descobre role.json do projeto (.messai) e exporta", async () => {
     const d = (await api("POST", "/v1/roles/discover", { dir: join(dir, "proj") })).json as { imported: { name: string; badge: string; instructions: string }[] };
     expect(d.imported).toHaveLength(1); expect(d.imported[0]).toMatchObject({ name: "Revisor", badge: "RV", instructions: "Revise sem alterar código." });
     const e = (await api("POST", `/v1/roles/${role.roleId}/export`, { dir: join(dir, "proj") })).json as { path: string };

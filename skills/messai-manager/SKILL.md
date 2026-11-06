@@ -20,7 +20,7 @@ mess maestro assign <id|title> <roleName|->                # (re)assign a role; 
 mess close <id|title>                                      # delete a NON-terminal node (note / portal / device / binder)
 ```
 
-Recruited terminals are **auto-linked to you** and placed in a free spot (no overlap). To clean up: a **terminal** goes via `mess maestro dismiss`; a **note, portal or device** goes via `mess close` (terminals are refused by `close` on purpose).
+Recruited terminals are **auto-linked to you** and placed in a free spot (no overlap). For a **long run that must survive closing/reopening the app**, recruit with **`--persist`** (wraps the agent in tmux); without it, the terminal dies when the app/runtime stops. To clean up: a **terminal** goes via `mess maestro dismiss`; a **note, portal or device** goes via `mess close` (terminals are refused by `close` on purpose).
 
 ### Roles must pre-exist
 

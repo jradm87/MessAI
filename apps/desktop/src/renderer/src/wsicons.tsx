@@ -1,7 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import { Folder, Code2, SquareTerminal, Globe, Rocket, Database, Server, Cloud, Cpu, Box, Package, Briefcase, BookOpen, FlaskConical, Bug, Wrench, Hammer, Layers, Zap, Star, Heart, Flag, Home, Gamepad2 } from "lucide-react";
 
-/** Grade de 24 ícones do diálogo New Workspace (mesma proposta do Maestri). */
+/** Grade de 24 ícones do diálogo New Workspace. */
 export const WS_ICONS: Record<string, LucideIcon> = {
   folder: Folder, code: Code2, terminal: SquareTerminal, globe: Globe, rocket: Rocket, database: Database,
   server: Server, cloud: Cloud, cpu: Cpu, box: Box, package: Package, briefcase: Briefcase,

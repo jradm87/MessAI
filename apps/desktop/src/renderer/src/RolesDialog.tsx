@@ -37,7 +37,7 @@ export function RolesPanel({ api, workspaceCwd, onChanged }: { api: Api; workspa
         {q.trim() && shown.length === 0 && <div className="mi mut">nenhum papel casa com a busca</div>}
         <div className={`mi ${sel === "new" ? "on" : ""}`} onClick={() => pick("new")} data-testid="role-new"><Plus size={14} /> Novo papel</div>
         <div className="sp" />
-        <button onClick={() => void discover()} disabled={!workspaceCwd} title={workspaceCwd ? `Procura role.json em ${workspaceCwd}/.messai/roles e .maestri/roles` : "Abra um espaço para descobrir papéis locais"}><FolderSearch size={14} /> Descobrir no diretório</button>
+        <button onClick={() => void discover()} disabled={!workspaceCwd} title={workspaceCwd ? `Procura role.json em ${workspaceCwd}/.messai/roles` : "Abra um espaço para descobrir papéis locais"}><FolderSearch size={14} /> Descobrir no diretório</button>
       </div>
       <div className="roles-edit">
         {sel ? (<>

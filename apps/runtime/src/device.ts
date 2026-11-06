@@ -25,6 +25,10 @@ export function findEmulator(): string | null {
   for (const r of SDK_ROOTS()) { const c = join(r, "emulator", "emulator"); if (existsSync(c)) return c; }
   return null;
 }
+export function findScrcpy(): string | null {
+  const env = process.env["MESS_SCRCPY"]; if (env) return existsSync(env) ? env : null;
+  return whichOnPath("scrcpy");
+}
 
 export type AdbResult = { status: number; stdout: Buffer; stderr: string };
 export function runBin(bin: string, args: string[], opts: { timeoutMs?: number; maxBuffer?: number } = {}): Promise<AdbResult> {
@@ -208,6 +212,23 @@ export class DeviceManager {
     const e = this.entries.get(nodeId); if (!e?.dev) return;
     if (live > DEVICE_MAX_LOOPS) return; // teto de capturas simultâneas
     e.dev.startLoop(); e.dev.replay();
+  }
+  /** Abre o scrcpy (janela nativa) conectado no serial deste nó — controle manual de verdade na MESMA sessão adb que a IA usa. */
+  async scrcpy(nodeId: string): Promise<void> {
+    const e = this.entries.get(nodeId); const serial = e?.dev?.serial ?? e?.serial;
+    if (!serial) throw new Error("ligue o nó a um aparelho antes de abrir o scrcpy");
+    const bin = findScrcpy(); if (!bin) throw new Error("scrcpy não encontrado (instale o pacote `scrcpy` ou defina MESS_SCRCPY)");
+    const adb = findAdb(); // o scrcpy usa o MESMO adb do MessAI (via env ADB) → sem conflito de versão de adb server
+    const child = spawn(bin, ["-s", serial, "--window-title", `MessAI · ${e?.model || serial}`], { detached: true, stdio: ["ignore", "ignore", "pipe"], env: { ...process.env, ...(adb ? { ADB: adb } : {}) } });
+    let tail = ""; child.stderr?.setEncoding("utf8"); child.stderr?.on("data", (d: string) => { tail = (tail + d).slice(-600); });
+    // falha cedo (ex.: libav ausente) = reporta; se ficou de pé ~1s, deu certo e soltamos o processo
+    const early = await new Promise<string | null>((res) => {
+      const to = setTimeout(() => res(null), 1000);
+      child.once("exit", (code) => { clearTimeout(to); res(code ? (tail.trim().split("\n").filter(Boolean).slice(-1)[0] || `scrcpy encerrou (código ${code})`) : null); });
+      child.once("error", (err: Error) => { clearTimeout(to); res(err.message); });
+    });
+    if (early) throw new Error(`scrcpy falhou: ${early}`);
+    child.unref();
   }
   watch(nodeId: string, key: string): void { const e = this.entry(nodeId); e.watchers.add(key); this.startLoop(nodeId); this.publish(nodeId); }
   unwatch(nodeId: string, key: string): void { const e = this.entries.get(nodeId); if (!e) return; e.watchers.delete(key); if (!e.watchers.size) e.dev?.stopLoop(); this.publish(nodeId); }

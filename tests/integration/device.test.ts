@@ -19,7 +19,7 @@ const bwrapOk = (() => { try { execFileSync("bwrap", ["--unshare-user", "--ro-bi
 const calls = (): string[] => (existsSync(join(fake, "calls.log")) ? readFileSync(join(fake, "calls.log"), "utf8").split("\n").filter(Boolean) : []);
 const emuStarts = (): string[] => (existsSync(join(fake, "emulator.log")) ? readFileSync(join(fake, "emulator.log"), "utf8").split("\n").filter((l) => l.startsWith("-avd")) : []);
 const devicesFile = (): string => (existsSync(join(fake, "devices")) ? readFileSync(join(fake, "devices"), "utf8") : "");
-const boot = async (port: number, dataDir: string, env: NodeJS.ProcessEnv) => { const p = spawn(process.execPath, [join(ROOT, "apps/runtime/dist/index.js")], { env: { ...process.env, MESS_DATA_DIR: dataDir, MESS_PORT: String(port), SHELL: "/bin/sh", FAKE_ADB_DIR: fake, MESS_ADB: join(FIX, "fake-adb"), MESS_EMULATOR: join(FIX, "fake-emulator"), ...env }, stdio: "ignore" }); let tk = ""; for (let i = 0; i < 60; i++) { await sleep(200); try { tk = readFileSync(join(dataDir, "runtime.token"), "utf8").trim(); if ((await fetch(`http://127.0.0.1:${port}/v1/health`, { headers: { authorization: `Bearer ${tk}` } })).ok) break; } catch { /* subindo */ } } return { p, tk }; };
+const boot = async (port: number, dataDir: string, env: NodeJS.ProcessEnv) => { const p = spawn(process.execPath, [join(ROOT, "apps/runtime/dist/index.js")], { env: { ...process.env, MESS_DATA_DIR: dataDir, MESS_PORT: String(port), SHELL: "/bin/sh", FAKE_ADB_DIR: fake, MESS_ADB: join(FIX, "fake-adb"), MESS_EMULATOR: join(FIX, "fake-emulator"), MESS_SCRCPY: join(FIX, "fake-scrcpy"), ...env }, stdio: "ignore" }); let tk = ""; for (let i = 0; i < 60; i++) { await sleep(200); try { tk = readFileSync(join(dataDir, "runtime.token"), "utf8").trim(); if ((await fetch(`http://127.0.0.1:${port}/v1/health`, { headers: { authorization: `Bearer ${tk}` } })).ok) break; } catch { /* subindo */ } } return { p, tk }; };
 let n = 0;
 const mkDev = async (name: string, content: Record<string, unknown> | string = {}, wsId?: string) => {
   const ws = wsId ?? ((await api("POST", "/v1/workspaces", { name: `${name}-${++n}`, cwd: dir })).json as { workspaceId: string }).workspaceId;
@@ -100,6 +100,13 @@ describe("dispositivos Android com adb falso", () => {
       const r = await act(id, bad); expect(r.status, JSON.stringify(bad)).toBe(400);
     }
     expect(calls().slice(n0).filter((c) => c.includes(" shell "))).toEqual([]); // nada chegou ao adb
+  });
+  it("scrcpy: abre a janela nativa conectada no serial do nó (-s SER)", async () => {
+    const d = await mkDev("scrcpy", { serial: SER }); const id = d.nodeId;
+    expect((await act(id, { action: "select", serial: SER })).status).toBe(200);
+    const r = await act(id, { action: "scrcpy" }); expect(r.status, JSON.stringify(r.json)).toBe(200);
+    const log = await waitFor(() => (existsSync(join(fake, "scrcpy.log")) ? readFileSync(join(fake, "scrcpy.log"), "utf8") : false));
+    expect(log).toContain(`-s ${SER}`);
   });
 
   it("árvore de UI, captura PNG e apps; desconectar e agir de novo reconecta pelo serial salvo", async () => {

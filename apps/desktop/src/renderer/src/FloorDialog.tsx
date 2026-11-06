@@ -5,7 +5,7 @@ import type { Api } from "./api.js";
 const slug = (n: string) => n.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
 export type FloorInput = { name: string; branch?: string; newBranch?: boolean; base?: string; floorType?: "worktree" | "copy" | "none"; copyMode?: FloorCopyMode; excludeDirs?: string[]; cloneLayout?: boolean; hooks?: PutFloorHooks };
 
-/** Diálogo "Novo andar" (estilo Maestri): nome + clonar layout. Isolamento (worktree / cópia isolada CoW / sem isolamento) e hooks ficam em "Avançado". */
+/** Diálogo "Novo andar": nome + clonar layout. Isolamento (worktree / cópia isolada CoW / sem isolamento) e hooks ficam em "Avançado". */
 export function FloorDialog({ ground, api, onSubmit, onClose }: { ground: Workspace; api?: Api; onSubmit: (i: FloorInput) => void; onClose: () => void }) {
   const [name, setName] = useState("");
   const [clone, setClone] = useState(false);

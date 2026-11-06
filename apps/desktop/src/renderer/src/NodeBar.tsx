@@ -12,7 +12,7 @@ export type NodeBarProps = {
   onDelete: () => void;
 };
 
-/** Barra contextual acima do nó selecionado (mesma ordem do Maestri): editar, chat, elevar/acoplar, conectar, recarregar, excluir. */
+/** Barra contextual acima do nó selecionado: editar, chat, elevar/acoplar, conectar, recarregar, excluir. */
 export function NodeBar(p: NodeBarProps) {
   return (
     <NodeToolbar isVisible={p.visible} position={Position.Top} offset={8} className="nodebar">

@@ -60,7 +60,7 @@ const http = buildServer(cfg, svc, { unix: false, onShutdown: (killAgents) => vo
 const agent = buildServer(cfg, svc, { unix: true });
 
 if (existsSync(cfg.socketPath)) unlinkSync(cfg.socketPath);
-try { const r = installAgentSkills(); if (r.installed) console.log(`[skills] ${r.installed} skills MessAI instaladas em ${r.dirs} pastas; ${r.removedMaestri} skills maestri-* removidas`); } catch (e) { console.error("[skills] falha ao instalar skills:", e); }
+try { const r = installAgentSkills(); if (r.installed) console.log(`[skills] ${r.installed} skills MessAI instaladas em ${r.dirs} pastas`); } catch (e) { console.error("[skills] falha ao instalar skills:", e); }
 await http.listen({ host: cfg.host, port: cfg.port });
 await agent.listen({ path: cfg.socketPath });
 chmodSync(cfg.socketPath, 0o600);

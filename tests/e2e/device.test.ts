@@ -58,9 +58,9 @@ describe("dispositivo Android na interface (#73)", () => {
     await page.waitForFunction((s) => !![...document.querySelectorAll('[data-testid="device-select"] option')].find((o) => (o as HTMLOptionElement).value === `serial:${s}`), SER, { timeout: 10_000 });
     await page.selectOption('[data-testid="device-select"]', `serial:${SER}`);
     await page.waitForSelector('[data-testid="device-status"][data-status="connected"]', { timeout: 15_000 });
-    await page.waitForFunction(() => (document.querySelector('[data-testid="device-img"]') as HTMLImageElement | null)?.src.startsWith("data:image/png"), undefined, { timeout: 15_000 });
-    // pixel azul do retângulo (10..120 x 10..70) do fixture
-    const px = await page.waitForFunction(() => { const im = document.querySelector('[data-testid="device-img"]') as HTMLImageElement; if (!im.naturalWidth) return null; const c = document.createElement("canvas"); c.width = im.naturalWidth; c.height = im.naturalHeight; const g = c.getContext("2d")!; g.drawImage(im, 0, 0); const d = g.getImageData(40, 30, 1, 1).data; return d[2]! > 180 && d[0]! < 80 ? "azul" : d[0]! > 180 && d[2]! < 80 ? "vermelho" : null; }, undefined, { timeout: 15_000 });
+    await page.waitForFunction(() => ((document.querySelector('[data-testid="device-img"]') as HTMLCanvasElement | null)?.width ?? 0) > 0, undefined, { timeout: 15_000 });
+    // pixel azul do retângulo (10..120 x 10..70) do fixture — lê direto do canvas do nó
+    const px = await page.waitForFunction(() => { const c = document.querySelector('[data-testid="device-img"]') as HTMLCanvasElement; if (!c?.width) return null; const d = c.getContext("2d")!.getImageData(40, 30, 1, 1).data; return d[2]! > 180 && d[0]! < 80 ? "azul" : d[0]! > 180 && d[2]! < 80 ? "vermelho" : null; }, undefined, { timeout: 15_000 });
     expect(["azul", "vermelho"]).toContain(await px.jsonValue()); // o fake alterna as duas imagens a cada entrada
     expect(JSON.parse((((await api("GET", `/v1/workspaces/${WS}`)) as { nodes: { kind: string; content: string }[] }).nodes.find((n) => n.kind === "device")!.content))).toEqual({ serial: SER }); // escolha gravada no nó
   }, 60_000);
@@ -92,9 +92,9 @@ describe("dispositivo Android na interface (#73)", () => {
 
   it("ação do AGENTE (API) aparece na tela: o quadro muda e a mudança vem do runtime", async () => {
     const id = await devId();
-    const src0 = await page.getAttribute('[data-testid="device-img"]', "src");
+    const px0 = await page.evaluate(() => { const c = document.querySelector('[data-testid="device-img"]') as HTMLCanvasElement; return c?.width ? c.toDataURL() : ""; });
     await api("POST", `/v1/devices/${id}/act`, { action: "tap", x: 1, y: 1 });
-    await page.waitForFunction((s) => (document.querySelector('[data-testid="device-img"]') as HTMLImageElement).src !== s, src0, { timeout: 15_000 });
+    await page.waitForFunction((s) => { const c = document.querySelector('[data-testid="device-img"]') as HTMLCanvasElement; return !!c?.width && c.toDataURL() !== s; }, px0, { timeout: 15_000 });
   }, 30_000);
 
   it("inspecionar: clicar no botão mostra o elemento (texto, id, bounds) e envia ao agente conectado", async () => {
@@ -121,7 +121,7 @@ describe("dispositivo Android na interface (#73)", () => {
     await page.waitForSelector('[data-testid="device-status"][data-status="starting"]', { timeout: 10_000 });
     expect(await page.textContent('[data-testid="device-message"]')).toMatch(/emulador|procurando|Conectando/i);
     await page.waitForSelector('[data-testid="device-status"][data-status="connected"]', { timeout: 40_000 });
-    await page.waitForFunction(() => (document.querySelector('[data-testid="device-img"]') as HTMLImageElement | null)?.src.startsWith("data:image/png"), undefined, { timeout: 15_000 });
+    await page.waitForFunction(() => ((document.querySelector('[data-testid="device-img"]') as HTMLCanvasElement | null)?.width ?? 0) > 0, undefined, { timeout: 15_000 });
     expect(readFileSync(join(fake, "devices"), "utf8")).toContain("emulator-5554");
     expect(readFileSync(join(fake, "emulator.log"), "utf8")).toContain("-avd Pixel_Fake -port 5554 -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader_indirect -read-only");
     const id = await devId(); const rev = ((await api("GET", `/v1/workspaces/${WS}`)) as Snap).workspace.revision;

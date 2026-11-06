@@ -266,8 +266,8 @@ mess portal clip type 1 "via cli" --submit > type.txt 2>&1
 mess portal clip eval "document.querySelector('#q').innerText" > eval.txt 2>&1
 mess portal clip screenshot shot.png > shot.txt 2>&1
 mess portal clip open file:///etc/passwd > bad.txt 2>&1
-mess portal snapshot clip > maestri-order.txt 2>&1
-mess portal click clip 0 > maestri-click.txt 2>&1
+mess portal snapshot clip > altorder.txt 2>&1
+mess portal click clip 0 > altclick.txt 2>&1
 touch done
 sleep 60
 `);
@@ -282,8 +282,8 @@ sleep 60
     expect(r("type.txt")).toContain("/search?q=via+cli"); expect(r("eval.txt").trim()).toBe("q=via cli");
     expect(r("shot.txt")).toContain("shot.png"); expect(readFileSync(join(cwd, "shot.png")).subarray(0, 4).toString("hex")).toBe("89504e47");
     expect(r("bad.txt")).toMatch(/INVALID.*esquema não permitido/);
-    expect(r("maestri-order.txt")).toContain("# Busca"); // ordem `mess portal snapshot <portal>` (a que a skill do Maestri ensina) também funciona
-    expect(r("maestri-click.txt")).not.toMatch(/não encontrado/);
+    expect(r("altorder.txt")).toContain("# Busca"); // ordem alternativa `mess portal snapshot <portal>` também funciona
+    expect(r("altclick.txt")).not.toMatch(/não encontrado/);
   }, 120_000);
 });
 

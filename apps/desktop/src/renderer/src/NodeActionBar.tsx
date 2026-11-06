@@ -12,7 +12,7 @@ export type NodeAction = {
   onDelete: () => void;
 };
 
-/** Barra de ações do nó selecionado, central no topo (abaixo da barra do canvas), como no Maestri. */
+/** Barra de ações do nó selecionado, central no topo (abaixo da barra do canvas). */
 export function NodeActionBar({ a }: { a: NodeAction }) {
   return (
     <div className="nodebar center" data-testid="nodebar">
