@@ -190,6 +190,7 @@ export class Api {
   askBand(id: string, input: AskBand) { return this.req<BandAskResult>("POST", `/v1/bands/${id}/ask`, input); }
   broadcastBand(id: string, input: AskBand) { return this.req<BandAskResult>("POST", `/v1/bands/${id}/broadcast`, input); }
   restart(nodeId: string) { return this.req<Session>("POST", `/v1/nodes/${nodeId}/restart`); }
+  maestroInterrupt(maestroNodeId: string, body: { ref?: string; all?: boolean; notify?: boolean }) { return this.req<{ interrupted: number; titles: string[] }>("POST", `/v1/nodes/${maestroNodeId}/maestro/interrupt`, body); }
   stop(sessionId: string) { return this.req<Session>("POST", `/v1/sessions/${sessionId}/stop`); }
   // #80 monitor de processos
   sessionProcs(sessionId: string) { return this.req<SessionProcs>("GET", `/v1/sessions/${sessionId}/procs`); }

@@ -54,6 +54,14 @@ To talk to a node you must be **connected** to it. If you are not, connect first
 mess connect <id|title>                   # link your node to another node
 ```
 
+### Reporting back when someone delegated a task to you (important)
+
+When another agent (often a **Maestro/conductor**) sends you a task via `mess ask` and asks you to report, or to "let me know when done", you **must notify them by running the CLI** — do NOT just print "done" in your own terminal (the requester never sees your screen unless they poll it).
+
+- End the task with: `mess reply <messageId> "[DONE] <one-line result>"` (use the id from the message you received — it is shown in the delivery header, or run `mess inbox`). This wakes the requester and they see your result.
+- If you no longer have the message id, send `mess ask "<their name>" "[DONE] <result>" --no-wait` instead.
+- Always send this completion message **when you finish**, even if you already printed the result locally. "me avisa / tell me when done" means *send a message*, not *print on screen*.
+
 ## Chat with the human (balloons on your terminal)
 
 When a user message arrives tagged `[MessAI chat]`, answer with:

@@ -2,7 +2,7 @@ import { Type, type Static } from "@sinclair/typebox";
 
 export const PROTOCOL_VERSION = 1 as const;
 /** Incrementar a cada mudança de snapshot/rotas; o cliente avisa quando o runtime está atrás. */
-export const BUILD_VERSION = 43 as const;
+export const BUILD_VERSION = 44 as const;
 
 // ---------- Identidades ----------
 export const Id = Type.String({ minLength: 8, maxLength: 64 });
@@ -393,6 +393,9 @@ export const MaestroTarget = Type.Object({ ref: Type.String({ minLength: 1 }) })
 export type MaestroTarget = Static<typeof MaestroTarget>;
 export const MaestroAssign = Type.Object({ ref: Type.String({ minLength: 1 }), roleName: Type.Union([Type.String({ minLength: 1 }), Type.Null()]) });
 export type MaestroAssign = Static<typeof MaestroAssign>;
+// #29 interromper (Esc/Ctrl-C, sem matar) um recrutado ou todos; notify = avisa o condutor no terminal dele (parada de emergência pelo usuário)
+export const MaestroInterrupt = Type.Object({ ref: Type.Optional(Type.String({ minLength: 1 })), all: Type.Optional(Type.Boolean()), notify: Type.Optional(Type.Boolean()) });
+export type MaestroInterrupt = Static<typeof MaestroInterrupt>;
 
 export const WorkspaceSnapshot = Type.Object({
   workspace: Workspace,

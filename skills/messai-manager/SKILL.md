@@ -17,6 +17,8 @@ mess maestro recruit --preset <id> --name "<Name>"        # recruit a terminal f
 mess maestro recruit --command "<cmd>" --arg a --arg b --name "<Name>"
 mess maestro dismiss <id|title>                            # end and remove a TERMINAL you recruited
 mess maestro assign <id|title> <roleName|->                # (re)assign a role; `-` removes it
+mess maestro interrupt <id|title>                          # interrupt a recruit mid-action (Esc/Ctrl-C) WITHOUT killing it
+mess maestro interrupt --all                               # emergency: interrupt ALL your recruits at once
 mess close <id|title>                                      # delete a NON-terminal node (note / portal / device / binder)
 ```
 
@@ -35,6 +37,17 @@ mess ask <name> "<clear, self-contained instructions>" --no-wait
 ```
 
 Give **complete** instructions (the recruit only knows what you tell it). Tell it the exact `mess` commands to run. A recruited agent is cautious about orders coming from another agent — be explicit that you are its conductor and this is the task.
+
+### Getting notified when a recruit finishes (important)
+
+You are **not** auto-notified when a recruit finishes — you only find out if the recruit **sends you a message**. So, in every delegation, end the briefing with an explicit report-back instruction, e.g.:
+
+> "When you finish, run `mess reply <the id of this message> \"[DONE] <short result>\"` so I'm notified — don't just print it on your screen."
+
+Then, to receive it:
+- Delegate with `mess ask <name> "...task... report back with mess reply" --no-wait` (don't block), and the recruit's `mess reply` will **arrive in your terminal and wake you** when it's done — relay it to the user (e.g. `mess say`).
+- If a recruit goes quiet and you're unsure, **poll** it: `mess check <name>` (reads its screen without sending) or `mess ask <name> "status?"`.
+- Never assume "done" just because you delegated — wait for the `[DONE]` message or check.
 
 ## Bands (groups you can ask in batch)
 

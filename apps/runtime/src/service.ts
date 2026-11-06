@@ -9,7 +9,7 @@ import { ISOLATED_APPROVABLE_CAPS, ISOLATED_DEFAULT_CAPS, validateIsolation, nor
 import { PortalManager, type PortalFrame } from "./portal.js";
 import { DeviceManager, listDevices, type DeviceFrame } from "./device.js";
 import type { DeviceList, DeviceState, DeviceAct, DeviceActResult, DeviceUiTree, DeviceScreenshot } from "@messai/contracts";
-import { isAdbSerial, isAvdName, treeLayout } from "@messai/domain";
+import { isAdbSerial, isAvdName } from "@messai/domain";
 import type { PortalState, PortalAct, PortalActResult, PortalSnapshot, PortalScreenshot } from "@messai/contracts";
 import { buildIsolatedPlan, probeIsolation } from "./isolation.js";
 import { readProcTree } from "./procs.js";
@@ -2779,7 +2779,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const c: Connection = { connectionId: newId(), workspaceId, sourceNodeId: a.nodeId, targetNodeId: b.nodeId, createdAt: nowIso(), ...(input.label ? { label: input.label } : {}) };
     this.store.transaction(() => { this.store.insertConnection(c); this.store.bumpRevision(workspaceId, rev.value); });
     this.publishConnectionEndpoints(c);
-    if (byAgent && a.workspaceId === workspaceId && b.workspaceId === workspaceId) this.relayoutTree(workspaceId, a.nodeId); // #37 agente conectou → re-arruma a árvore (portal/nota alinhado abaixo de quem criou)
+    // NÃO re-arranjar a árvore aqui: respeita o layout que o usuário fez na mão. A árvore automática fica só sob comando ("Organizar em árvore").
     return succeed(c);
   }
 
@@ -3176,27 +3176,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const bottom = Math.max(...nodes.map((n) => n.geometry.y + n.geometry.h));
     return { x: left, y: bottom + 40, w: norm.w, h: norm.h }; // empilha de cima para baixo (mesma coluna à esquerda)
   }
-  /** Re-organiza em árvore (de cima para baixo) o componente conectado do nó-semente: raiz no topo, filhos numa linha abaixo, netos abaixo deles.
-   *  Ancorado no canto atual do componente para não pular. Chamado quando um agente recruta ou conecta (mantém o canvas arrumado sozinho). */
-  private relayoutTree(workspaceId: string, seedId: string): void {
-    const nodes = this.store.listNodes(workspaceId);
-    const conns = this.store.listConnections(workspaceId).filter((c) => c.sourceNodeId && c.targetNodeId);
-    const adj = new Map<string, Set<string>>(); nodes.forEach((n) => adj.set(n.nodeId, new Set()));
-    for (const c of conns) { if (adj.has(c.sourceNodeId) && adj.has(c.targetNodeId)) { adj.get(c.sourceNodeId)!.add(c.targetNodeId); adj.get(c.targetNodeId)!.add(c.sourceNodeId); } }
-    if (!adj.has(seedId)) return;
-    const comp = new Set<string>([seedId]); const stack = [seedId];
-    while (stack.length) { const u = stack.pop()!; for (const v of adj.get(u)!) if (!comp.has(v)) { comp.add(v); stack.push(v); } }
-    if (comp.size < 2) return;
-    const items = nodes.filter((n) => comp.has(n.nodeId)).map((n) => ({ id: n.nodeId, geometry: n.geometry }));
-    const edges = conns.filter((c) => comp.has(c.sourceNodeId) && comp.has(c.targetNodeId)).map((c) => ({ source: c.sourceNodeId, target: c.targetNodeId }));
-    const originX = Math.min(...items.map((i) => i.geometry.x)), originY = Math.min(...items.map((i) => i.geometry.y));
-    const moves = treeLayout(items, edges, { originX, originY });
-    const changed = moves.filter((m) => { const o = items.find((i) => i.id === m.id)!.geometry; return o.x !== m.geometry.x || o.y !== m.geometry.y; });
-    if (!changed.length) return;
-    const w = this.store.getWorkspace(workspaceId)!;
-    this.store.transaction(() => { for (const m of changed) this.store.updateNode(m.id, { geometry: m.geometry }); this.store.bumpRevision(workspaceId, w.revision + 1); });
-    this.publish(workspaceId);
-  }
+  // (O arranjo em árvore automático foi removido: atropelava o layout manual do usuário. A árvore fica sob comando no app — "Organizar em árvore".)
   private freeSpotNear(anchor: Node, nodes: Node[], w: number, h: number): Node["geometry"] {
     const x = anchor.geometry.x; // mesma coluna do condutor
     for (let k = 1; k < 80; k++) {
@@ -3229,7 +3209,8 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const node = made.value.node;
     const link = this.createConnection(w.workspaceId, { expectedRevision: this.store.getWorkspace(w.workspaceId)!.revision, sourceNodeId: maestro.nodeId, targetNodeId: node.nodeId });
     if (!link.ok) return link;
-    this.relayoutTree(w.workspaceId, maestro.nodeId); // #37 recrutados numa linha abaixo do Maestro (árvore), sem sobrepor
+    // o recrutado já nasceu posicionado por freeSpotNear (abaixo do Maestro, sem sobrepor). NÃO re-arranjamos a árvore
+    // automaticamente: isso atropelava o layout manual do usuário. A árvore fica sob comando ("Organizar em árvore").
     let bandId: string | undefined;
     if (input.band) {
       let b = this.findBand(w.workspaceId, input.band);
@@ -3248,6 +3229,27 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const w = this.store.getWorkspace(m.value.workspaceId)!;
     const r = this.deleteNode(t.value.nodeId, w.revision); if (!r.ok) return r;
     return succeed({ nodeId: t.value.nodeId, title: t.value.title });
+  }
+  private interruptNode(node: Node): boolean {
+    if (node.kind !== "terminal" || !node.sessionId) return false;
+    return this.sessions.interrupt(node.sessionId, this.kindOfNode(node).isAgent).ok;
+  }
+  /** Interrompe (Esc nos agentes / Ctrl-C em shell, SEM matar) um recrutado — ou TODOS os ligados ao condutor (parada de emergência). */
+  maestroInterrupt(maestroId: string, input: { ref?: string; all?: boolean; notify?: boolean }): Result<{ interrupted: number; titles: string[] }> {
+    const m = this.requireMaestro(maestroId); if (!m.ok) return m;
+    let targets: Node[];
+    if (input.all) {
+      const ids = this.store.listNodeConnections(m.value.nodeId).map((c) => (c.sourceNodeId === m.value.nodeId ? c.targetNodeId : c.sourceNodeId));
+      targets = [...new Set(ids)].map((id) => this.store.getNode(id)).filter((n): n is Node => !!n && n.kind === "terminal" && n.workspaceId === m.value.workspaceId);
+    } else {
+      if (!input.ref) return fail("INVALID", "informe um nó ou use all");
+      const t = this.maestroTarget(m.value, input.ref); if (!t.ok) return t; targets = [t.value];
+    }
+    const titles: string[] = [];
+    for (const n of targets) if (this.interruptNode(n)) titles.push(n.title);
+    if (input.notify && titles.length && m.value.sessionId) // avisa o condutor pra realinhar
+      this.sessions.deliver(m.value.sessionId, `# [MessAI] Parada de emergência: o usuário interrompeu ${titles.length} recrutado(s) — ${titles.join(", ")}. Reavalie o que estavam fazendo antes de continuar.\r`);
+    return succeed({ interrupted: titles.length, titles });
   }
   /** Reatribui o papel de um terminal ligado ao condutor (reinicia só o processo dele); `null` remove. */
   assignRole(maestroId: string, ref: string, roleName: string | null): Result<Node> {

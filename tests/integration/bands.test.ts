@@ -118,6 +118,23 @@ describe("#29 modo maestro", () => {
     expect(after.nodes.some((n) => n.title === "Recruta")).toBe(false);
     expect(after.bands?.find((b) => b.name === "Time")?.nodeIds).not.toContain(rec.node.nodeId);
   });
+  it("interrompe recrutados: um nó e --all; só o condutor pode", async () => {
+    // obs.: o teste usa `cat` (shell) → interrupt manda Ctrl-C (encerra o cat). Com agente de IA real seria Esc (não mata).
+    const single = await api("POST", `/v1/nodes/${m.nodeId}/maestro/recruit`, { command: "cat", name: "Int0" });
+    expect(single.status).toBe(201);
+    await new Promise((r) => setTimeout(r, 700));
+    const one = await api("POST", `/v1/nodes/${m.nodeId}/maestro/interrupt`, { ref: "Int0" });
+    expect(one.status).toBe(200); expect((one.json as { interrupted: number }).interrupted).toBe(1);
+    const r1 = await api("POST", `/v1/nodes/${m.nodeId}/maestro/recruit`, { command: "cat", name: "Int1" });
+    const r2 = await api("POST", `/v1/nodes/${m.nodeId}/maestro/recruit`, { command: "cat", name: "Int2" });
+    expect(r1.status).toBe(201); expect(r2.status).toBe(201);
+    await new Promise((r) => setTimeout(r, 800)); // espera os dois `cat` entrarem em "running"
+    const all = await api("POST", `/v1/nodes/${m.nodeId}/maestro/interrupt`, { all: true });
+    expect(all.status).toBe(200); expect((all.json as { interrupted: number }).interrupted).toBeGreaterThanOrEqual(2);
+    // terminal comum não conduz
+    expect((await api("POST", `/v1/nodes/${plain.nodeId}/maestro/interrupt`, { all: true })).status).toBe(403);
+    for (const name of ["Int0", "Int1", "Int2"]) await api("POST", `/v1/nodes/${m.nodeId}/maestro/dismiss`, { ref: name });
+  });
   it("pela CLI: recruit/assign/dismiss e o condutor enxerga o próprio estado", async () => {
     const r = await cli(["maestro", "recruit", "--command", "cat", "--name", "ViaCli"], env);
     expect(r.code).toBe(0); expect(r.out).toContain("ViaCli");

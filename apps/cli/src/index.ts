@@ -64,6 +64,7 @@ try {
                                     (só condutor) recruta um terminal ligado a você · --persist = tmux (sobrevive a fechar/reabrir o app)
   mess maestro dismiss <nó>         (só condutor) encerra e remove um terminal ligado a você
   mess maestro assign <nó> <papel|->  (só condutor) reatribui o papel (- remove)
+  mess maestro interrupt <nó> | --all   (só condutor) interrompe (Esc/Ctrl-C, sem matar) um recrutado ou todos
   mess portal list|new [url] [--name n]   portais (navegador no canvas) do espaço · cria um
   mess portal <portal> open <url>   navega · back|forward|reload|state|close
   mess portal <portal> snapshot [--full]   página como texto + elementos com ref [N] (clicáveis)
@@ -455,7 +456,12 @@ try {
     } else if (op === "assign") {
       const [ref, role] = args; if (!ref || !role) throw new Error("uso: mess maestro assign <nó> <papel|->");
       const r = await call<Node>("POST", `/v1/nodes/${nodeId}/maestro/assign`, { ref, roleName: role === "-" ? null : role }); console.log(`"${r.title}": ${role === "-" ? "sem papel" : `papel ${role}`}`);
-    } else throw new Error("uso: mess maestro recruit|dismiss|assign");
+    } else if (op === "interrupt" || op === "stop") {
+      const all = (() => { const i = args.indexOf("--all"); if (i < 0) return false; args.splice(i, 1); return true; })();
+      const [ref] = args; if (!all && !ref) throw new Error("uso: mess maestro interrupt <nó> | --all");
+      const r = await call<{ interrupted: number; titles: string[] }>("POST", `/v1/nodes/${nodeId}/maestro/interrupt`, { ...(all ? { all: true } : { ref }) });
+      console.log(r.interrupted ? `interrompido(s) ${r.interrupted}: ${r.titles.join(", ")}` : "nenhum recrutado em execução para interromper");
+    } else throw new Error("uso: mess maestro recruit|dismiss|assign|interrupt");
   } else if (cmd === "close" || cmd === "delete" || cmd === "rm") {
     // apaga um nó não-terminal do espaço (nota, portal, dispositivo, fichário…); terminais vão por `mess maestro dismiss`
     const ref = [sub, ...rest].filter((a): a is string => a !== undefined).join(" ").trim();

@@ -163,6 +163,14 @@ export class SessionManager extends EventEmitter<SessionEvents> {
     }
   }
 
+  /** Interrompe o turno atual da sessão sem matar o processo: Esc nos agentes de IA (Claude/Codex), Ctrl-C num shell. */
+  interrupt(sessionId: string, agent: boolean): Result<void> {
+    const l = this.live.get(sessionId); const s = this.get(sessionId);
+    if (!l || !s) return fail("NOT_FOUND", "sessão não encontrada");
+    if (s.state !== "running") return fail("SESSION_NOT_RUNNING", `sessão está ${s.state}`);
+    l.proc.write(agent ? "\x1b" : "\x03"); // Esc interrompe o turno do agente; Ctrl-C para o comando do shell
+    return succeed(undefined);
+  }
   write(sessionId: string, clientId: string, data: string): Result<void> {
     const l = this.live.get(sessionId);
     const s = this.get(sessionId);

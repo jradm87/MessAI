@@ -302,6 +302,8 @@ select { background: var(--input); color: var(--fg); border: 1px solid var(--lin
 .actions.left { justify-content: flex-start; margin-top: 4px; align-items: center; }
 .actions.left button { display: inline-flex; align-items: center; gap: 5px; }
 button.danger:hover { border-color: var(--danger); color: var(--danger-fg); }
+.bar button.maestro-stop { color: var(--danger-fg, #ff6b6b); }
+.bar button.maestro-stop:hover { background: var(--danger-bg); }
 .confirm-modal { max-width: 400px; }
 .confirm-modal h2.left { display: flex; align-items: center; gap: 8px; }
 .confirm-modal .confirm-ic { color: var(--danger, #ff6b6b); flex: none; }
