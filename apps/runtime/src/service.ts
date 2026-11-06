@@ -2803,6 +2803,10 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     this.store.transaction(() => { this.store.insertConnection(c); this.store.bumpRevision(workspaceId, rev.value); });
     this.publishConnectionEndpoints(c);
     // NÃO re-arranjar a árvore aqui: respeita o layout que o usuário fez na mão. A árvore automática fica só sob comando ("Organizar em árvore").
+    // Nota secreta ligada a um terminal JÁ rodando: a env só entra no SPAWN → reinicia o terminal pra injetar agora.
+    const secretNote = [a, b].find((x) => x.kind === "note" && x.secret && x.secretEnv);
+    const term = [a, b].find((x) => x.kind === "terminal");
+    if (secretNote && term?.sessionId && this.store.getSession(term.sessionId)?.state === "running") this.respawnTerminal(term.nodeId);
     return succeed(c);
   }
 

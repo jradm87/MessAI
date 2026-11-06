@@ -67,10 +67,11 @@ describe("papéis (responsabilidades)", () => {
     const reveal = await api("GET", `/v1/nodes/${note.nodeId}/reveal`); // HTTP = humano
     expect(reveal.status).toBe(200); expect((reveal.json as { value: string }).value).toBe("s3cr3t!");
     const out = join(dir, "secret-env.txt");
-    const created = (await api("POST", `/v1/workspaces/${ws}/nodes`, { expectedRevision: await rev(), kind: "terminal", title: "STerm", command: "sh", args: ["-c", `printf '%s' "$SENHA" > ${out}`], geometry: { x: 400, y: 0, w: 400, h: 300 } })).json as { node: { nodeId: string }; session: { sessionId: string } };
-    await wait(async () => ((await api(`GET`, `/v1/sessions/${created.session.sessionId}`)).json as { state: string }).state !== "running"); // 1º spawn (sem env) termina
+    // terminal JÁ rodando (loop reescreve o $SENHA atual); conectar a nota secreta deve REINICIAR o terminal e injetar a env (sem restart manual)
+    const created = (await api("POST", `/v1/workspaces/${ws}/nodes`, { expectedRevision: await rev(), kind: "terminal", title: "STerm", command: "sh", args: ["-c", `while true; do printf '%s' "$SENHA" > ${out}; sleep 0.3; done`], geometry: { x: 400, y: 0, w: 400, h: 300 } })).json as { node: { nodeId: string }; session: { sessionId: string } };
+    await wait(async () => existsSync(out)); // 1º spawn (sem env) escreve vazio
+    expect(readFileSync(out, "utf8")).toBe("");
     expect((await api("POST", `/v1/workspaces/${ws}/connections`, { expectedRevision: await rev(), sourceNodeId: note.nodeId, targetNodeId: created.node.nodeId })).status).toBe(201);
-    expect((await api("POST", `/v1/nodes/${created.node.nodeId}/restart`)).status).toBe(200); // re-sobe já com a env injetada
-    expect(await wait(async () => existsSync(out) && readFileSync(out, "utf8") === "s3cr3t!", 12_000)).toBe(true);
+    expect(await wait(async () => readFileSync(out, "utf8") === "s3cr3t!", 12_000)).toBe(true); // conectar reiniciou e injetou
   });
 });

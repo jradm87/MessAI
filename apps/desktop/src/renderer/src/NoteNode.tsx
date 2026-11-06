@@ -63,7 +63,7 @@ function NoteNodeImpl({ id, data, selected }: NodeProps & { data: NoteData }) {
               ? <button className="ns-reveal" data-testid="note-secret-reveal" onClick={() => { void data.onReveal().then(setRevealed).catch(() => setRevealed("")); }}><Eye size={13} /> Revelar / editar</button>
               : <><textarea className="ns-val nodrag nowheel" data-testid="note-secret-value" value={revealed} spellCheck={false} placeholder="valor secreto (ex.: a senha)" onChange={(e) => setRevealed(e.target.value)} autoFocus />
                  <div className="ns-actions"><button className="pri" onClick={() => { data.onChange(revealed ?? ""); setRevealed(null); }}>Salvar</button><button onClick={() => setRevealed(null)}>Ocultar</button></div></>}
-            <div className="ns-hint mut">Injetada no agente ligado como <b>${envName || "ENV"}</b> — ele usa por referência, nunca vê o valor.</div>
+            <div className="ns-hint mut">Injetada no agente ligado como <b>${envName || "ENV"}</b> — ele usa por referência, nunca vê o valor. <b>Conectar reinicia o agente</b> para a env entrar (a injeção é no boot).</div>
           </div>
         : raw
         ? <textarea className="nodrag nowheel" value={text} onChange={(e) => setText(e.target.value)} placeholder="Escreva em Markdown… (```mermaid para diagramas)" onBlur={() => { if (text.trim()) setRaw(false); }} autoFocus={data.content !== ""} />
