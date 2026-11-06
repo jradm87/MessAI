@@ -224,7 +224,7 @@ try {
     for (const c of conn) {
       const label = c.crossWorkspace && c.workspaceName ? `${c.node.title} @ ${c.workspaceName}` : c.node.title;
       console.log(`\n--- ${c.direction === "in" ? "←" : "→"} ${c.node.kind} "${label}" [${short(c.node.nodeId)}]`);
-      if (c.node.kind === "note") { if (c.node.locked) console.log("(bloqueada: somente leitura)"); if (c.node.filePath) console.log(`arquivo: ${c.node.filePath}`); console.log(c.node.content ?? ""); }
+      if (c.node.kind === "note") { if (c.node.locked) console.log("(bloqueada: somente leitura)"); if (c.node.secret) { console.log(`(nota SECRETA — valor oculto${c.node.secretEnv ? `; já está no seu ambiente como $${c.node.secretEnv}, use por referência e nunca imprima` : ""})`); continue; } if (c.node.filePath) console.log(`arquivo: ${c.node.filePath}`); console.log(c.node.content ?? ""); }
     }
   } else if (cmd === "nodes") {
     const s = await snapshot();
@@ -232,7 +232,8 @@ try {
   } else if (cmd === "note" && sub === "read") {
     const s = await snapshot(); const n = findNode(s.nodes, rest[0] ?? "");
     if (!n || n.kind !== "note") throw new Error("nota não encontrada");
-    console.log(n.content ?? "");
+    if (n.secret) { console.log(`[oculto] nota secreta — o valor não é exposto.${n.secretEnv ? ` Use por referência: $${n.secretEnv} (já no seu ambiente).` : ""}`); }
+    else console.log(n.content ?? "");
   } else if (cmd === "note" && sub === "path") {
     const s = await snapshot(); const n = findNode(s.nodes, rest[0] ?? "");
     if (!n || n.kind !== "note") throw new Error("nota não encontrada");

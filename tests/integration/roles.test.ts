@@ -59,4 +59,18 @@ describe("papéis (responsabilidades)", () => {
     const snap = (await api("GET", `/v1/workspaces/${ws}`)).json as { nodes: { roleId?: string }[] };
     expect(snap.nodes.every((n) => !n.roleId)).toBe(true);
   });
+  it("nota secreta: mascarada no snapshot, revela só por HTTP, e injeta a env no agente ligado", async () => {
+    const rev = async () => ((await api("GET", `/v1/workspaces/${ws}`)).json as { workspace: { revision: number } }).workspace.revision;
+    const note = ((await api("POST", `/v1/workspaces/${ws}/nodes`, { expectedRevision: await rev(), kind: "note", content: "s3cr3t!", secret: true, secretEnv: "SENHA", geometry: { x: 0, y: 0, w: 300, h: 200 } })).json as { node: { nodeId: string } }).node;
+    const sn = ((await api("GET", `/v1/workspaces/${ws}`)).json as { nodes: { nodeId: string; secret?: boolean; secretEnv?: string; content?: string }[] }).nodes.find((n) => n.nodeId === note.nodeId)!;
+    expect(sn.secret).toBe(true); expect(sn.secretEnv).toBe("SENHA"); expect(sn.content ?? "").toBe(""); // valor NÃO aparece no snapshot
+    const reveal = await api("GET", `/v1/nodes/${note.nodeId}/reveal`); // HTTP = humano
+    expect(reveal.status).toBe(200); expect((reveal.json as { value: string }).value).toBe("s3cr3t!");
+    const out = join(dir, "secret-env.txt");
+    const created = (await api("POST", `/v1/workspaces/${ws}/nodes`, { expectedRevision: await rev(), kind: "terminal", title: "STerm", command: "sh", args: ["-c", `printf '%s' "$SENHA" > ${out}`], geometry: { x: 400, y: 0, w: 400, h: 300 } })).json as { node: { nodeId: string }; session: { sessionId: string } };
+    await wait(async () => ((await api(`GET`, `/v1/sessions/${created.session.sessionId}`)).json as { state: string }).state !== "running"); // 1º spawn (sem env) termina
+    expect((await api("POST", `/v1/workspaces/${ws}/connections`, { expectedRevision: await rev(), sourceNodeId: note.nodeId, targetNodeId: created.node.nodeId })).status).toBe(201);
+    expect((await api("POST", `/v1/nodes/${created.node.nodeId}/restart`)).status).toBe(200); // re-sobe já com a env injetada
+    expect(await wait(async () => existsSync(out) && readFileSync(out, "utf8") === "s3cr3t!", 12_000)).toBe(true);
+  });
 });

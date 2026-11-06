@@ -2,7 +2,7 @@ import { Type, type Static } from "@sinclair/typebox";
 
 export const PROTOCOL_VERSION = 1 as const;
 /** Incrementar a cada mudança de snapshot/rotas; o cliente avisa quando o runtime está atrás. */
-export const BUILD_VERSION = 44 as const;
+export const BUILD_VERSION = 45 as const;
 
 // ---------- Identidades ----------
 export const Id = Type.String({ minLength: 8, maxLength: 64 });
@@ -81,6 +81,8 @@ export const Node = Type.Object({
   // nota: arquivo .md real no disco, bloqueio (agentes só leem), cor
   filePath: Type.Optional(Type.String()),
   locked: Type.Optional(Type.Boolean()),
+  secret: Type.Optional(Type.Boolean()), // nota secreta: conteúdo mascarado no canvas/para agentes (revela só o humano)
+  secretEnv: Type.Optional(Type.String()), // nome da env injetada no agente ligado (ex.: SENHA) — o valor nunca é exposto
   color: Type.Optional(Type.String()),
   // terminal (#56): ícone e tema do xterm escolhidos no preset ou editados no nó; `color` também vale para terminal
   icon: Type.Optional(Type.String()),
@@ -624,6 +626,8 @@ export const CreateNode = Type.Object({
   persistent: Type.Optional(Type.Boolean()),
   // só para nota: vincular um .md/.txt existente (fica no lugar) e cor
   filePath: Type.Optional(Type.String({ minLength: 1 })),
+  secret: Type.Optional(Type.Boolean()), // nota secreta
+  secretEnv: Type.Optional(Type.String({ maxLength: 64 })), // nome da env injetada no agente ligado
   color: Type.Optional(Type.String()), // nota ou terminal
   // terminal (#56): aparência vinda do preset
   icon: Type.Optional(Type.String({ maxLength: 40 })),
@@ -644,6 +648,8 @@ export const PatchNode = Type.Object({
   roleId: Type.Optional(Type.Union([Id, Type.Null()])),
   // nota
   locked: Type.Optional(Type.Boolean()),
+  secret: Type.Optional(Type.Boolean()), // marcar/desmarcar como secreta
+  secretEnv: Type.Optional(Type.Union([Type.String({ maxLength: 64 }), Type.Null()])), // nome da env (null limpa)
   color: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   /** "Mover para…": novo caminho completo do .md; o arquivo é movido. */
   filePath: Type.Optional(Type.String({ minLength: 1 })),

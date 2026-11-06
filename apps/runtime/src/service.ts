@@ -461,8 +461,10 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
   snapshot(workspaceId: string): WorkspaceSnapshot | undefined {
     const workspace = this.store.getWorkspace(workspaceId);
     if (!workspace) return undefined;
-    return { workspace, nodes: this.store.listNodes(workspaceId).map((n) => this.syncNoteFromDisk(n)), connections: this.store.listConnections(workspaceId), drawings: this.store.listDrawings(workspaceId), groups: this.store.listGroups(workspaceId), bands: this.listBands(workspaceId) };
+    return { workspace, nodes: this.store.listNodes(workspaceId).map((n) => this.redactSecret(this.syncNoteFromDisk(n))), connections: this.store.listConnections(workspaceId), drawings: this.store.listDrawings(workspaceId), groups: this.store.listGroups(workspaceId), bands: this.listBands(workspaceId) };
   }
+  /** Nota secreta: o VALOR nunca sai no snapshot (nem pro app nem pros agentes) — só os flags. O humano revela por /v1/nodes/:id/reveal. */
+  private redactSecret(n: Node): Node { return n.secret ? { ...n, content: "" } : n; }
 
   // ---- notas em arquivo .md real ----
   private noteMtime = new Map<string, number>();
@@ -1942,7 +1944,11 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     let titleAuto = true;
     if (input.kind === "note") {
       if (input.color) node.color = input.color;
-      if (input.filePath) {
+      if (input.secret) {
+        node.secret = true;
+        if (input.secretEnv) node.secretEnv = input.secretEnv.trim();
+        // nota secreta: fica SÓ na base, nunca num .md no disco (evita vazar em disco/export). O valor veio em content.
+      } else if (input.filePath) {
         if (!/\.(md|markdown|txt)$/i.test(input.filePath)) return fail("INVALID", "só arquivos .md ou .txt podem virar nota");
         if (!existsSync(input.filePath)) return fail("NOT_FOUND", "arquivo não encontrado");
         node.filePath = input.filePath; node.content = readFileSync(input.filePath, "utf8");
@@ -2019,6 +2025,22 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     return succeed({ revision: rev.value });
   }
 
+  /** Notas secretas ligadas a este nó → { NOME: valor } pra injetar no ambiente. Ignora nomes reservados (PATH/SHELL/MESS_*). */
+  private secretEnvsFor(node: Node): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const c of this.store.listNodeConnections(node.nodeId)) {
+      const otherId = c.sourceNodeId === node.nodeId ? c.targetNodeId : c.sourceNodeId;
+      const o = this.store.getNode(otherId);
+      if (o?.kind === "note" && o.secret && o.secretEnv && o.content && !/^(PATH|SHELL)$/.test(o.secretEnv) && !o.secretEnv.startsWith("MESS_")) out[o.secretEnv] = o.content;
+    }
+    return out;
+  }
+  /** Valor real de uma nota secreta (só o app/humano chama; nunca vai no snapshot). */
+  revealSecret(nodeId: string): Result<{ value: string; envName?: string }> {
+    const n = this.store.getNode(nodeId);
+    if (!n || n.kind !== "note" || !n.secret) return fail("NOT_FOUND", "nota secreta não encontrada");
+    return succeed({ value: n.content ?? "", ...(n.secretEnv ? { envName: n.secretEnv } : {}) });
+  }
   private plan(w: Workspace, node: Node, s: Session, opts: { reattach?: boolean } = {}) {
     const baseEnv: Record<string, string> = {};
     // Não herdar marcadores de sessão de agentes que possam ter lançado o runtime.
@@ -2032,6 +2054,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const agentToken = opts.reattach ? this.reattachToken(node, s) : this.agentTokenForSpawn(node, s);
     const inject = {
       ...userEnv,
+      ...this.secretEnvsFor(node), // notas secretas ligadas → injeta o valor como env (o agente usa $NOME, nunca vê o valor)
       ...(role ? { [AGENT_ENV.roleName]: role.name, [AGENT_ENV.roleInstructions]: roleText(role) } : {}),
       ...(skills.length ? { [AGENT_ENV.skills]: skills.map((k) => k.name).join(", "), [AGENT_ENV.skillsText]: skillsText(skills) } : {}),
       ...(ground ? { [AGENT_ENV.floorId]: w.workspaceId, [AGENT_ENV.floorName]: w.name, [AGENT_ENV.floorBranch]: w.branch ?? "", [AGENT_ENV.branchName]: w.branch ?? "", [AGENT_ENV.floorPath]: w.cwd, [AGENT_ENV.rootPath]: ground.cwd, [AGENT_ENV.projectName]: ground.name } : { [AGENT_ENV.rootPath]: w.cwd, [AGENT_ENV.projectName]: w.name }),
@@ -2136,7 +2159,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
         kind: n.kind,
         title: n.title,
         geometry: { ...n.geometry },
-        ...(n.kind !== "terminal" && n.content !== undefined ? { content: n.content } : {}),
+        ...(n.kind !== "terminal" && n.content !== undefined && !n.secret ? { content: n.content } : {}),
         ...(n.color ? { color: n.color } : {}),
         ...(n.locked ? { locked: true } : {}),
         ...(n.icon ? { icon: n.icon } : {}),
@@ -2630,7 +2653,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       const role = n.roleId ? this.store.getRole(n.roleId) : undefined;
       const skillNames = (n.skillIds ?? []).map((id) => this.store.getSkill(id)?.name).filter((x): x is string => !!x);
       return { key: keyOf.get(n.nodeId)!, kind: n.kind, title: n.title, geometry: { ...n.geometry, x: n.geometry.x - minX, y: n.geometry.y - minY },
-        ...(n.kind !== "terminal" && n.content !== undefined ? { content: n.content } : {}), ...(n.color ? { color: n.color } : {}), ...(n.icon ? { icon: n.icon } : {}), ...(n.termTheme ? { termTheme: n.termTheme } : {}),
+        ...(n.kind !== "terminal" && n.content !== undefined && !n.secret ? { content: n.content } : {}), ...(n.color ? { color: n.color } : {}), ...(n.icon ? { icon: n.icon } : {}), ...(n.termTheme ? { termTheme: n.termTheme } : {}),
         ...(role ? { roleName: role.name } : {}), ...(skillNames.length ? { skillNames } : {}),
         ...(n.isolation ? { isolation: n.isolation } : {}),
         ...(ses ? { command: ses.command, args: ses.args, cwd: ses.cwd, ...(ses.persistent ? { persistent: true } : {}) } : {}) };
@@ -2814,7 +2837,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       if (!node) continue;
       const ws = this.store.getWorkspace(node.workspaceId);
       const row: ConnectedPeer = {
-        node,
+        node: this.redactSecret(this.syncNoteFromDisk(node)), // nunca expor o valor de nota secreta (nem no mess context)
         direction: c.sourceNodeId === nodeId ? "out" : "in",
         connectionId: c.connectionId,
         workspaceId: node.workspaceId,
@@ -2967,6 +2990,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     if (typeof input.groupId === "string") { const g = this.store.getGroup(input.groupId); if (!g || g.workspaceId !== node.workspaceId) return fail("NOT_FOUND", "grupo não encontrado neste espaço"); } // #78
     // #93 um agente NUNCA mexe no próprio isolamento, no Maestro (ganharia capacidades) nem no limite de memória: só o app.
     if (byAgent && (input.isolation !== undefined || input.maestro !== undefined || input.memLimitMb !== undefined)) return fail("FORBIDDEN", "isolamento, Maestro e limite de memória só podem ser alterados pelo app");
+    if (byAgent && (input.secret !== undefined || input.secretEnv !== undefined)) return fail("FORBIDDEN", "nota secreta só pode ser configurada pelo usuário"); // agente não desmascara nem reaponta a env
     let newIso: NodeIsolation | null | undefined;
     if (input.isolation !== undefined && node.kind === "terminal") {
       if (input.isolation === null) newIso = null;
@@ -2987,6 +3011,10 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     let title = input.title; let titleAuto: boolean | undefined;
     let filePath: string | undefined;
     if (node.kind === "note") {
+      if (input.secret === true && node.filePath) { // virou secreta: tira o valor do disco (remove o .md gerenciado) e para de vigiar
+        try { if (node.filePath.startsWith(this.notesDir(node.workspaceId))) unlinkSync(node.filePath); } catch { /* já removido */ }
+        this.unwatchNote(node.filePath); this.noteMtime.delete(nodeId); filePath = "";
+      }
       if (input.title !== undefined) titleAuto = false;
       else if (input.content !== undefined && this.store.isTitleAuto(nodeId)) title = deriveNoteTitle(input.content) ?? "Nota";
       if (input.filePath && input.filePath !== node.filePath) {
@@ -2998,11 +3026,11 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       }
     }
     this.store.transaction(() => {
-      this.store.updateNode(nodeId, { title, geometry: input.geometry ? normalizeGeometry(input.geometry) : undefined, content: input.content, locked: input.locked, color: input.color, filePath, titleAuto, icon: input.icon, termTheme: input.termTheme === "system" ? null : input.termTheme, groupId: input.groupId, maestro: node.kind === "terminal" ? input.maestro : undefined, memLimitMb: node.kind === "terminal" && input.memLimitMb !== undefined ? (input.memLimitMb || null) : undefined, isolation: newIso });
+      this.store.updateNode(nodeId, { title, geometry: input.geometry ? normalizeGeometry(input.geometry) : undefined, content: input.content, locked: input.locked, color: input.color, filePath, titleAuto, icon: input.icon, termTheme: input.termTheme === "system" ? null : input.termTheme, groupId: input.groupId, maestro: node.kind === "terminal" ? input.maestro : undefined, memLimitMb: node.kind === "terminal" && input.memLimitMb !== undefined ? (input.memLimitMb || null) : undefined, isolation: newIso, secret: node.kind === "note" ? input.secret : undefined, secretEnv: node.kind === "note" ? input.secretEnv : undefined });
       if (input.groupId !== undefined) this.store.pruneEmptyGroups(node.workspaceId); // #78 sair de um grupo pode esvaziá-lo
       this.store.bumpRevision(node.workspaceId, rev.value);
     });
-    if (node.kind === "note" && input.content !== undefined) this.writeNoteFile(this.store.getNode(nodeId)!, input.content);
+    if (node.kind === "note" && input.content !== undefined && !this.store.getNode(nodeId)!.secret) this.writeNoteFile(this.store.getNode(nodeId)!, input.content); // nota secreta nunca vai pro disco
     else if (filePath) { try { this.noteMtime.set(nodeId, statSync(filePath).mtimeMs); } catch { /* ignorar */ } }
     if (newIso !== undefined) { this.writeNodeCaps(nodeId, null); this.respawnTerminal(nodeId); } // #93 trocar o modo zera concessões e reinicia SÓ o processo
     if (input.maestro !== undefined && input.maestro !== node.maestro) { // #29 ligar/desligar Maestro reflete JÁ no token do agente (ganha/perde maestro:conduct), sem reiniciar
@@ -3024,6 +3052,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const w = this.store.getWorkspace(node.workspaceId)!;
     const rev = checkRevision(w, expectedRevision);
     if (!rev.ok) return rev;
+    console.log(`[node] delete ${node.kind} "${node.title}" [${nodeId.slice(0, 8)}] ws=${w.name}`); // rastro de exclusão (nós não somem sozinhos)
     if (node.sessionId) this.sessions.dispose(node.sessionId);
     if (node.kind === "portal") void this.portals.close(nodeId); // #26 mata o navegador do portal
     if (node.kind === "device") void this.devices.close(nodeId); // #73 solta o aparelho (e encerra o emulador que nós iniciamos)

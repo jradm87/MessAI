@@ -54,7 +54,7 @@ describe("upgrade de bancos antigos", () => {
       let s = new Store(path); const v = s.db.pragma("user_version", { simple: true }) as number; s.close();
       // volta o banco ao estado de antes (sem a coluna e a tabela novas, versão -2) e planta dados
       const db = new Database(path); db.pragma("foreign_keys = ON");
-      db.exec("DROP TABLE approvals; ALTER TABLE nodes DROP COLUMN isolation;"); db.pragma(`user_version = ${v - 2}`);
+      db.exec("DROP TABLE approvals; ALTER TABLE nodes DROP COLUMN isolation; ALTER TABLE nodes DROP COLUMN secret; ALTER TABLE nodes DROP COLUMN secret_env;"); db.pragma(`user_version = ${v - 3}`);
       db.prepare("INSERT INTO workspaces(workspace_id,machine_id,name,cwd,revision,created_at) VALUES('w1','m','Antes','/tmp',1,?)").run(now);
       db.prepare("INSERT INTO nodes(node_id,workspace_id,kind,title,x,y,w,h,created_at) VALUES('n1','w1','terminal','T',0,0,1,1,?)").run(now);
       db.close();

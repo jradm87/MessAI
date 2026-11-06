@@ -254,6 +254,8 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
   // #69 — atenção global (quem espera você) e "já vi"
   app.get("/v1/attention", async () => svc.attention());
   app.post<{ Params: { id: string } }>("/v1/nodes/:id/seen", async (req, reply) => send(reply, svc.markSeen(req.params.id)));
+  // nota secreta: só o humano (app) revela o valor; agente nunca.
+  app.get<{ Params: { id: string } }>("/v1/nodes/:id/reveal", async (req, reply) => { if (opts.unix || isAgent(req)) return reply.status(403).send({ error: { code: "FORBIDDEN", message: "o valor de uma nota secreta não é exposto a agentes" } }); return send(reply, svc.revealSecret(req.params.id)); });
   // #85 — notificações do SO + mess notify
   app.get("/v1/notifications", async () => svc.listNotifications());
   app.post("/v1/notify", async (req, reply) => {

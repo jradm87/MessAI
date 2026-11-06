@@ -74,6 +74,7 @@ export class Api {
   attentionList() { return this.req<AttentionItem[]>("GET", "/v1/attention"); }
   find(q: string, opt: { workspaceId?: string; kinds?: FindKind[]; limit?: number } = {}) { const p = new URLSearchParams({ q }); if (opt.workspaceId) p.set("workspaceId", opt.workspaceId); if (opt.kinds?.length) p.set("kinds", opt.kinds.join(",")); if (opt.limit) p.set("limit", String(opt.limit)); return this.req<FindHit[]>("GET", `/v1/find?${p.toString()}`); }
   seen(nodeId: string) { return this.req<{ cleared: boolean }>("POST", `/v1/nodes/${nodeId}/seen`); }
+  revealSecret(nodeId: string) { return this.req<{ value: string; envName?: string }>("GET", `/v1/nodes/${nodeId}/reveal`); }
   // #62 dados
   dataInfo() { return this.req<DataInfo>("GET", "/v1/data"); }
   createBackup(dir?: string) { return this.req<BackupEntry>("POST", "/v1/data/backup", dir ? { dir } : {}); }
