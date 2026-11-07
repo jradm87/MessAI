@@ -35,10 +35,24 @@ export function buildServer(cfg: Config, svc: WorkspaceService, opts: { unix: bo
   // Autenticação: token Bearer (ou ?token= para o WS do navegador). Origem só loopback/file.
   // #87 [MESS-02]: o token mestre é do desktop; cada terminal tem credencial própria com capacidades e escopo.
   app.decorateRequest("auth", null);
+  const allowedOrigin = (o: string) => /^(https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?|file:\/\/|null)$/.test(o) || o.startsWith("app://");
+  // CORS só para as origens locais permitidas (o renderer em dev roda em http://localhost:5173 e chama 127.0.0.1:<porta>):
+  // a pré-verificação OPTIONS não leva token, então é respondida antes da autenticação; o token segue obrigatório no pedido real.
+  app.addHook("onSend", async (req, reply, payload) => {
+    const o = req.headers.origin;
+    if (o && allowedOrigin(o)) { reply.header("access-control-allow-origin", o); reply.header("vary", "Origin"); }
+    return payload;
+  });
   app.addHook("onRequest", async (req, reply) => {
     const origin = req.headers.origin;
-    if (origin && !/^(https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?|file:\/\/|null)$/.test(origin) && !origin.startsWith("app://")) {
+    if (origin && !allowedOrigin(origin)) {
       return reply.status(403).send({ error: { code: "FORBIDDEN", message: "origem não permitida" } });
+    }
+    if (req.method === "OPTIONS" && origin) {
+      return reply.status(204)
+        .header("access-control-allow-methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+        .header("access-control-allow-headers", "authorization, content-type")
+        .header("access-control-max-age", "600").send();
     }
     const auth = req.headers.authorization;
     const q = (req.query as Record<string, string | undefined>)["token"];
