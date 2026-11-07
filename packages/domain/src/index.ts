@@ -846,6 +846,27 @@ export function withClaudeAutonomy(command: string, args: string[]): string[] {
   return [...args, "--dangerously-skip-permissions"];
 }
 
+/** Autonomia por CLI: flag de "não perguntar" + flags que, se presentes, significam controle explícito (aí não mexe). */
+const AGENT_AUTONOMY: Record<string, { add: string[]; already: RegExp }> = {
+  codex: {
+    add: ["--dangerously-bypass-approvals-and-sandbox", "-c", "shell_environment_policy.inherit=all", "-c", "shell_environment_policy.ignore_default_excludes=true"],
+    already: /^(--dangerously-bypass-approvals-and-sandbox|--full-auto|--approve-for-me|-a|--ask-for-approval|-s|--sandbox)(=|$)/,
+  },
+  antigravityCLI: { add: ["--dangerously-skip-permissions"], already: /^(--dangerously-skip-permissions|--mode)(=|$)/ },
+  openCode: { add: ["--auto"], already: /^--auto$/ },
+};
+/** Todo agente recrutado roda sem perguntas de aprovação (Claude, Codex, Antigravity, OpenCode) — inclusive quando o
+ * Maestro recruta por `--command` (sem os args do preset). Respeita quem já passou flags de permissão/aprovação. */
+export function withAgentAutonomy(command: string, args: string[]): string[] {
+  const kind = agentKind(command, args).agentType;
+  if (kind === "claudeCode") return withClaudeAutonomy(command, args);
+  const spec = AGENT_AUTONOMY[kind];
+  // só quando o próprio binário é o agente (não mexe em `sh -c "codex ..."`)
+  if (!spec || agentKind(command).agentType !== kind) return args;
+  if (args.some((a) => spec.already.test(a))) return args;
+  return [...args, ...spec.add];
+}
+
 // ---------- Canvas: fios flutuantes (ligam no ponto da borda mais próximo) ----------
 export type Rect = { x: number; y: number; w: number; h: number };
 /** Ponto na borda do retângulo (centro cx,cy; tamanho w,h) no raio em direção a (tx,ty). */

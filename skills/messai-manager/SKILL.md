@@ -6,7 +6,7 @@ user-invocable: true
 
 # MessAI — Maestro mode, bands and roles
 
-This skill is for **conducting other agents**: recruiting terminals, grouping them, and briefing them. The command is **`mess`** (if not on `PATH`, use `"$MESS_CLI"`).
+This skill is for **conducting other agents**: recruiting terminals, grouping them, and briefing them. The command is **`mess`** (call it as a plain single command — no `||`, `;`, `$(...)` or variables — so allowlists approve it; only after an actual `command not found`, use `"$MESS_CLI"`).
 
 ## Maestro mode (recruit / dismiss / reassign)
 

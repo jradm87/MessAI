@@ -6,7 +6,7 @@ user-invocable: true
 
 # MessAI — replying in chat
 
-You're running inside **MessAI**, a spatial workspace of agents, terminals, notes, portals and devices on a canvas. The CLI is **`mess`** (if not on `PATH`, use `"$MESS_CLI"`).
+You're running inside **MessAI**, a spatial workspace of agents, terminals, notes, portals and devices on a canvas. The CLI is **`mess`** (call it as a plain single command — no `||`, `;`, `$(...)` or variables — so allowlists approve it; only after an actual `command not found`, use `"$MESS_CLI"`).
 
 ## When this applies
 

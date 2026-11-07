@@ -12,7 +12,8 @@ You are running inside a **terminal node of MessAI**, a spatial workspace where 
 
 Every action uses the `mess` command-line tool, pre-installed and on your `PATH`.
 
-- **If `mess` is not found**, use the absolute path in the `$MESS_CLI` environment variable: `"$MESS_CLI" context`.
+- **Call `mess` as a plain, single command** — e.g. `mess note read "X"`. Do **not** wrap it in `||`, `;`, `&&`, `$(...)`, subshells or variables (no `command -v mess || ...`, no `mess ... || "$MESS_CLI" ...`). Permission allowlists such as `Bash(mess:*)` only auto-approve simple commands; compound ones make the user approve each call.
+- **Only if you actually got `command not found`**, switch to the absolute path in `$MESS_CLI` for the rest of the session: `"$MESS_CLI" context`.
 - `mess` only works from inside a MessAI terminal (the `MESS_*` environment variables carry your credential). Run `mess --help` any time to see every command.
 
 ## See where you are

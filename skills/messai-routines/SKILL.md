@@ -6,7 +6,7 @@ user-invocable: true
 
 # MessAI — scheduled routines
 
-Routines run a **prompt** (delivered to a terminal) or a **shell command** on a schedule. The command is **`mess routine`** (if `mess` is not on `PATH`, use `"$MESS_CLI" routine ...`).
+Routines run a **prompt** (delivered to a terminal) or a **shell command** on a schedule. The command is **`mess routine`** (call it as a plain single command — no `||`, `;`, `$(...)` or variables — so allowlists approve it; only after an actual `command not found`, use `"$MESS_CLI" routine ...`).
 
 ## Manage routines
 

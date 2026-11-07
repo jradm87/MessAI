@@ -1,5 +1,5 @@
 import {  describe, expect, it } from "vitest";
-import { canMessage, formatDelivery, resolveNodeRef, parseCrossRef, resolveCrossNodeRef, parseGitRemote, buildPrCompareUrl, canWrite, checkRevision, decideLease, normalizeGeometry, trimBuffer, MAX_BUFFER_BYTES, applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxAttachPlan, shellQuote, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, alignGeometries, gridLayout, agentKind, agentResume, stripAnsi, normalizePortalUrl, parsePortal, portalKey, serializePortal, androidInputText, androidKey, isAdbSerial, isAndroidActivity, isAndroidPackage, isAvdName, parseAdbDevices, parseAndroidFocus, parseAndroidPackages, parseUiDump, parseWmSize, pngSize, uiNodeAt, withClaudeAutonomy, rectBorderToward, floatingEnds, borderSide, treeLayout, pushOutsideRect } from "./index.js";
+import { canMessage, formatDelivery, resolveNodeRef, parseCrossRef, resolveCrossNodeRef, parseGitRemote, buildPrCompareUrl, canWrite, checkRevision, decideLease, normalizeGeometry, trimBuffer, MAX_BUFFER_BYTES, applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxAttachPlan, shellQuote, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, alignGeometries, gridLayout, agentKind, agentResume, stripAnsi, normalizePortalUrl, parsePortal, portalKey, serializePortal, androidInputText, androidKey, isAdbSerial, isAndroidActivity, isAndroidPackage, isAvdName, parseAdbDevices, parseAndroidFocus, parseAndroidPackages, parseUiDump, parseWmSize, pngSize, uiNodeAt, withClaudeAutonomy, withAgentAutonomy, rectBorderToward, floatingEnds, borderSide, treeLayout, pushOutsideRect } from "./index.js";
 
 describe("revisão", () => {
   it("aceita revisão igual e devolve próxima", () => {
@@ -392,6 +392,20 @@ describe("Claude autônomo sempre (#29)", () => {
     expect(withClaudeAutonomy("claude", ["--allowedTools", "Read Grep"])).toEqual(["--allowedTools", "Read Grep"]); // controle explícito de permissões: não força bypass
     expect(withClaudeAutonomy("claude", ["--permission-mode", "default"])).toEqual(["--permission-mode", "default"]);
     expect(withClaudeAutonomy("claude", ["--disallowed-tools=Edit"])).toEqual(["--disallowed-tools=Edit"]);
+  });
+  it("autonomia para todo agente recrutado (codex/antigravity/opencode), respeitando controle explícito", () => {
+    expect(withAgentAutonomy("claude", [])).toEqual(["--dangerously-skip-permissions"]);
+    expect(withAgentAutonomy("codex", [])).toContain("--dangerously-bypass-approvals-and-sandbox");
+    expect(withAgentAutonomy("codex", ["-a", "on-request"])).toEqual(["-a", "on-request"]);
+    expect(withAgentAutonomy("codex", ["--sandbox=read-only"])).toEqual(["--sandbox=read-only"]);
+    const preset = ["--dangerously-bypass-approvals-and-sandbox", "-c", "x=1"];
+    expect(withAgentAutonomy("codex", preset)).toEqual(preset); // preset já autônomo: não duplica
+    expect(withAgentAutonomy("agy", [])).toEqual(["--dangerously-skip-permissions"]);
+    expect(withAgentAutonomy("agy", ["--mode", "plan"])).toEqual(["--mode", "plan"]);
+    expect(withAgentAutonomy("/home/u/.opencode/bin/opencode", [])).toEqual(["--auto"]);
+    expect(withAgentAutonomy("sh", ["-c", "codex"])).toEqual(["-c", "codex"]); // wrapper de shell: não mexe
+    expect(withAgentAutonomy("aider", [])).toEqual([]);
+    expect(withAgentAutonomy("/bin/bash", [])).toEqual([]);
   });
 });
 
