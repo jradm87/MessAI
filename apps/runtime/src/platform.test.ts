@@ -1,0 +1,35 @@
+import { describe, expect, it } from "vitest";
+import { getPath, isPathLike, pathExts, pathKey, prependPath, toPosixPath } from "./platform.js";
+
+describe("platform (porte Windows)", () => {
+  it("pathKey/getPath: Windows acha a chave em qualquer caixa; fora dele é sempre PATH", () => {
+    expect(pathKey({ Path: "a" }, true)).toBe("Path");
+    expect(pathKey({ PATH: "a" }, true)).toBe("PATH");
+    expect(pathKey({}, true)).toBe("PATH");
+    expect(pathKey({ Path: "a" }, false)).toBe("PATH");
+    expect(getPath({ Path: "C:\\x" }, true)).toBe("C:\\x");
+    expect(getPath({ Path: "C:\\x" }, false)).toBe("");
+  });
+  it("prependPath (C): preserva a chave existente e não deixa PATH + Path duplicados", () => {
+    expect(prependPath({ Path: "C:\\w", X: "1" }, "C:\\cli", true)).toEqual({ Path: "C:\\cli;C:\\w", X: "1" });
+    const dup = prependPath({ PATH: "C:\\a", Path: "C:\\b" }, "C:\\cli", true);
+    expect(Object.keys(dup).filter((k) => k.toUpperCase() === "PATH")).toHaveLength(1);
+    expect(prependPath({ PATH: "/usr/bin" }, "/cli", false)).toEqual({ PATH: "/cli:/usr/bin" });
+    expect(prependPath({}, "/cli", false)).toEqual({ PATH: "/cli" });
+  });
+  it("pathExts: PATHEXT em minúsculas, sem \"\" no Windows; [\"\"] fora dele", () => {
+    expect(pathExts({ PATHEXT: ".COM;.EXE;.CMD" }, true)).toEqual([".com", ".exe", ".cmd"]);
+    expect(pathExts({}, true)).toEqual([".com", ".exe", ".bat", ".cmd"]);
+    expect(pathExts({ PATHEXT: ".EXE" }, false)).toEqual([""]);
+  });
+  it("isPathLike e toPosixPath", () => {
+    expect(isPathLike("claude", true)).toBe(false);
+    expect(isPathLike("C:\\x\\claude.cmd", true)).toBe(true);
+    expect(isPathLike("bin\\claude", true)).toBe(true);
+    expect(isPathLike("bin\\claude", false)).toBe(false);
+    expect(isPathLike("/usr/bin/claude", false)).toBe(true);
+    expect(toPosixPath("C:\\Users\\ctscs\\mess")).toBe("/c/Users/ctscs/mess");
+    expect(toPosixPath("D:\\")).toBe("/d");
+    expect(toPosixPath("/usr/bin")).toBe("/usr/bin");
+  });
+});
