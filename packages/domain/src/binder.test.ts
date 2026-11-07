@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { binderAddPage, binderBringToFront, binderPatchPage, binderRemovePage, binderSetActive, emptyBinder, parseBinder, serializeBinder } from "./index.js";
+import { binderAddPage, binderBringToFront, binderDeletePage, binderFindPage, binderMovePage, binderPatchPage, binderRemovePage, binderSetActive, emptyBinder, parseBinder, serializeBinder } from "./index.js";
 
 describe("fichário (#74)", () => {
   it("parseBinder tolera lixo, garante ≥1 página e active válido", () => {
@@ -24,5 +24,21 @@ describe("fichário (#74)", () => {
     expect(r.page.title).toBe("C"); expect(r.binder.pages).toHaveLength(2); expect(r.binder.active).toBe(r.binder.pages[1]!.id);
     expect(binderRemovePage(emptyBinder(), "p1")).toBeNull(); expect(binderRemovePage(b, "x")).toBeNull();
     const f = binderBringToFront(b, b.pages[2]!.id); expect(f.pages[0]!.title).toBe("C"); expect(f.active).toBe(f.pages[0]!.id);
+  });
+  it("páginas: busca por id/posição/título, cor só hex, mover e apagar (nunca esvazia)", () => {
+    let b = binderAddPage(binderAddPage(emptyBinder(), { title: "Achados", color: "#ef5350" }), { title: "Resumo" });
+    expect(binderFindPage(b, "p2")?.title).toBe("Achados");
+    expect(binderFindPage(b, "3")?.title).toBe("Resumo");
+    expect(binderFindPage(b, "achados")?.id).toBe("p2");
+    expect(binderFindPage(b, "res")?.title).toBe("Resumo");
+    expect(binderFindPage(b, "nada")).toBeUndefined();
+    expect(b.pages[1]!.color).toBe("#ef5350");
+    expect(binderPatchPage(b, "p2", { color: "" }).pages[1]!.color).toBeUndefined();
+    const evil = parseBinder(JSON.stringify({ pages: [{ id: "p1", title: "x", content: "", color: "url(http://e)" }], active: "p1", color: "red;}" }));
+    expect(evil.pages[0]!.color).toBeUndefined(); expect(evil.color).toBe("");
+    b = binderMovePage(b, "p3", 0); expect(b.pages.map((p) => p.title)).toEqual(["Resumo", "Página 1", "Achados"]);
+    expect(binderMovePage(b, "p3", 99).pages.at(-1)!.title).toBe("Resumo");
+    const one = binderDeletePage(binderDeletePage(b, "p1")!, "p2")!; expect(one.pages.length).toBe(1);
+    expect(binderDeletePage(one, one.pages[0]!.id)).toBeNull();
   });
 });

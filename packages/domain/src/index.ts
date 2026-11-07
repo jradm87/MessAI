@@ -500,26 +500,45 @@ export function connectionsWithin<T extends { sourceNodeId: string; targetNodeId
 }
 
 // ---------- #74 fichários: várias páginas (notas) num nó, com aba ativa e cor uniforme ----------
-export type BinderPage = { id: string; title: string; content: string };
+export type BinderPage = { id: string; title: string; content: string; color?: string };
 export type Binder = { pages: BinderPage[]; active: string; color: string };
 export const emptyBinder = (): Binder => ({ pages: [{ id: "p1", title: "Página 1", content: "" }], active: "p1", color: "" });
 /** Conteúdo salvo → fichário válido (sempre ≥1 página e `active` existente); lixo vira um fichário vazio. */
 export function parseBinder(raw: string | null | undefined): Binder {
   try {
     const j = JSON.parse(raw ?? "") as Partial<Binder>;
-    const pages = (Array.isArray(j.pages) ? j.pages : []).filter((p): p is BinderPage => !!p && typeof p.id === "string" && typeof p.title === "string" && typeof p.content === "string");
+    const pages = (Array.isArray(j.pages) ? j.pages : []).filter((p): p is BinderPage => !!p && typeof p.id === "string" && typeof p.title === "string" && typeof p.content === "string")
+      .map(({ id, title, content, color }) => ({ id, title, content, ...(hexColor(color) ? { color: color as string } : {}) }));
     if (!pages.length) return emptyBinder();
-    return { pages, active: pages.some((p) => p.id === j.active) ? (j.active as string) : pages[0]!.id, color: typeof j.color === "string" ? j.color : "" };
+    return { pages, active: pages.some((p) => p.id === j.active) ? (j.active as string) : pages[0]!.id, color: hexColor(j.color) ? (j.color as string) : "" };
   } catch { return emptyBinder(); }
 }
+/** cores do fichário vão para CSS: só hex passa (o conteúdo é JSON livre, editável por agente) */
+const hexColor = (c: unknown): boolean => typeof c === "string" && /^#[0-9a-f]{3}([0-9a-f]{3})?$/i.test(c);
 export const serializeBinder = (b: Binder): string => JSON.stringify(b);
 const nextPageId = (b: Binder): string => { let n = b.pages.length + 1; while (b.pages.some((p) => p.id === `p${n}`)) n++; return `p${n}`; };
-export function binderAddPage(b: Binder, page?: { title?: string; content?: string }): Binder {
+export function binderAddPage(b: Binder, page?: { title?: string; content?: string; color?: string }): Binder {
   const id = nextPageId(b);
-  return { ...b, pages: [...b.pages, { id, title: page?.title?.trim() || `Página ${b.pages.length + 1}`, content: page?.content ?? "" }], active: id };
+  return { ...b, pages: [...b.pages, { id, title: page?.title?.trim() || `Página ${b.pages.length + 1}`, content: page?.content ?? "", ...(page?.color && hexColor(page.color) ? { color: page.color } : {}) }], active: id };
 }
 export function binderSetActive(b: Binder, id: string): Binder { return b.pages.some((p) => p.id === id) ? { ...b, active: id } : b; }
-export function binderPatchPage(b: Binder, id: string, patch: Partial<Pick<BinderPage, "title" | "content">>): Binder { return { ...b, pages: b.pages.map((p) => (p.id === id ? { ...p, ...patch } : p)) }; }
+export function binderPatchPage(b: Binder, id: string, patch: Partial<Pick<BinderPage, "title" | "content" | "color">>): Binder {
+  return { ...b, pages: b.pages.map((p) => { if (p.id !== id) return p; const n = { ...p, ...patch }; if (!n.color) delete n.color; return n; }) };
+}
+/** Página por referência: id (`p2`), posição 1-based (`2`) ou título (exato, sem caixa; depois prefixo). */
+export function binderFindPage(b: Binder, ref: string): BinderPage | undefined {
+  const r = ref.trim(); const lo = r.toLowerCase();
+  return b.pages.find((p) => p.id === r) ?? (/^\d+$/.test(r) ? b.pages[Number(r) - 1] : undefined)
+    ?? b.pages.find((p) => p.title.toLowerCase() === lo) ?? b.pages.find((p) => p.title.toLowerCase().startsWith(lo));
+}
+/** Apaga a página (sem virar nota). A última página não sai: o fichário nunca fica vazio. */
+export function binderDeletePage(b: Binder, id: string): Binder | null { return binderRemovePage(b, id)?.binder ?? null; }
+/** Move a página para a posição `to` (0-based, limitada às bordas). */
+export function binderMovePage(b: Binder, id: string, to: number): Binder {
+  const i = b.pages.findIndex((p) => p.id === id); if (i < 0) return b;
+  const pages = [...b.pages]; const [p] = pages.splice(i, 1); pages.splice(Math.max(0, Math.min(to, pages.length)), 0, p!);
+  return { ...b, pages };
+}
 /** Tira uma página (spill). Com 1 página só não dá (o fichário não fica vazio): devolve null. */
 export function binderRemovePage(b: Binder, id: string): { binder: Binder; page: BinderPage } | null {
   const page = b.pages.find((p) => p.id === id); if (!page || b.pages.length <= 1) return null;

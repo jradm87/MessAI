@@ -92,6 +92,7 @@ const RULES: Rule[] = [
   // ---- canvas (nós, conexões, desenhos, grupos, bandas, partituras) ----
   ["POST", "/v1/workspaces/:id/nodes", r("nodes:write", "ws")],
   ["PATCH", "/v1/nodes/:id", r("nodes:write", "node")],
+  ["POST", "/v1/nodes/:id/binder", r("nodes:write", "node")],
   ["DELETE", "/v1/nodes/:id", r("nodes:write", "node")],
   ["POST", "/v1/nodes/:id/duplicate", r("nodes:write", "node")],
   ["POST", "/v1/nodes/:id/seen", r("nodes:write", "node")],

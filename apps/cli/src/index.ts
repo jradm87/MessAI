@@ -5,6 +5,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import { AGENT_ENV, type Band, type BandAskResult, type AskResult, type ChatMessage, type EnvVarEntry, type FloorCopyInfo, type FloorHooksState, type FloorPrState, type GitHostEntry, type Message, type Node, type NotificationItem, type Routine, type RoutineRunResult, type Session, type Workspace, type WorkspaceBundle, type WorkspaceBundlePreview, type WorkspaceSnapshot } from "@messai/contracts";
 
+import type { BinderView } from "@messai/contracts";
 import type { PortalActResult, PortalSnapshot, PortalScreenshot, DeviceList, DeviceActResult, DeviceUiTree, DeviceScreenshot, DeviceState } from "@messai/contracts";
 
 const env = (k: keyof typeof AGENT_ENV) => process.env[AGENT_ENV[k]];
@@ -53,6 +54,7 @@ try {
   mess connect <id|título>          liga seu nó a outro nó
   mess color <id|título> <cor>      pinta qualquer nó · --color <cor> também em note write, portal/device new, recruit, band create
                                       (${COLOR_HELP})
+  mess binder list|new <título> · <fichário> pages|read|add|write|append|rename|color|delete|open|front|move   fichários (páginas)
   mess close <id|título>            apaga uma nota/portal/dispositivo (terminal: use mess maestro dismiss)
   mess peers                        terminais conectados a você (com quem pode falar)
   mess ask <id|título> <texto>      pergunta a um nó conectado e ESPERA a resposta (última tela)
@@ -472,6 +474,59 @@ try {
       const r = await call<{ interrupted: number; titles: string[] }>("POST", `/v1/nodes/${nodeId}/maestro/interrupt`, { ...(all ? { all: true } : { ref }) });
       console.log(r.interrupted ? `interrompido(s) ${r.interrupted}: ${r.titles.join(", ")}` : "nenhum recrutado em execução para interromper");
     } else throw new Error("uso: mess maestro recruit|dismiss|assign|interrupt");
+  } else if (cmd === "binder" || cmd === "fichario" || cmd === "fichário") {
+    // #74 fichários: várias páginas num nó — o Maestro/agentes criam, escrevem, renomeiam, colorem, ordenam e apagam páginas
+    const args = [sub, ...rest].filter((a): a is string => a !== undefined);
+    const usage = `uso: mess binder list · new <título> [--color c] · <fichário> [pages] · <fichário> read <pág>
+     <fichário> add <título> [texto] [--color c] · write|append <pág> <texto> · rename <pág> <novo título>
+     <fichário> color [<pág>] <cor> · delete|open|front <pág> · move <pág> <posição>
+     (<pág> = posição 1,2,3…, id p2 ou título) (${COLOR_HELP})`;
+    const s = await snapshot(); const binders = s.nodes.filter((n) => n.kind === "binder");
+    const first = args.shift();
+    const show = (v: BinderView) => { console.log(`fichário "${v.title}" [${short(v.nodeId)}]${v.color ? ` cor ${v.color}` : ""} — ${v.pages.length} pág.`); v.pages.forEach((p, i) => console.log(`${p.id === v.active ? "*" : " "} ${String(i + 1).padStart(2)}. ${p.id.padEnd(4)} ${p.title}${p.color ? `  (${p.color})` : ""}  · ${p.content.length} chars`)); };
+    if (!first || first === "help" || first === "--help") throw new Error(usage);
+    if (first === "list") {
+      if (!binders.length) console.log("nenhum fichário neste espaço (crie com: mess binder new <título>)");
+      for (const n of binders) { const pages = (() => { try { return (JSON.parse(n.content ?? "{}") as { pages?: unknown[] }).pages?.length ?? 0; } catch { return 0; } })(); console.log(`${short(n.nodeId)}  ${n.title}  · ${pages} pág.`); }
+    } else if (first === "new" || first === "create") {
+      const col = takeColor(args); const title = args.join(" ").trim() || "Fichário";
+      const me = s.nodes.find((n) => n.nodeId === nodeId);
+      const g = me ? { x: me.geometry.x + me.geometry.w + 40, y: me.geometry.y, w: 520, h: 360 } : { x: 40, y: 40, w: 520, h: 360 };
+      const r = await call<{ node: Node }>("POST", `/v1/workspaces/${workspaceId}/nodes`, { expectedRevision: s.workspace.revision, kind: "binder", title, geometry: g, autoPlace: true });
+      if (col.color) await call("POST", `/v1/nodes/${r.node.nodeId}/binder`, { op: "color", color: col.color });
+      if (nodeId) { const s2 = await snapshot(); await call("POST", `/v1/workspaces/${workspaceId}/connections`, { expectedRevision: s2.workspace.revision, sourceNodeId: nodeId, targetNodeId: r.node.nodeId }).catch(() => {}); }
+      console.log(`fichário "${r.node.title}" criado [${short(r.node.nodeId)}]${nodeId ? " e ligado ao seu nó" : ""}`);
+    } else {
+      const bn = findNode(binders, first); if (!bn) throw new Error(`fichário não encontrado: ${first}\n${usage}`);
+      const op = args.shift() ?? "pages";
+      const run = (b: Record<string, unknown>) => call<BinderView>("POST", `/v1/nodes/${bn.nodeId}/binder`, b);
+      if (op === "pages" || op === "list" || op === "get") show(await run({ op: "get" }));
+      else if (op === "read") {
+        const [pg] = args; if (!pg) throw new Error(usage);
+        const v = await run({ op: "get", page: pg }); const lo = pg.toLowerCase();
+        const p = v.pages.find((x) => x.id === pg) ?? (/^\d+$/.test(pg) ? v.pages[Number(pg) - 1] : undefined) ?? v.pages.find((x) => x.title.toLowerCase() === lo) ?? v.pages.find((x) => x.title.toLowerCase().startsWith(lo));
+        console.log(p?.content ?? "");
+      } else if (op === "add") {
+        const col = takeColor(args); const [title, ...text] = args; if (!title) throw new Error(usage);
+        const v = await run({ op: "add", title, content: text.join(" "), ...col }); console.log(`página "${v.pages.at(-1)!.title}" adicionada (${v.pages.length}ª)`);
+      } else if (op === "write" || op === "append") {
+        const [pg, ...text] = args; if (!pg) throw new Error(usage);
+        await run({ op, page: pg, content: text.join(" ") }); console.log(op === "write" ? `página "${pg}" reescrita` : `texto anexado à página "${pg}"`);
+      } else if (op === "rename") {
+        const [pg, ...t] = args; if (!pg || !t.length) throw new Error(usage);
+        await run({ op, page: pg, title: t.join(" ") }); console.log(`página renomeada para "${t.join(" ")}"`);
+      } else if (op === "color" || op === "colour") {
+        const color = args.pop(); const pg = args.join(" ").trim(); if (color === undefined) throw new Error(usage);
+        await run({ op: "color", color, ...(pg ? { page: pg } : {}) }); console.log(pg ? `página "${pg}" com cor ${color}` : `fichário com cor ${color}`);
+      } else if (op === "delete" || op === "remove" || op === "rm" || op === "open" || op === "front") {
+        const pg = args.join(" ").trim(); if (!pg) throw new Error(usage);
+        const o = op === "remove" || op === "rm" ? "delete" : op; await run({ op: o, page: pg });
+        console.log(o === "delete" ? `página "${pg}" apagada` : o === "open" ? `página "${pg}" aberta` : `página "${pg}" na frente`);
+      } else if (op === "move") {
+        const to = Number(args.pop()); const pg = args.join(" ").trim(); if (!pg || !Number.isInteger(to) || to < 1) throw new Error(usage);
+        await run({ op: "move", page: pg, to }); console.log(`página "${pg}" na posição ${to}`);
+      } else throw new Error(usage);
+    }
   } else if (cmd === "color" || cmd === "colour") {
     // pinta qualquer nó do espaço (nota, terminal, portal, dispositivo, fichário…)
     const args = [sub, ...rest].filter((a): a is string => a !== undefined);

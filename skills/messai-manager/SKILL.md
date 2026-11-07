@@ -21,6 +21,7 @@ mess maestro interrupt <id|title>                          # interrupt a recruit
 mess maestro interrupt --all                               # emergency: interrupt ALL your recruits at once
 mess close <id|title>                                      # delete a NON-terminal node (note / portal / device / binder)
 mess color <id|title> <color>                              # recolor ANY node (e.g. group helpers/findings by color)
+mess binder new "<Title>" · mess binder "<Title>" add|write|rename|color|move|delete ...   # multi-page report (see the messai skill)
 ```
 
 `--color <color>` also works on `maestro recruit`, `band create`, `note write`, `portal new`/`device new`. Colors: `cinza vermelho laranja amarelo verde ciano azul roxo rosa` (or English: gray red orange yellow green cyan blue purple pink), `#rrggbb`, or `-` to clear.

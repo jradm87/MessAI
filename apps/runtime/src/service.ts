@@ -1,7 +1,7 @@
 import { AGENT_ENV, type TreeEntry, type FileContent, type FsOp, type SearchHit, type CreateFloor, type LandFloor, type LandResult, type Role, type CreateRole, type PatchRole, type ChatMessage, type SendChat, type Attachment, type CreateAttachment, type FileEntry, type Connection, type CreateConnection, type PatchConnection, type CreateDrawing, type PatchDrawing, type GroupDrawings, type CreateFolder, type CreateNode, type Drawing, type Folder, type Message, type PatchFolder, type SendMessage, type Sidebar, type CreateWorkspace, type Node, type PatchNode, type PatchWorkspace, type Session, type Workspace, type WorkspaceSnapshot, type TaskFinished, type TaskSummary } from "@messai/contracts";
 import type { RuntimeSettings, PatchRuntimeSettings, PresetInput, Skill, CreateSkill, PatchSkill, FindHit, FindKind, NodeGroup, CreateNodeGroup, PatchNodeGroup, AttentionItem, Score, ScoreNode, SaveScore, PatchScore, PlaceScore, PlaceScoreResult } from "@messai/contracts";
 import type { ChatAttachment, ExportAttachment, InstructionsStatus, InstructionFileInfo, PutInstructions, SyncInstructions } from "@messai/contracts";
-import type { Band, CreateBand, PatchBand, AskBand, BandAnswer, BandAskResult, MaestroRecruit } from "@messai/contracts";
+import type { Band, CreateBand, PatchBand, AskBand, BandAnswer, BandAskResult, MaestroRecruit, BinderOp, BinderView } from "@messai/contracts";
 import type { FloorHookSection, FloorHooksConfig, PutFloorHooks, FloorHookStatus, FloorHooksState, RunFloorHookInput, StopFloorHookInput, FloorCopyInfo, PutFloorExcludes, ConnectedPeer, CrossNodeCandidate, GitHostEntry, PutGitHostsInput, FloorPrState, CreateFloorPrInput, PatchFloorPrInput, FloorPrReviewStatus, FloorPrChecksStatus, EnvVarEntry, PutEnvVarsInput, EnvironmentsState, WorkspaceBundle, WorkspaceBundlePreview, ImportWorkspaceInput, DuplicateWorkspaceInput, BundleNode, BundleConnection, BundleGroup, BundleBand, BundleDrawing, NotificationItem, NotificationKind, SendNotifyInput, Routine, CreateRoutineInput, PatchRoutineInput, RoutineRunResult } from "@messai/contracts";
 import { WORKSPACE_BUNDLE_FORMAT } from "@messai/contracts";
 import type { AgentCapability, IssueAgentTokenInput, AgentTokenInfo, Approval, CreateApproval, NodeIsolation } from "@messai/contracts";
@@ -22,7 +22,7 @@ import { probeAccounts } from "./accounts.js";
 import { backupName, copyBackupFiles, dataStats, isBackupName, listBackups, validateBackup, validateMoveTarget, writeManifest, type BackupEntry } from "./data.js";
 import { BUILD_VERSION } from "@messai/contracts";
 import { defaultPresets, parsePresets, validatePresets, PRESETS_META_KEY } from "./presets.js";
-import { applyRole, withAgentAutonomy, parseNodeColor, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, DEFAULT_FLOOR_EXCLUDES, normalizeFloorExcludes, shouldExcludeFloorDir, parseGitRemote, buildPrCompareUrl, normalizeEnvVars, mergeEnvLayers, safeRelPath, isWithinCanonicalRoot, looksBinary, canMessage, checkRevision, formatDelivery, normalizeGeometry, planLocalTerminal, resolveNodeRef, resolveCrossNodeRef, validateNewNode, agentKind, agentResume, stripAnsi, fail, succeed, type Result, applySkills, skillsText, placeGeometries, connectionsWithin } from "@messai/domain";
+import { applyRole, withAgentAutonomy, parseNodeColor, parseBinder, serializeBinder, binderAddPage, binderPatchPage, binderFindPage, binderDeletePage, binderMovePage, binderBringToFront, binderSetActive, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, DEFAULT_FLOOR_EXCLUDES, normalizeFloorExcludes, shouldExcludeFloorDir, parseGitRemote, buildPrCompareUrl, normalizeEnvVars, mergeEnvLayers, safeRelPath, isWithinCanonicalRoot, looksBinary, canMessage, checkRevision, formatDelivery, normalizeGeometry, planLocalTerminal, resolveNodeRef, resolveCrossNodeRef, validateNewNode, agentKind, agentResume, stripAnsi, fail, succeed, type Result, applySkills, skillsText, placeGeometries, connectionsWithin } from "@messai/domain";
 import { createHash, randomUUID, randomBytes, timingSafeEqual } from "node:crypto";
 import { Companion } from "./companion.js";
 import type { Store } from "@messai/storage";
@@ -3272,6 +3272,34 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     return this.sessions.interrupt(node.sessionId, this.kindOfNode(node).isAgent).ok;
   }
   /** Interrompe (Esc nos agentes / Ctrl-C em shell, SEM matar) um recrutado — ou TODOS os ligados ao condutor (parada de emergência). */
+  /** #74 — uma operação no fichário (agente/CLI/UI). Lê-modifica-grava no runtime (síncrono, sem corrida) e devolve o fichário. */
+  binderOp(nodeId: string, input: BinderOp, byAgent = false): Result<BinderView> {
+    const node = this.store.getNode(nodeId);
+    if (!node || node.kind !== "binder") return fail("NOT_FOUND", "fichário não encontrado");
+    let b = parseBinder(node.content);
+    const page = input.page !== undefined ? binderFindPage(b, input.page) : undefined;
+    if (input.page !== undefined && !page) return fail("NOT_FOUND", `página não encontrada: ${input.page}`);
+    const need = () => (page ? null : fail("INVALID", "informe a página (id, posição ou título)"));
+    const color = (): Result<string> => { const c = parseNodeColor(input.color ?? ""); return c === null ? fail("INVALID", `cor inválida: ${input.color} (use um nome da paleta ou #rrggbb)`) : succeed(c); };
+    switch (input.op) {
+      case "get": break;
+      case "add": { const c = color(); if (!c.ok) return c; b = binderAddPage(b, { ...(input.title ? { title: input.title } : {}), content: input.content ?? "", ...(c.value ? { color: c.value } : {}) }); break; }
+      case "write": { const e = need(); if (e) return e; b = binderPatchPage(b, page!.id, { content: input.content ?? "" }); break; }
+      case "append": { const e = need(); if (e) return e; b = binderPatchPage(b, page!.id, { content: page!.content ? `${page!.content.replace(/\n*$/, "")}\n${input.content ?? ""}` : (input.content ?? "") }); break; }
+      case "rename": { const e = need(); if (e) return e; if (!input.title?.trim()) return fail("INVALID", "informe o novo título"); b = binderPatchPage(b, page!.id, { title: input.title.trim() }); break; }
+      case "color": { const c = color(); if (!c.ok) return c; b = page ? binderPatchPage(b, page.id, { color: c.value }) : { ...b, color: c.value }; break; }
+      case "delete": { const e = need(); if (e) return e; const nb = binderDeletePage(b, page!.id); if (!nb) return fail("INVALID", "o fichário precisa de pelo menos uma página"); b = nb; break; }
+      case "open": { const e = need(); if (e) return e; b = binderSetActive(b, page!.id); break; }
+      case "front": { const e = need(); if (e) return e; b = binderBringToFront(b, page!.id); break; }
+      case "move": { const e = need(); if (e) return e; if (!input.to) return fail("INVALID", "informe a posição (to, 1-based)"); b = binderMovePage(b, page!.id, input.to - 1); break; }
+    }
+    if (input.op !== "get") {
+      const w = this.store.getWorkspace(node.workspaceId)!;
+      const r = this.patchNode(nodeId, { expectedRevision: w.revision, content: serializeBinder(b) }, byAgent);
+      if (!r.ok) return r;
+    }
+    return succeed({ nodeId, title: node.title, color: b.color, active: b.active, pages: b.pages.map((p) => ({ id: p.id, title: p.title, ...(p.color ? { color: p.color } : {}), content: p.content })) });
+  }
   maestroInterrupt(maestroId: string, input: { ref?: string; all?: boolean; notify?: boolean }): Result<{ interrupted: number; titles: string[] }> {
     const m = this.requireMaestro(maestroId); if (!m.ok) return m;
     let targets: Node[];

@@ -2,7 +2,7 @@ import { Type, type Static } from "@sinclair/typebox";
 
 export const PROTOCOL_VERSION = 1 as const;
 /** Incrementar a cada mudança de snapshot/rotas; o cliente avisa quando o runtime está atrás. */
-export const BUILD_VERSION = 49 as const;
+export const BUILD_VERSION = 50 as const;
 
 // ---------- Identidades ----------
 export const Id = Type.String({ minLength: 8, maxLength: 64 });
@@ -397,6 +397,14 @@ export type MaestroTarget = Static<typeof MaestroTarget>;
 export const MaestroAssign = Type.Object({ ref: Type.String({ minLength: 1 }), roleName: Type.Union([Type.String({ minLength: 1 }), Type.Null()]) });
 export type MaestroAssign = Static<typeof MaestroAssign>;
 // #29 interromper (Esc/Ctrl-C, sem matar) um recrutado ou todos; notify = avisa o condutor no terminal dele (parada de emergência pelo usuário)
+// #74 fichário manipulável por agente/CLI: uma operação por chamada; `page` = id, posição 1-based ou título
+export const BinderOp = Type.Object({
+  op: Type.Union([Type.Literal("get"), Type.Literal("add"), Type.Literal("write"), Type.Literal("append"), Type.Literal("rename"), Type.Literal("color"), Type.Literal("delete"), Type.Literal("open"), Type.Literal("front"), Type.Literal("move")]),
+  page: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })), title: Type.Optional(Type.String({ maxLength: 200 })),
+  content: Type.Optional(Type.String({ maxLength: 2_000_000 })), color: Type.Optional(Type.String({ maxLength: 20 })), to: Type.Optional(Type.Integer({ minimum: 1 })),
+});
+export type BinderOp = Static<typeof BinderOp>;
+export type BinderView = { nodeId: string; title: string; color: string; active: string; pages: { id: string; title: string; color?: string; content: string }[] };
 export const MaestroInterrupt = Type.Object({ ref: Type.Optional(Type.String({ minLength: 1 })), all: Type.Optional(Type.Boolean()), notify: Type.Optional(Type.Boolean()) });
 export type MaestroInterrupt = Static<typeof MaestroInterrupt>;
 

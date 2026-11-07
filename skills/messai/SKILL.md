@@ -39,6 +39,25 @@ Add `--color <color>` to `note write` to tint it, and recolor any node (note, te
 
 Notes are Markdown (support `#` headings, lists, links, and ```mermaid``` diagrams). `mess note write` always connects the new note to you, so the user sees it hanging off your terminal.
 
+## Binders (one node, many pages)
+
+A **binder** keeps several pages (notes) in one node with side tabs — good for a report with sections, or one page per finding/agent.
+
+```
+mess binder list                                   # binders in this workspace
+mess binder new "<Title>" [--color c]              # create one, auto-linked to YOUR node
+mess binder "<Binder>" pages                       # list pages (position, id, title, color; * = open)
+mess binder "<Binder>" read <page>                 # print a page
+mess binder "<Binder>" add "<Title>" "<text>" [--color c]
+mess binder "<Binder>" write|append <page> "<text>"
+mess binder "<Binder>" rename <page> "<New title>"
+mess binder "<Binder>" color <page> <color>        # page color · `color <color>` alone colors the whole binder
+mess binder "<Binder>" move <page> <position>      # reorder · open <page> shows it · front <page> moves it first
+mess binder "<Binder>" delete <page>               # the last page can't be deleted
+```
+
+`<page>` = position (`1`, `2`…), id (`p2`) or title (prefix works). One `mess` call per command (no `;`/`&&`).
+
 ## Talk to connected agents
 
 ```
