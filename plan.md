@@ -1,8 +1,8 @@
 # Plano — Porte do MessAI para Windows (`windows_version`)
 
-> Branch: **`windows_version`** (da `main` em `841f02d` / v0.0.14). **Rev. 4** — rev. 3 (reavaliação + revisão crítica contra o código) + **plano de execução multi-agente** (seção final: 7 papéis, ondas, contrato, gates, briefings).
+> Branch: **`windows_version`** (da `main` em `841f02d` / v0.0.14). **Rev. 5** — rev. 4 auditada contra o código em `5b46fa6` numa máquina **Windows 11 Pro** (Git 2.56; sem Node/pwsh instalados — nada foi executado além de `git`). Novidades: CRLF já no working tree (K), nome do binário `.exe/.cmd` (M), `windowsHide` (N), tmux forçado off, CI que não dispara em `windows_version`, testes de integração tratados como suíte Linux (não 43 `skipIf`), e **execução simplificada para 2 trilhas** (seção final) em vez de 7 papéis.
 > Objetivo: instalador Windows (`.exe`) reaproveitando o código atual, sem reescrever o app.
-> Convenção: toda referência a código é `arquivo:linha`; o que depende de máquina Windows real está marcado como **hipótese**.
+> Convenção: toda referência a código é `arquivo:linha`; o que depende de executar em Windows está marcado como **hipótese**. Repositório local: `C:\Users\ctscs\Documents\MessAI` (a rev. 4 chamava de `koba`, nome antigo).
 
 ## Decisão (ADR)
 **Build nativo do Electron para Windows** (electron-builder **`nsis`**; `portable` opcional, ver Fase 3).
@@ -16,11 +16,11 @@ Por quê (verificado no código):
 - **Segurança no Windows:** o named pipe não tem `chmod`; a autenticação fica no **Bearer** + credencial por terminal com escopo (`server.ts:38-55`, `service.ts:2054`). Decisão registrada.
 
 ## Degradações aceitas no Windows (feature-flags)
-- **tmux** ausente → sem sessões duráveis / `--persist` (`tmuxAvailable()` já desliga).
+- **tmux** ausente → sem sessões duráveis / `--persist`. `tmuxAvailable()` (`sessions.ts:64`) já desliga quando não há `tmux` no PATH, mas um tmux do MSYS2 no PATH ligaria `terminal.tmux` (`server.ts:123`) e `persist` (`service.ts:1964,3239`) sobre um ConPTY — **forçar `false` em `win32`**.
 - **bubblewrap** ausente → sem modo isolado. A API deve **rejeitar** `isolation` no Windows (hoje cai em `/bin/sh` e o terminal nasce "exited" sem mensagem — `isolation.ts:51`, `service.ts:2074`).
 - **Monitor de processos (#80)**: v1 só raiz/memória (sem `/proc`) ou oculto.
 - **Hooks e rotinas** rodam em **PowerShell** no Windows (decisão de produto; documentar).
-- Shell padrão: `MESS_SHELL` > `pwsh` > `powershell.exe` > `%COMSPEC%`.
+- Shell padrão: `MESS_SHELL` > `pwsh` > `powershell.exe` > `%COMSPEC%`. **Verificado nesta máquina: Windows 11 Pro não traz `pwsh`** (só `powershell.exe` 5.1); o caminho padrão para a maioria dos usuários será o PowerShell 5.1, que usa codepage OEM por padrão — reforça H.
 
 ---
 
@@ -43,14 +43,17 @@ Por quê (verificado no código):
 | E | **`findBrowser()` só conhece binários Linux**; Chrome/Edge não ficam no PATH no Windows → portais não funcionam. | `portal.ts:18-23` | Caminhos padrão de `msedge.exe` (presente em todo Win10/11) e `chrome.exe`; validar `--remote-debugging-pipe` (**hipótese**: funciona, é o que o Puppeteer usa). |
 | 3 | `resolveDefaultShell` → `$SHELL`/`/bin/bash`. | `config.ts:30-35` | Cadeia pwsh → powershell → `%COMSPEC%`. |
 | 4 | Desktop sobe runtime com `detached: true` → console; fallback `process.kill(pid,"SIGTERM")` vira `TerminateProcess` e o handler `SIGTERM` do runtime nunca roda (sem `shutdownAll()`). | `desktop/main/index.ts:101,75-76`, `runtime/index.ts:71` | `detached` só fora do Windows + `windowsHide: true`; fallback via `taskkill /T`. |
-| 5 | `/proc`/`ps` no monitor e em `pidOnPort`; `process.kill(-pid)` (grupo) lança e é engolido → Chrome headless, emulador e hooks órfãos. *(Correção: não há `kill(-pid)` em `sessions.ts` — lá é `proc.kill()` do node-pty, que funciona.)* | `procs.ts:12-23`, `desktop/main/index.ts:46-54`, `service.ts:1626`, `device.ts:196,242`, `portal.ts:256` | `killTree(pid)` → `taskkill /PID <pid> /T /F`; degradar monitor. |
+| 5 | `/proc`/`ps` no monitor e em `pidOnPort`; `process.kill(-pid)` (grupo) lança e é engolido → Chrome headless, emulador e hooks órfãos. *(Correção: não há `kill(-pid)` em `sessions.ts` — lá é `proc.kill()` do node-pty, que funciona.)* | `procs.ts:12-23`, `desktop/main/index.ts:42-58`, `service.ts:1626`, `device.ts:196,242`, `portal.ts:256` | `killTree(pid)` → `taskkill /PID <pid> /T /F`; degradar monitor. |
+| K | **CRLF já está no working tree.** Este clone tem `core.autocrlf=true` e `git ls-files --eol` mostra `w/crlf` em `apps/cli/bin/mess`, `abrir.sh`, `scripts/package.mjs` e todos os `.ts`. Com `#!/bin/sh\r` o launcher não executa no Git Bash, e o launcher gerado por `package.mjs:31` herdaria o problema. Não há `.gitattributes` no repo. (**Verificado** nesta máquina.) | `apps/cli/bin/mess:1`, `package.mjs:31`, ausência de `.gitattributes` | `.gitattributes` (`* text=auto`, `*.sh`/`apps/cli/bin/mess`/`*.mjs` `eol=lf`, `*.cmd` `eol=crlf`) **e renormalizar o checkout** (`git add --renormalize .` + `git checkout -- .` ou re-clone com `core.autocrlf=false`). Teste no CI Windows: `bash.exe apps/cli/bin/mess --help`. |
+| M | **Nome do binário com `\` ou extensão quebra a detecção de agente.** `applyRole`/`applySkills` comparam `command.split("/").pop() === "claude"`; `agentKind` usa `/(^|[\s/])claude([\s/-]|$)/` — `C:\…\claude.cmd`, `claude.exe` ou `claude.cmd` não casam → sem papel/skills no system prompt, sem `--dangerously-skip-permissions`, sem pré-trust (`service.ts:2069-2071`), turno não detectado. Também vale se o usuário puser caminho completo no preset. | `domain:162-166`, `:292`, `:302`, `:841-845`; `sessions.ts:87` | `binaryName(command)` no `domain` (tira diretório por `/` **e** `\` e sufixo `.exe/.cmd/.ps1`) usado por `agentKind`/`applyRole`/`applySkills`. **E** o `resolveSpawnCommand()` de A roda só no `pty.spawn` (`sessions.ts:79`), nunca altera `session.command` gravado. Teste unitário com `C:\x\claude.cmd`. |
 
 ### Médio
 | ID | Problema | Evidência | Correção |
 |---|---|---|---|
 | F | Rotinas com **`/bin/sh -c` fixo**; hooks com `<shell> -c` (pwsh aceita `-c`, `cmd` exige `/c`). | `service.ts:408`, `:1584`, `:1874` | Usar `defaultShell` com flag certa por shell; documentar "PowerShell no Windows". |
 | G | Hint/skills ensinam sintaxe POSIX (`$MESS_CLI`, aspas simples). Codex no Windows usa PowerShell (`$env:MESS_CLI`). | `presets.ts:9`, `skills/*/SKILL.md` | Variante do hint por plataforma/shell, ou exigir Git Bash. |
-| H | **Bracketed paste** (`\x1b[200~…`) no ConPTY depende da versão do Windows → briefing pode chegar solto/sem Enter (**hipótese**). **Encoding**: console em codepage OEM/1252 → mojibake em pt-BR. | `sessions.ts:226-230`, `:92`, `:171` | Testar `deliver` no ConPTY; forçar UTF-8 (`chcp 65001` / `[Console]::OutputEncoding`) no shell spawnado. |
+| H | **Bracketed paste** (`\x1b[200~…`) no ConPTY depende da versão do Windows → briefing pode chegar solto/sem Enter (**hipótese**). **Encoding**: console em codepage OEM/1252 → mojibake em pt-BR. | `sessions.ts:226-230`, `:97`, `:171` | Testar `deliver` no ConPTY; forçar UTF-8 (`chcp 65001` / `[Console]::OutputEncoding`) no shell spawnado. |
+| N | **`detached: true` em processos de console abre janela de console no Windows** (hooks, emulador, scrcpy) e `stdio: "pipe"` não impede. Para o Chrome (GUI) não há janela, mas o `detached` deixa de fazer sentido sem `kill(-pid)`. | `service.ts:1584`, `device.ts:184,222`, `portal.ts:101`, `desktop/main/index.ts:101` | `windowsHide: true` em todo `spawn` de processo auxiliar; `detached` só fora do Windows (ver #4/F). |
 | I | `0o600`/`chmod` são no-op no Windows; fora de `%USERPROFILE%` (ex.: `D:\MessAI`) o `runtime.token` (token mestre) fica legível por `Users`. | `config.ts:46-53`, `runtime/index.ts:67`, `data.ts:20,96-99`, `service.ts:1330-1334` | Ajustar ACL (`icacls`) ou avisar na UI ao mover a pasta de dados para fora do perfil. |
 | J | Encerramento forçado/logoff deixa órfãos (claude.exe, pwsh, Chrome, emulador). | `desktop/main/index.ts:75-76` | Job Object (kill-on-close) amarrando filhos ao runtime; no mínimo `taskkill /T` também no fallback. |
 | L | Empacotamento: `package.mjs:50` `--linux` fixo; desktop só tem target `linux`, sem `.ico`. **node-pty 1.0.0 não tem prebuild Windows** → compila do fonte e exige VS Build Tools **com libs Spectre-mitigated** (ponto clássico de falha). **`portable` não tem auto-update.** SmartScreen bloqueia instalador **e cada update** sem assinatura. | `package.mjs:31,50`, `apps/desktop/package.json:45-53`, `desktop/main/index.ts:317` | Ver Fase 3. |
@@ -60,19 +63,22 @@ Por quê (verificado no código):
 - `process.on("SIGUSR2")` no main do Electron — guardar por plataforma (**hipótese**: pode lançar no Windows) — `desktop/main/index.ts:394`.
 - Filtro de env de nota secreta é case-sensitive (`/^(PATH|SHELL)$/`, `MESS_`) → no Windows uma nota `path` sobrescreve o PATH — `service.ts:2034`.
 - Preset `shell` persiste `command: defaultShell` no banco; backup importado do Linux traz `/bin/bash` — normalizar no boot — `presets.ts:16`.
-- Ocultar opção systemd ("manter runtime vivo") no Windows — `systemd.ts`, `index.ts:87`.
+- systemd: **nada a ocultar** — não há opção na UI; o desktop já guarda com `process.platform === "linux"` (`desktop/main/index.ts:87`) e a unidade só é instalada pelo CLI separado `messai-runtime-service` (`service-cli.ts`, `systemd.ts`). Opcional: mensagem "só Linux" nesse CLI. *(A rev. 4 mandava ocultar uma opção que não existe.)*
 - `HOME` inexistente no Windows (`cli/index.ts:12`); `expandHome` só trata `~/` (`domain:665`).
-- `split("/").pop()` para nomes — cosmético — `service.ts:1955`, `TreeNode.tsx:54`, `PrefsAgents.tsx:167`.
-- Já OK (verificado): `safeRelPath` trata `\` e drive (`domain:433-436`); `isWithinCanonicalRoot` normaliza `\` (`domain:444`); `COPYFILE_FICLONE`/`symlinkSync` degradam em `try/catch`.
+- `split("/").pop()` / `includes("/")` para nomes — cosmético — `service.ts:1955`, `desktop/main/index.ts:309`, `TreeNode.tsx:39,45,54`, `PrefsAgents.tsx:167`.
+- `ci.yml:6` só dispara em push para `main`/`auto/**` — push em `windows_version` **não roda CI** (PR roda). Adicionar `windows_version` à lista.
+- Ícone: `build/icon.png` é **512×512** (verificado no cabeçalho PNG) — o electron-builder gera o `.ico` sozinho a partir dele; `.ico` próprio é opcional.
+- Já OK (verificado): `safeRelPath` trata `\` e drive (`domain:433-436`); `isWithinCanonicalRoot` normaliza `\` (`domain:444`); `COPYFILE_FICLONE`/`symlinkSync` degradam em `try/catch`; `git.ts` usa `execFile("git")` sem shell; `skills.ts` só usa `join`/`cpSync`; Fastify/`http.request` aceitam `\\.\pipe\…` (named pipe é suportado pelo `net` do Node — não é hipótese).
 
 ---
 
 ## Fases (ordem final)
 
-### Fase 0 — VM Windows + ferramentas (1 dia) ⟵ começar aqui
-- [ ] VM **Windows 11** (imagem de avaliação Microsoft, 90 dias grátis).
-- [ ] Instalar Node 22, Git for Windows, Claude Code, Codex, Chrome; VS Build Tools (C++ + **Spectre libs**).
-- [ ] Validar hipóteses A, B, E, H na primeira semana.
+### Fase 0 — Máquina Windows + ferramentas (0,5–1 dia) ⟵ começar aqui
+- [ ] Máquina: **esta** (Windows 11 Pro, Git for Windows 2.56 já instalado). VM só se o dono não quiser sujar a máquina de trabalho.
+- [ ] Instalar o que falta (**verificado ausente**): Node 22 (`engines` exige `>=22 <23`, `package.json:12`), `pwsh` 7 (opcional — o fallback é o 5.1), VS Build Tools (C++ + **Spectre libs**, exigido pelo `binding.gyp` do node-pty 1.0.0, que não traz prebuild e compila em todo `npm ci`), Claude Code, Codex, Chrome/Edge.
+- [ ] **`.gitattributes` + renormalizar o checkout (K)** antes de qualquer `npm ci` — o working tree já está em CRLF.
+- [ ] Validar hipóteses A, B, E, H com micro-scripts fora do repo (lista em §7 da seção de execução) **antes** de codar A/E/H.
 
 ### Fase 1 — Núcleo multiplataforma (runtime + CLI) (6–9 dias)
 - [ ] `whichOnPath` com `PATHEXT`, sem `X_OK`, reconhecendo `\` (#2).
@@ -84,23 +90,24 @@ Por quê (verificado no código):
 - [ ] Unificar `resolveDataDir` desktop/runtime (D).
 - [ ] `findBrowser()` com Edge/Chrome do Windows (E).
 - [ ] Rotinas/hooks com `defaultShell` (F).
-- [ ] `killTree()` + monitor degradado (#5); desktop `windowsHide` + fallback `taskkill` (#4).
-- [ ] Rejeitar `isolation` no Windows.
-- [ ] Itens "Baixo" (SIGUSR2, filtro case-insensitive, systemd, preset shell).
-- [ ] **Testes unitários** (rodam no Linux e no `windows-latest`): `whichOnPath`+`PATHEXT`; `resolveSpawnCommand`; normalização `PATH`; nome do pipe; tamanho da linha de comando (papel+skills ≤ 30 k ou via env/arquivo); `resolveDataDir` com `C:\`.
+- [ ] `killTree()` + monitor degradado (#5); `windowsHide` em hooks/emulador/scrcpy/Chrome (N); desktop `detached` só fora do Windows + fallback `taskkill` (#4).
+- [ ] `binaryName()` no `domain` para `agentKind`/`applyRole`/`applySkills` (M).
+- [ ] Rejeitar `isolation` no Windows; `tmuxAvailable()` → `false` em `win32`.
+- [ ] Itens "Baixo" (SIGUSR2, filtro case-insensitive, preset shell, `HOME`/`expandHome`, `includes("/")`).
+- [ ] **Testes unitários** (rodam no Linux e no `windows-latest`): `whichOnPath`+`PATHEXT`; `resolveSpawnCommand`; `binaryName` com `C:\x\claude.cmd`; normalização `PATH`; nome do pipe; tamanho da linha de comando (papel+skills ≤ 30 k ou via env/arquivo); `resolveDataDir` com `C:\`; `shellCommandArgs` por shell.
 
 ### Fase 3 — Empacotamento Windows (2–4 dias) ⟵ **em paralelo à Fase 1**
 > Antecipada: o `electron-rebuild` do node-pty no runner Windows é o risco de infra mais incerto e não depende do código do runtime. Um `.exe` cedo permite testar na VM.
-- [ ] `apps/desktop/package.json`: target `win` → **`nsis`** (auto-update); `portable` só se aceitarmos "sem auto-update"; ícone `.ico`.
-- [ ] `package.yml`: job `windows-latest` com `@electron/rebuild --force` (node-pty, better-sqlite3), cache, publish no mesmo release da tag (`latest.yml`).
-- [ ] `package.mjs`: remover `--linux` fixo; gerar `mess.cmd` + `cli.mjs` em `resources/cli`; skills incluídas.
+- [ ] `apps/desktop/package.json`: target `win` → **`nsis`** (auto-update); `portable` só se aceitarmos "sem auto-update"; ícone vem de `build/icon.png` (512 px, basta) — `.ico` só se quisermos arte própria.
+- [ ] `package.yml`: job `windows-latest` com `@electron/rebuild --force` (node-pty, better-sqlite3), cache, publish no mesmo release da tag (`latest.yml`). Conferir que o runner tem as **Spectre libs** (se não, instalar via `vs_installer modify` no job — **hipótese**: primeira falha provável do job).
+- [ ] `package.mjs`: remover `--linux` fixo (`:50`); gerar `mess.cmd` + `cli.mjs` em `resources/cli` (`:31`); skills incluídas. Conferir no Windows o `execSync` com aspas (`:26,:30`: o `.bin/esbuild` é `.cmd`, e o `--banner:js` leva aspas simples e `;` — **hipótese**: funciona via `cmd.exe`, mas é o ponto a testar primeiro).
 - [ ] Pós-build no CI: `MessAI.exe` com `ELECTRON_RUN_AS_NODE=1 resources\cli\cli.mjs --help` (validar stdout — **hipótese**: binário GUI pode não emitir no console).
 
 ### Fase 2 — CI Windows + smoke real (2–3 dias)
-- [ ] Job `windows-latest` em `ci.yml`: `npm ci`, `npm run build`, `vitest run packages apps`.
-- [ ] Smoke headless **pelo caminho real**: runtime → `/v1/health` → terminal **`pwsh -NoProfile`** executando `mess context` e `mess note write`; o mesmo via **Git Bash** (`C:\Program Files\Git\bin\bash.exe`, existe no runner) chamando `"$MESS_CLI" context`; `deliver` com `\r` chegando como uma linha; saída com acento (`echo "diretório"`) correta no buffer.
+- [ ] Job `windows-latest` em `ci.yml`: `npm ci`, `npm run build`, `vitest run packages apps` (**sem** `tests/integration`). Adicionar `windows_version` aos `branches` do `push` (`ci.yml:6`), senão só PR dispara.
+- [ ] Smoke headless **pelo caminho real** (`scripts/smoke-windows.mjs`): runtime → `/v1/health` → terminal **`powershell -NoProfile`** (e `pwsh` se houver) executando `mess context` e `mess note write`; o mesmo via **Git Bash** (`C:\Program Files\Git\bin\bash.exe`, existe no runner) chamando `"$MESS_CLI" context`; `deliver` com `\r` chegando como uma linha; saída com acento (`echo "diretório"`) correta no buffer.
 - [ ] e2e Playwright/Electron em `windows-latest` (há sessão gráfica): ao menos `pilot`, `prefs`, `portal`.
-- [ ] `skipIf(win32)` nos testes que dependem de `sh -c`/`cat`/tmux/bwrap (≈43 arquivos de integração) — cobertura Linux inalterada.
+- [ ] **Suíte de integração é Linux-only por construção**: **todos os 43** arquivos de `tests/integration` sobem o runtime com `spawn("node", …)` e dirigem terminais com `/bin/sh`/`MESS_SHELL=/bin/sh` (ex.: `shell.test.ts:18,26`). Não vale editar 43 arquivos com `skipIf`: basta **não incluir `tests/integration` no job Windows** (o `ci.yml` Linux continua rodando tudo). Em vez disso, o smoke acima cobre o caminho real no Windows; depois, portar 3–4 testes-chave (`shell`, `notes`, `lifecycle`, `routines`) para uma variante `*.win.test.ts` com `powershell`.
 
 ### Fase 4 — Portais, dispositivos, paste/encoding (3–5 dias)
 - [ ] Portais: CDP por pipe com Edge/Chrome no Windows.
@@ -112,27 +119,29 @@ Por quê (verificado no código):
 - [ ] `abrir.ps1` (build + subir app) ou documentar `npm run dev`.
 
 ### Fase 6 — Release + teste manual (3–5 dias)
-- [ ] **Assinatura de código** (Azure Trusted Signing é barato) **antes do primeiro release público** — SmartScreen bloqueia instalação e cada update.
+- [ ] **Assinatura de código** (Azure Trusted Signing é barato) **antes do primeiro release público** — SmartScreen bloqueia instalação e cada update. Ao assinar, conferir o `publisherName` em `build.win` (o electron-updater no Windows valida a assinatura do instalador baixado contra ele — **inferência** da documentação do electron-updater, não verificada aqui).
 - [ ] Tag de pré-release com Linux + Windows no mesmo release.
 - [ ] Teste manual na VM **a cada fase** (não só no fim) + rodada final: instalar, espaço, terminal, nota, portal, recrutar agente (Claude e Codex), nota secreta, auto-update.
 - [ ] Página de instalação do **WSL2** como caminho suportado.
 
 ## Estimativa
-| Fase | Dias-pessoa |
-|---|---|
-| 0 — VM + ferramentas | 1 |
-| 1 — Núcleo multiplataforma | 6–9 |
-| 3 — Empacotamento (paralelo à 1) | 2–4 |
-| 2 — CI + smoke real | 2–3 |
-| 4 — Portais/dispositivos/encoding | 3–5 |
-| 5 — Dev no Windows | 0,5–1 |
-| 6 — Release + teste manual | 3–5 |
-| **Total** | **17–28** |
+| Fase | Dias-pessoa (rev. 4) | Dias-pessoa (rev. 5) | Por quê mudou |
+|---|---|---|---|
+| 0 — Máquina + ferramentas | 1 | 0,5–1 | máquina já é Windows; só instalar Node/VS Build Tools e normalizar CRLF |
+| 1 — Núcleo multiplataforma | 6–9 | **3–5** | o próprio mapa de acoplamento da rev. 4 mostra: 2 módulos novos (~200 linhas), ~10 call-sites de 1 linha em `service.ts`, ajustes pontuais em ~12 arquivos, mais testes. 6–9 dias assumia coordenação entre 3 agentes |
+| 3 — Empacotamento (paralelo à 1) | 2–4 | 2–4 | inalterado: é a incerteza de infra (node-pty + MSVC + Spectre no runner) |
+| 2 — CI + smoke real | 2–3 | 1–2 | sem os 43 `skipIf`; smoke é um script |
+| 4 — Portais/dispositivos/encoding | 3–5 | 2–4 | portais dependem da hipótese E; se confirmada, é `findBrowser` + teste |
+| 5 — Dev no Windows | 0,5–1 | 0,5 | `abrir.ps1` mínimo ou só `npm run dev` documentado |
+| 6 — Release + teste manual | 3–5 | 2–4 | + espera externa da assinatura |
+| **Total** | **17–28** | **11–20** | julgamento a partir do código lido, não medido |
 
 ## Riscos & mitigação
 | Risco | Mitigação |
 |---|---|
-| Sem máquina Windows | VM desde a Fase 0; smoke pelo caminho real (PTY→shell→`mess`→pipe) no CI. CI não substitui a VM. |
+| Sem máquina Windows | **Resolvido**: esta máquina é Windows 11. Smoke pelo caminho real (PTY→shell→`mess`→pipe) no CI complementa, não substitui. |
+| CRLF (K) | `.gitattributes` + renormalizar antes do primeiro `npm ci`; `bash.exe apps/cli/bin/mess --help` no CI Windows. |
+| Detecção de agente com `.exe/.cmd` (M) | `binaryName()` + `session.command` sempre o nome lógico (`claude`), resolução só no `pty.spawn`. |
 | Spawn/argv do agente (A) | `resolveSpawnCommand` + texto longo fora do argv + teste de tamanho. |
 | Agentes via Git Bash (B, C) | `MESS_CLI` POSIX, chave `PATH` normalizada, smoke via `bash.exe`. |
 | Addons nativos | Runner Windows + Spectre libs + `electron-rebuild --force` + cache; **nunca `npm run package` na máquina de dev** (lição da ABI). |
@@ -144,8 +153,9 @@ Por quê (verificado no código):
 Tauri / GUI nativa · Windows Sandbox/Job Objects como *modo isolado* (o Job Object da Fase 4 é só ciclo de vida) · runtime híbrido no WSL.
 
 ## Prioridades (próximos passos, em ordem)
-1. VM Windows 11 + ferramentas; validar hipóteses A/B/E/H.
-2. `resolveSpawnCommand()` + texto longo fora do argv (A).
+0. `.gitattributes` + renormalizar o checkout (K); instalar Node 22 e VS Build Tools; `npm ci` uma vez e ver o node-pty compilar.
+1. Validar hipóteses A/B/E/H com micro-scripts (meio dia).
+2. `resolveSpawnCommand()` + texto longo fora do argv (A) + `binaryName()` (M).
 3. Chave `PATH` + `MESS_CLI` POSIX/`.cmd` + aspas no hint (B, C, G).
 4. `resolveDataDir` unificado (D).
 5. Named pipe sem `existsSync`/`chmod`/`unlink` (#6).
