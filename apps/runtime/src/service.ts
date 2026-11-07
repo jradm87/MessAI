@@ -2066,6 +2066,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       [AGENT_ENV.socket]: this.cfg.socketPath, [AGENT_ENV.token]: agentToken,
       [AGENT_ENV.workspaceId]: w.workspaceId, [AGENT_ENV.workspaceName]: w.name, [AGENT_ENV.workspaceDir]: w.cwd,
       [AGENT_ENV.nodeId]: node.nodeId, [AGENT_ENV.sessionId]: s.sessionId, [AGENT_ENV.cli]: join(CLI_DIR, "mess"),
+      ...(IS_WIN ? { [AGENT_ENV.cliCmd]: join(CLI_DIR, "mess.cmd") } : {}), // #1: pwsh/cmd não rodam o launcher sh
       ...(node.maestro ? { [AGENT_ENV.maestro]: "1" } : {}), // #29
       // Q: no Windows não exporta SHELL=pwsh — o Claude Code de lá usa Git Bash e SHELL apontando para pwsh pode confundi-lo.
       ...(IS_WIN ? {} : { SHELL: this.cfg.defaultShell }),
