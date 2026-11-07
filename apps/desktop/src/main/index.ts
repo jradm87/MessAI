@@ -3,7 +3,7 @@ import electronUpdater from "electron-updater";
 import { spawn, execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, openSync, readFileSync, readdirSync, readlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve, sep } from "node:path";
+import { isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BUILD_VERSION } from "@messai/contracts";
 import { parsePowerMode, shouldBlock, type PowerMode } from "./power.js";
@@ -12,7 +12,8 @@ import { applyUpdateEvent, friendlyUpdateError, initialUpdateState, type UpdateS
 /** Pasta de dados: MESS_DATA_DIR > ponteiro ~/.messai/datadir (#62 "Mudar…") > ~/.messai. Re-resolvida ao reiniciar o runtime. */
 function resolveDataDir(): string {
   if (process.env["MESS_DATA_DIR"]) return process.env["MESS_DATA_DIR"];
-  try { const p = readFileSync(join(homedir(), ".messai", "datadir"), "utf8").trim(); if (p.startsWith("/")) return p; } catch { /* sem ponteiro */ }
+  // D: mesma regra do runtime (data.ts resolveDataDir: isAbsolute) — no Windows o ponteiro é `D:\MessAI`, não começa com "/"
+  try { const p = readFileSync(join(homedir(), ".messai", "datadir"), "utf8").trim(); if (p && isAbsolute(p)) return p; } catch { /* sem ponteiro */ }
   return join(homedir(), ".messai");
 }
 let DATA_DIR = resolveDataDir();
