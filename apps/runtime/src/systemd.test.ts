@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { renderUnit, unitPath } from "./systemd.js";
 
 describe("unidade systemd --user", () => {
-  it("gera ExecStart com node e entrada, reinício em falha e variáveis opcionais", () => {
+  // O: systemd é Linux-only (o caminho usa join do SO)
+  it.skipIf(process.platform === "win32")("gera ExecStart com node e entrada, reinício em falha e variáveis opcionais", () => {
     const u = renderUnit({ nodeBin: "/usr/bin/node", entry: "/opt/mess/apps/runtime/dist/index.js", dataDir: "/home/x/.messai", port: 47821 });
     expect(u).toContain("ExecStart=/usr/bin/node /opt/mess/apps/runtime/dist/index.js");
     expect(u).toContain("Restart=on-failure"); expect(u).toContain("Environment=MESS_DATA_DIR=/home/x/.messai"); expect(u).toContain("Environment=MESS_PORT=47821");

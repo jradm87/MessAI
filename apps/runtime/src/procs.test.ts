@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { readProcTree } from "./procs.js";
 
 describe("readProcTree (#80)", () => {
-  it("lista o próprio processo atual com RSS > 0 e depth 0", () => {
+  // O: /proc é Linux-only; no Windows o monitor é degradado (#5) e este caso não se aplica
+  it.skipIf(process.platform === "win32")("lista o próprio processo atual com RSS > 0 e depth 0", () => {
     const tree = readProcTree(process.pid);
     expect(tree.length).toBeGreaterThanOrEqual(1);
     expect(tree[0]?.pid).toBe(process.pid);
