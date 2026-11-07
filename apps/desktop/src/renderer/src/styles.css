@@ -780,3 +780,13 @@ button.danger:hover { border-color: var(--danger); color: var(--danger-fg); }
 /* corda/fios SEMPRE por cima dos nós (nunca atrás) */
 .react-flow__edges { z-index: 6; }
 .react-flow__edge .rope { pointer-events: stroke; }
+
+/* copiar do canvas: o React Flow põe user-select:none em todo nó — devolve a seleção de texto onde há conteúdo legível */
+.react-flow__node .md, .react-flow__node .md * { user-select: text; -webkit-user-select: text; cursor: text; }
+.react-flow__node .md a { cursor: pointer; }
+/* menu de clique direito do terminal (copiar/colar) */
+.term-menu { z-index: 30; display: flex; flex-direction: column; min-width: 200px; }
+.term-menu button { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 10px; border-radius: 5px; background: none; border: 0; color: inherit; text-align: left; cursor: pointer; font: inherit; }
+.term-menu button:hover:not(:disabled) { background: var(--hover-2); }
+.term-menu button:disabled { color: var(--mut); cursor: default; }
+.term-menu kbd { font-size: 11px; color: var(--mut); font-family: inherit; }

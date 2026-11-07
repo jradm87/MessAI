@@ -30,6 +30,8 @@ contextBridge.exposeInMainWorld("messai", {
   appInfo: (): Promise<unknown> => ipcRenderer.invoke("mess:app-info"),
   openExternal: (url: string): Promise<boolean> => ipcRenderer.invoke("mess:open-external", url),
   runtimeLogTail: (lines: number): Promise<string> => ipcRenderer.invoke("mess:runtime-log-tail", lines),
+  clipboardRead: (): Promise<{ text: string; png: string | null }> => ipcRenderer.invoke("mess:clipboard-read"),
+  clipboardWrite: (text: string): Promise<void> => ipcRenderer.invoke("mess:clipboard-write", text),
   saveText: (suggestedName: string, text: string): Promise<string | null> => ipcRenderer.invoke("mess:save-text", suggestedName, text),
   // #62 — reinicia o runtime (após restaurar/mover/apagar dados)
   runtimeRestart: (): Promise<boolean> => ipcRenderer.invoke("mess:runtime-restart"),

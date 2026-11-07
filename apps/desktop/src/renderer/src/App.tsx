@@ -526,7 +526,7 @@ function Canvas({ conn }: { conn: Connection }) {
           : n.kind === "tree" ? { title: n.title, content: n.content ?? "", editSignal: renameSig.id === n.nodeId ? renameSig.n : 0, workspaceId: snap.workspace.workspaceId, api, ...(n.groupId ? { groupId: n.groupId } : {}), onChange: change, onDelete: del, onRename: rename, ...extras,
               onOpenNote: (rel: string) => void mutate((r) => api.createNode(snap.workspace.workspaceId, { expectedRevision: r, kind: "note", geometry: { x: n.geometry.x + n.geometry.w + 40, y: n.geometry.y, w: 360, h: 260 }, filePath: `${snap.workspace.cwd}/${rel}` })),
               onPreview: (rel: string) => setPreview(rel), onGit: () => setGitOpen(true), toast }
-          : n.kind === "stack" ? { title: n.title, content: n.content ?? "", children: stackChildren, api, stream, editSignal: renameSig.id === n.nodeId ? renameSig.n : 0,
+          : n.kind === "stack" ? { title: n.title, content: n.content ?? "", children: stackChildren, api, stream, workspaceId: snap.workspace.workspaceId, editSignal: renameSig.id === n.nodeId ? renameSig.n : 0,
               onChange: change, onRename: rename, onDelete: () => void ungroupStack(n), onUngroup: () => void ungroupStack(n), onSpill: (cid: string) => void spillFromStack(n, cid),
               ...(stackFocus?.stackId === n.nodeId ? { focusChild: { nodeId: stackFocus.nodeId, n: stackFocus.n } } : {}) }
           : { content: n.content ?? "", onChange: change, onDelete: del, onRaise: extras.onRaise, editSignal: renameSig.id === n.nodeId ? renameSig.n : 0 },

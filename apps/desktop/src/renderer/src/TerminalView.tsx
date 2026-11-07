@@ -10,6 +10,7 @@ import { effectiveScrollback, fontStack, parseCustomPalette, resolveTermTheme } 
 import { onTheme, cssVar } from "./theme.js";
 import { finishedMapAtom, summaryMapAtom, store } from "./atoms.js";
 import type { Api, Stream } from "./api.js";
+import { copyText, readClipboard } from "./clip.js";
 
 /**
  * View reutilizável do terminal ao vivo (xterm + stream). Antes vivia dentro do TerminalNode; agora o nó e o
@@ -17,21 +18,26 @@ import type { Api, Stream } from "./api.js";
  */
 export type TerminalViewHandle = { clear: () => void; openFind: () => void };
 type Props = {
-  sessionId: string; nodeId: string; api: Api; stream: Stream;
+  sessionId: string; nodeId: string; api: Api; stream: Stream; workspaceId?: string;
   termTheme?: string | null; padX?: number; padY?: number;
   onSession?: (s: Session) => void; onResume?: () => void; onFocus?: () => void;
 };
 export const TerminalView = forwardRef<TerminalViewHandle, Props>(function TerminalView(
-  { sessionId, nodeId, api, stream, termTheme, padX, padY, onSession, onResume, onFocus }, ref,
+  { sessionId, nodeId, api, stream, workspaceId, termTheme, padX, padY, onSession, onResume, onFocus }, ref,
 ) {
   const host = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal>(null);
   const searchRef = useRef<SearchAddon>(null);
   const [find, setFind] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; sel: boolean } | null>(null);
+  const viewEl = useRef<HTMLDivElement>(null);
+  const wsRef = useRef(workspaceId); wsRef.current = workspaceId;
+  const flash = (m: string) => { setErr(m); setTimeout(() => setErr(null), 2500); };
   const resumedRef = useRef(false);
   const stateRef = useRef<string>("");
   const fitNow = useRef<() => void>(null);
+  const pasteRef = useRef<() => Promise<void>>(async () => {});
   const cbRef = useRef({ onSession, onResume, onFocus }); cbRef.current = { onSession, onResume, onFocus };
 
   const pTheme = usePref("termTheme"); const pCustom = usePref("termCustom"); const pFont = usePref("termFont"); const pSize = usePref("termFontSize");
@@ -57,7 +63,16 @@ export const TerminalView = forwardRef<TerminalViewHandle, Props>(function Termi
     term.loadAddon(search);
     searchRef.current = search;
     term.unicode.activeVersion = "11";
-    term.attachCustomKeyEventHandler((e) => { if (e.type === "keydown" && (e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "f") { setFind((v) => v ?? ""); return false; } return true; });
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.type !== "keydown") return true;
+      const k = e.key.toLowerCase(); const ctrl = e.ctrlKey || e.metaKey;
+      if (ctrl && !e.shiftKey && k === "f") { setFind((v) => v ?? ""); return false; }
+      // copiar: Ctrl+Shift+C sempre; Ctrl+C só com seleção (sem seleção continua sendo o Ctrl-C de interromper)
+      if (ctrl && k === "c" && (e.shiftKey || term.hasSelection())) { e.preventDefault(); if (term.hasSelection()) { void copyText(term.getSelection()); if (!e.shiftKey) term.clearSelection(); } return false; }
+      // colar: Ctrl+V / Ctrl+Shift+V / Shift+Insert — texto vai como bracketed paste; imagem vira arquivo e cola o caminho
+      if ((ctrl && k === "v") || (e.shiftKey && k === "insert")) { e.preventDefault(); void pasteRef.current(); return false; }
+      return true;
+    });
     term.open(host.current!);
     termRef.current = term;
     applyTheme();
@@ -77,6 +92,16 @@ export const TerminalView = forwardRef<TerminalViewHandle, Props>(function Termi
     });
     stream.attach(sessionId);
     const onData = term.onData((d) => stream.send({ type: "input", sessionId, data: d }));
+    pasteRef.current = async () => {
+      const c = await readClipboard().catch(() => ({ text: "", png: null }));
+      if (stateRef.current === "running") stream.send({ type: "acquireLease", sessionId });
+      if (c.text) { term.paste(c.text); return; }
+      if (!c.png) return;
+      // imagem (print, "copiar imagem"): salva como anexo e cola o CAMINHO — Claude/Codex/agy reconhecem e anexam a imagem
+      if (!wsRef.current) { flash("não deu para colar a imagem aqui"); return; }
+      try { const a = await api.attach(wsRef.current, { name: `colagem-${Date.now()}.png`, dataBase64: c.png }); term.paste(a.path); term.focus(); }
+      catch (e) { flash(`falha ao colar imagem: ${String(e)}`); }
+    };
     const applyFit = () => {
       try {
         const d = fit.proposeDimensions();
@@ -89,7 +114,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, Props>(function Termi
     fitNow.current = applyFit;
     const ro = new ResizeObserver(applyFit);
     ro.observe(host.current!);
-    const onSel = term.onSelectionChange(() => { if (copyRef.current && term.hasSelection()) void navigator.clipboard.writeText(term.getSelection()).catch(() => {}); });
+    const onSel = term.onSelectionChange(() => { if (copyRef.current && term.hasSelection()) void copyText(term.getSelection()).catch(() => {}); });
     const el = host.current!;
     const focus = () => {
       if (stateRef.current === "running") stream.send({ type: "acquireLease", sessionId });
@@ -104,7 +129,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, Props>(function Termi
   }, [sessionId, stream]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className="term-view">
+    <div className="term-view" ref={viewEl}>
       {err && <div className="err">{err}</div>}
       {find !== null && (
         <div className="term-find nodrag nowheel">
@@ -119,9 +144,27 @@ export const TerminalView = forwardRef<TerminalViewHandle, Props>(function Termi
           <button title="Fechar (Esc)" onClick={() => { setFind(null); searchRef.current?.clearDecorations(); }}>✕</button>
         </div>
       )}
+      {menu && (
+        <div className="menu term-menu nodrag" style={{ left: menu.x, top: menu.y }} onMouseLeave={() => setMenu(null)} data-testid="term-menu">
+          <button disabled={!menu.sel} onClick={() => { const t = termRef.current; if (t?.hasSelection()) void copyText(t.getSelection()); setMenu(null); }}>Copiar <kbd>Ctrl+Shift+C</kbd></button>
+          <button onClick={() => { setMenu(null); termRef.current?.focus(); void pasteRef.current(); }}>Colar <kbd>Ctrl+V</kbd></button>
+          <button onClick={() => { const t = termRef.current; if (t) { t.selectAll(); void copyText(t.getSelection()); t.clearSelection(); } setMenu(null); }}>Copiar tudo</button>
+          <button onClick={() => { termRef.current?.selectAll(); setMenu(null); }}>Selecionar tudo</button>
+        </div>
+      )}
       <div className="term nodrag nowheel" ref={host} tabIndex={0} style={{ padding: `${pPadY}px ${pPadX}px` }}
-        onDragOver={(e) => { if (e.dataTransfer.types.includes("text/mess-path") || e.dataTransfer.types.includes("text/plain")) e.preventDefault(); }}
-        onDrop={(e) => { const p = e.dataTransfer.getData("text/mess-path") || e.dataTransfer.getData("text/plain"); if (!p) return; e.preventDefault(); stream.send({ type: "acquireLease", sessionId }); stream.send({ type: "input", sessionId, data: /\s/.test(p) ? `'${p}' ` : `${p} ` }); }} />
+        onContextMenu={(e) => {
+          e.preventDefault(); const v = viewEl.current; if (!v) return;
+          // o canvas tem zoom (transform): converte a posição do clique para coordenadas locais do terminal
+          const r = v.getBoundingClientRect(); const k = r.width / (v.offsetWidth || r.width);
+          setMenu({ x: (e.clientX - r.left) / k, y: (e.clientY - r.top) / k, sel: !!termRef.current?.hasSelection() });
+        }}
+        onMouseDown={(e) => { if (e.button === 0) setMenu(null); }}
+        onDragOver={(e) => { if (e.dataTransfer.types.includes("text/mess-path") || e.dataTransfer.types.includes("text/plain") || e.dataTransfer.types.includes("Files")) e.preventDefault(); }}
+        onDrop={(e) => { const f = e.dataTransfer.files[0]; const p = e.dataTransfer.getData("text/mess-path") || (f ? window.messai.pathForFile?.(f) ?? "" : "") || e.dataTransfer.getData("text/plain"); if (!p) return; e.preventDefault(); stream.send({ type: "acquireLease", sessionId });
+          // arquivo do SO (ex.: imagem do gerenciador de arquivos) vai como colagem (bracketed) para o agente reconhecer e anexar
+          if (f && !e.dataTransfer.getData("text/mess-path")) { termRef.current?.paste(p); termRef.current?.focus(); return; }
+          stream.send({ type: "input", sessionId, data: /\s/.test(p) ? `'${p}' ` : `${p} ` }); }} />
     </div>
   );
 });
