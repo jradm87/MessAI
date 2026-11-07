@@ -2080,6 +2080,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       const dir = join(this.cfg.dataDir, "prompts"); mkdirSync(dir, { recursive: true });
       const f = join(dir, `${s.sessionId}.md`); writeFileSync(f, text, { mode: 0o600 }); return f;
     });
+    if (agentKind(s.command, s.args).agentType === "claudeCode" && termArgs.includes("--dangerously-skip-permissions")) this.ensureClaudeBypassAccepted(); // W
     let plan = planLocalTerminal({ command: s.command, args: termArgs, cwd: s.cwd, defaultShell: this.cfg.defaultShell, baseEnv, inject });
     // #93 modo isolado: bubblewrap por fora (e tmux, se persistente, por fora dele). Falha FECHADA se o isolamento não for possível.
     if (node.kind === "terminal" && node.isolation) {
@@ -3219,6 +3220,18 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       j.projects[cwd] = { ...cur, hasTrustDialogAccepted: true };
       writeFileSync(p, JSON.stringify(j, null, 2));
     } catch { /* não bloqueia o spawn se o json estiver indisponível/em uso */ }
+  }
+  /** O Claude recrutado roda com --dangerously-skip-permissions; na 1ª vez numa máquina o Claude Code mostra um aviso cujo
+   * default é "No, exit" — o briefing fecharia o agente. Aceita o aviso uma vez em ~/.claude/settings.json (W). */
+  private ensureClaudeBypassAccepted(): void {
+    try {
+      const p = join(homedir(), ".claude", "settings.json");
+      const j = existsSync(p) ? JSON.parse(readFileSync(p, "utf8")) as Record<string, unknown> : {};
+      if (j["skipDangerousModePermissionPrompt"] === true) return;
+      j["skipDangerousModePermissionPrompt"] = true;
+      mkdirSync(dirname(p), { recursive: true });
+      writeFileSync(p, JSON.stringify(j, null, 2));
+    } catch { /* não bloqueia o spawn */ }
   }
   /** Uma posição que NÃO sobrepõe nenhum nó existente: à direita de tudo, no topo. Simples e nunca colide (usado por agentes/CLI via autoPlace). */
   private placeFree(nodes: Node[], w: number, h: number): Node["geometry"] {
