@@ -87,6 +87,7 @@ const RULES: Rule[] = [
   ["POST", "/v1/nodes/:id/maestro/recruit", r("maestro:conduct", "self")],
   ["POST", "/v1/nodes/:id/maestro/dismiss", r("maestro:conduct", "self")],
   ["POST", "/v1/nodes/:id/maestro/assign", r("maestro:conduct", "self")],
+  ["POST", "/v1/nodes/:id/maestro/interrupt", r("maestro:conduct", "self")],
 
   // ---- canvas (nós, conexões, desenhos, grupos, bandas, partituras) ----
   ["POST", "/v1/workspaces/:id/nodes", r("nodes:write", "ws")],

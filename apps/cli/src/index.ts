@@ -34,6 +34,8 @@ function call<T>(method: string, path: string, body?: unknown): Promise<T> {
 
 const snapshot = () => call<WorkspaceSnapshot>("GET", `/v1/workspaces/${workspaceId}`);
 const findNode = (nodes: Node[], ref: string) => nodes.find((n) => n.nodeId === ref || n.nodeId.startsWith(ref) || n.title.toLowerCase() === ref.toLowerCase());
+/** Nota por id/título — ignora terminais com o mesmo título (é comum o agente "X" ter a nota "X"). */
+const findNote = (nodes: Node[], ref: string) => findNode(nodes.filter((n) => n.kind === "note"), ref);
 const short = (id: string) => id.slice(0, 8);
 
 try {
@@ -230,12 +232,12 @@ try {
     const s = await snapshot();
     for (const n of s.nodes) console.log(`${short(n.nodeId)}  ${n.kind.padEnd(8)} ${n.title}${n.nodeId === nodeId ? "  (você)" : ""}`);
   } else if (cmd === "note" && sub === "read") {
-    const s = await snapshot(); const n = findNode(s.nodes, rest[0] ?? "");
+    const s = await snapshot(); const n = findNote(s.nodes, rest[0] ?? "");
     if (!n || n.kind !== "note") throw new Error("nota não encontrada");
     if (n.secret) { console.log(`[oculto] nota secreta — o valor não é exposto.${n.secretEnv ? ` Use por referência: $${n.secretEnv} (já no seu ambiente).` : ""}`); }
     else console.log(n.content ?? "");
   } else if (cmd === "note" && sub === "path") {
-    const s = await snapshot(); const n = findNode(s.nodes, rest[0] ?? "");
+    const s = await snapshot(); const n = findNote(s.nodes, rest[0] ?? "");
     if (!n || n.kind !== "note") throw new Error("nota não encontrada");
     console.log(n.filePath ?? "(sem arquivo)");
   } else if (cmd === "note" && sub === "write") {
@@ -247,7 +249,7 @@ try {
     if (nodeId) { s = await snapshot(); await call("POST", `/v1/workspaces/${workspaceId}/connections`, { expectedRevision: s.workspace.revision, sourceNodeId: nodeId, targetNodeId: r.node.nodeId }); }
     console.log(`nota criada [${short(r.node.nodeId)}]${nodeId ? " e ligada ao seu nó" : ""}`);
   } else if (cmd === "note" && sub === "append") {
-    const [ref, ...text] = rest; const s = await snapshot(); const n = findNode(s.nodes, ref ?? "");
+    const [ref, ...text] = rest; const s = await snapshot(); const n = findNote(s.nodes, ref ?? "");
     if (!n || n.kind !== "note") throw new Error("nota não encontrada");
     await call("PATCH", `/v1/nodes/${n.nodeId}`, { expectedRevision: s.workspace.revision, content: `${n.content ?? ""}${n.content ? "\n" : ""}${text.join(" ")}` });
     console.log("ok");

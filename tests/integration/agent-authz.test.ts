@@ -141,6 +141,9 @@ describe("Credencial por agente + autorização por capacidade (#87)", () => {
     const rec = await call(tk, "POST", `/v1/nodes/${r.node.nodeId}/maestro/recruit`, { command: "/bin/sh", name: "Filho" }); // MESMO token agora conduz
     expect(rec.status, JSON.stringify(rec.json)).toBe(201);
     expect(((await api("GET", `/v1/workspaces/${ws.workspaceId}`)).json as { nodes: { title: string }[] }).nodes.some((n) => n.title === "Filho")).toBe(true);
+    // o condutor também interrompe os recrutados com a credencial de agente (antes dava "rota reservada ao app")
+    const intr = await call(tk, "POST", `/v1/nodes/${r.node.nodeId}/maestro/interrupt`, { all: true });
+    expect(intr.status, JSON.stringify(intr.json)).toBe(200);
     // desligar remove a capacidade do mesmo token
     expect((await api("PATCH", `/v1/nodes/${r.node.nodeId}`, { expectedRevision: await rev(ws.workspaceId), maestro: false })).status).toBe(200);
     expect((await call(tk, "POST", `/v1/nodes/${r.node.nodeId}/maestro/recruit`, { command: "/bin/sh" })).status).toBe(403);

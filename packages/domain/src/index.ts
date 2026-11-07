@@ -841,6 +841,8 @@ export function pngSize(buf: Uint8Array): { w: number; h: number } | null {
 export function withClaudeAutonomy(command: string, args: string[]): string[] {
   if (agentKind(command, args).agentType !== "claudeCode") return args;
   if (args.includes("--dangerously-skip-permissions")) return args;
+  // quem já controla permissões explicitamente (modo/listas de ferramentas) decide sozinho — não forçar o bypass
+  if (args.some((a) => /^--(permission-mode|allowed-?tools|disallowed-?tools)(=|$)/i.test(a))) return args;
   return [...args, "--dangerously-skip-permissions"];
 }
 

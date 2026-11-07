@@ -389,6 +389,9 @@ describe("Claude autônomo sempre (#29)", () => {
     expect(withClaudeAutonomy("codex", [])).toEqual([]); // outro agente: não mexe
     expect(withClaudeAutonomy("/bin/sh", [])).toEqual([]); // shell: não mexe
     expect(withClaudeAutonomy("claude", ["--dangerously-skip-permissions"])).toEqual(["--dangerously-skip-permissions"]); // não duplica
+    expect(withClaudeAutonomy("claude", ["--allowedTools", "Read Grep"])).toEqual(["--allowedTools", "Read Grep"]); // controle explícito de permissões: não força bypass
+    expect(withClaudeAutonomy("claude", ["--permission-mode", "default"])).toEqual(["--permission-mode", "default"]);
+    expect(withClaudeAutonomy("claude", ["--disallowed-tools=Edit"])).toEqual(["--disallowed-tools=Edit"]);
   });
 });
 

@@ -2751,7 +2751,8 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
         ? this.store.listNodeConnections(fromNodeId).map((c) => (c.sourceNodeId === fromNodeId ? c.targetNodeId : c.sourceNodeId))
         : [],
     );
-    return resolveCrossNodeRef(this.store.listAllNodes(), this.store.listWorkspaces(), fromWorkspaceId, connIds, ref);
+    // alvo de ask/check/mensagem é sempre um terminal — ignora notas com o mesmo título
+    return resolveCrossNodeRef(this.store.listAllNodes().filter((n) => n.kind === "terminal"), this.store.listWorkspaces(), fromWorkspaceId, connIds, ref);
   }
   private publishConnectionEndpoints(c: Pick<Connection, "workspaceId" | "sourceNodeId" | "targetNodeId">): void {
     const wsIds = new Set<string>([c.workspaceId]);
