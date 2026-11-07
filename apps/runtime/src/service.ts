@@ -38,7 +38,7 @@ import { fileURLToPath } from "node:url";
 const CLI_DIR = process.env["MESS_RESOURCES"] ? join(process.env["MESS_RESOURCES"], "cli") : join(dirname(fileURLToPath(import.meta.url)), "../../cli/bin");
 import { SessionManager } from "./sessions.js";
 import { fitAppendPrompt } from "./spawncmd.js";
-import { getPath, prependPath } from "./platform.js";
+import { getPath, IS_WIN, prependPath } from "./platform.js";
 import { watch, type FSWatcher } from "chokidar";
 
 const MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", svg: "image/svg+xml", pdf: "application/pdf", md: "text/markdown", markdown: "text/markdown", txt: "text/plain", json: "application/json", csv: "text/csv", html: "text/html", log: "text/plain", ts: "text/plain", js: "text/plain", py: "text/plain", sh: "text/plain", yml: "text/plain", yaml: "text/plain" };
@@ -2067,7 +2067,8 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       [AGENT_ENV.workspaceId]: w.workspaceId, [AGENT_ENV.workspaceName]: w.name, [AGENT_ENV.workspaceDir]: w.cwd,
       [AGENT_ENV.nodeId]: node.nodeId, [AGENT_ENV.sessionId]: s.sessionId, [AGENT_ENV.cli]: join(CLI_DIR, "mess"),
       ...(node.maestro ? { [AGENT_ENV.maestro]: "1" } : {}), // #29
-      SHELL: this.cfg.defaultShell,
+      // Q: no Windows não exporta SHELL=pwsh — o Claude Code de lá usa Git Bash e SHELL apontando para pwsh pode confundi-lo.
+      ...(IS_WIN ? {} : { SHELL: this.cfg.defaultShell }),
       // Empacotado: o launcher `mess` roda o CLI com o Node do Electron (sem Node do sistema).
       ...(process.env["MESS_RESOURCES"] ? { MESS_ELECTRON: process.execPath } : {}),
     };
