@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { getPath, isPathLike, pathExts, pathKey, prependPath, toPosixPath } from "./platform.js";
+import { join } from "node:path";
+import { getPath, isPathLike, pathExts, pathKey, prependPath, socketPathFor, toPosixPath } from "./platform.js";
 
 describe("platform (porte Windows)", () => {
   it("pathKey/getPath: Windows acha a chave em qualquer caixa; fora dele é sempre PATH", () => {
@@ -21,6 +22,13 @@ describe("platform (porte Windows)", () => {
     expect(pathExts({ PATHEXT: ".COM;.EXE;.CMD" }, true)).toEqual([".com", ".exe", ".cmd"]);
     expect(pathExts({}, true)).toEqual([".com", ".exe", ".bat", ".cmd"]);
     expect(pathExts({ PATHEXT: ".EXE" }, false)).toEqual([""]);
+  });
+  it("socketPathFor (#6): Linux agent.sock; Windows named pipe estável por pasta, sem caixa/barra final", () => {
+    expect(socketPathFor("/home/u/.messai", false)).toBe(join("/home/u/.messai", "agent.sock"));
+    const a = socketPathFor("C:\\Users\\U\\.messai", true);
+    expect(a).toMatch(/^\\\\\.\\pipe\\messai-[0-9a-f]{16}$/);
+    expect(socketPathFor("c:/users/u/.messai/", true)).toBe(a);
+    expect(socketPathFor("D:\\MessAI", true)).not.toBe(a);
   });
   it("isPathLike e toPosixPath", () => {
     expect(isPathLike("claude", true)).toBe(false);

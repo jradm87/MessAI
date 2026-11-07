@@ -3,7 +3,7 @@ import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, writeFileSync }
 import { homedir, hostname, platform, userInfo } from "node:os";
 import { join } from "node:path";
 import { resolveDataDir } from "./data.js";
-import { IS_WIN } from "./platform.js";
+import { IS_WIN, socketPathFor } from "./platform.js";
 import { whichOnPath } from "./providers.js";
 
 export type Config = {
@@ -66,7 +66,7 @@ export function loadConfig(): Config {
     dataDir, dataDirSource,
     dbPath: join(dataDir, "runtime.sqlite"),
     tokenPath,
-    socketPath: join(dataDir, "agent.sock"),
+    socketPath: socketPathFor(dataDir), // #6: named pipe no Windows
     host: "127.0.0.1",
     port: Number(process.env["MESS_PORT"] ?? 47821),
     token: readFileSync(tokenPath, "utf8").trim(),

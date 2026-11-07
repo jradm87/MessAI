@@ -2,6 +2,9 @@
  * Camada de plataforma (porte Windows — plan.md §9.4). Todo comportamento específico do Windows mora aqui
  * ou atrás de `IS_WIN`. As funções recebem `win` opcional para que os testes cubram os dois caminhos em qualquer SO.
  */
+import { createHash } from "node:crypto";
+import { join } from "node:path";
+
 export const IS_WIN = process.platform === "win32";
 
 /** Nome real da chave PATH no env (Windows costuma ser "Path"), ou "PATH" se não existir. */
@@ -39,6 +42,16 @@ export function pathExts(env: NodeJS.ProcessEnv | Record<string, string | undefi
 /** `cmd` já é um caminho (tem separador de diretório)? No Windows conta `\` e `C:`. */
 export function isPathLike(cmd: string, win = IS_WIN): boolean {
   return cmd.includes("/") || (win && (cmd.includes("\\") || /^[a-zA-Z]:/.test(cmd)));
+}
+
+/**
+ * Socket do agente (#6): Linux `<dataDir>/agent.sock`; Windows named pipe `\\.\pipe\messai-<sha1(dataDir normalizado)[0..16]>`
+ * (normalizado = barras `\`, sem barra final, minúsculas — NTFS não diferencia caixa). O CLI replica esta regra sem importar o runtime.
+ */
+export function socketPathFor(dataDir: string, win = IS_WIN): string {
+  if (!win) return join(dataDir, "agent.sock");
+  const norm = dataDir.replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
+  return `\\\\.\\pipe\\messai-${createHash("sha1").update(norm).digest("hex").slice(0, 16)}`;
 }
 
 /** Converte `C:\a\b` → `/c/a/b` (Git Bash/MSYS). Caminho que não começa com letra de drive só troca `\` por `/`. */
