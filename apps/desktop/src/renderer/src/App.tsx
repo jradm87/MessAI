@@ -51,7 +51,7 @@ import { bandsOfNode } from "./bands.js";
 import { BinderNode } from "./BinderNode.js";
 import { StackNode } from "./StackNode.js";
 import { binderAddPage, binderRemovePage, emptyBinder, parseBinder, serializeBinder, parseStack, serializeStack, stackRemoveChild } from "@messai/domain";
-import type { PaletteItem } from "./palette.js";
+import type { PaletteItem } from "./paletteRank.js";
 import { useHint, useKeymap } from "./shortcuts.js";
 
 const nodeTypes: NodeTypes = { terminal: TerminalNode as never, note: NoteNode as never, text: TextNode as never, tree: TreeNode as never, binder: BinderNode as never, portal: PortalNode as never, device: DeviceNode as never, stack: StackNode as never };
