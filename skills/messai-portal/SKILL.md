@@ -8,12 +8,13 @@ user-invocable: true
 
 A **portal** is an embedded browser node on the MessAI canvas. Its Chromium session lives in the MessAI runtime, so you drive it from the command line and the user watches it live on the canvas. No window focus needed.
 
-The command is **`mess portal`** (if `mess` is not on `PATH`, use `"$MESS_CLI" portal ...`).
+The command is **`mess portal`** (call it as a plain single command — no `||`, `;`, `$(...)` or variables — so allowlists approve it; only after an actual `command not found`, use `"$MESS_CLI" portal ...`).
 
 ## Create a portal (and it auto-links to you)
 
 ```
 mess portal create <url> ["Name"]         # opens the url in a new portal, LINKED to your node
+# add --color <color> to tint it (palette name or #rrggbb); recolor later with `mess color <portal> <color>`
 mess portal create https://example.com "Docs"
 ```
 

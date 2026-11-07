@@ -13,7 +13,7 @@ import type { Api, Stream } from "./api.js";
 /** #70 — Pilha: terminais de uma banda agrupados num só nó, com abas. Só a aba ativa monta o terminal ao vivo; as sessões continuam rodando no runtime. */
 export type StackChild = { nodeId: string; sessionId: string; title: string; icon?: string; color?: string; termTheme?: string };
 export type StackData = {
-  title: string; content: string; children: StackChild[]; api: Api; stream: Stream; editSignal?: number;
+  title: string; content: string; children: StackChild[]; api: Api; stream: Stream; workspaceId?: string; editSignal?: number;
   onChange: (content: string) => void; onRename: (t: string) => void; onDelete: () => void;
   onUngroup: () => void; onSpill: (nodeId: string) => void;
   focusChild?: { nodeId: string; n: number }; // sinal do painel de bandas: ativa esta aba
@@ -67,7 +67,7 @@ function StackNodeImpl({ data, selected }: NodeProps & { data: StackData }) {
       </div>
       <div className="sk-body">
         {active
-          ? <TerminalView key={active.nodeId} ref={viewRef} sessionId={active.sessionId} nodeId={active.nodeId} api={data.api} stream={data.stream} termTheme={active.termTheme ?? null} />
+          ? <TerminalView key={active.nodeId} ref={viewRef} sessionId={active.sessionId} nodeId={active.nodeId} api={data.api} stream={data.stream} {...(data.workspaceId ? { workspaceId: data.workspaceId } : {})} termTheme={active.termTheme ?? null} />
           : <div className="sk-empty mut">Nenhum terminal ativo.</div>}
       </div>
       <Handle type="source" position={Position.Right} /><Handle type="target" position={Position.Left} />

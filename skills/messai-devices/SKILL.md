@@ -6,7 +6,7 @@ user-invocable: true
 
 # MessAI — Android device portals
 
-A **device** node drives an Android phone/emulator over `adb`, shown live on the canvas. The command is **`mess device`** (if `mess` is not on `PATH`, use `"$MESS_CLI" device ...`).
+A **device** node drives an Android phone/emulator over `adb`, shown live on the canvas. The command is **`mess device`** (call it as a plain single command — no `||`, `;`, `$(...)` or variables — so allowlists approve it; only after an actual `command not found`, use `"$MESS_CLI" device ...`).
 
 ## Find and attach a device
 
@@ -14,6 +14,7 @@ A **device** node drives an Android phone/emulator over `adb`, shown live on the
 mess device list                              # connected devices + available AVDs (emulators)
 mess device new --serial <serial>             # create a device node bound to a connected phone/emulator
 mess device new --avd <AvdName>               # create a node that will boot that emulator
+# add --color <color> to tint it (palette name or #rrggbb); recolor later with `mess color <node> <color>`
 ```
 `new` creates the node auto-linked to you. Then:
 

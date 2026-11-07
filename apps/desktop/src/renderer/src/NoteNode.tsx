@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, memo } from "react";
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
-import { Eye, Pencil, Lock, Unlock, Palette, FolderInput, FileText, KeyRound } from "lucide-react";
+import { Eye, Pencil, Lock, Unlock, Palette, FolderInput, FileText, KeyRound, Copy, Check } from "lucide-react";
+import { copyText } from "./clip.js";
 import { EditableTitle } from "./EditableTitle.js";
 import type { NodeExtras } from "./TerminalNode.js";
 import { renderMarkdown, useMermaid } from "./md.js";
@@ -21,6 +22,7 @@ function NoteNodeImpl({ id, data, selected }: NodeProps & { data: NoteData }) {
   const [text, setText] = useState(data.content);
   const [raw, setRaw] = useState(data.content === "");
   const [colors, setColors] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [envName, setEnvName] = useState(data.secretEnv ?? "");
   const [revealed, setRevealed] = useState<string | null>(null);
   useEffect(() => setEnvName(data.secretEnv ?? ""), [data.secretEnv]);
@@ -44,6 +46,7 @@ function NoteNodeImpl({ id, data, selected }: NodeProps & { data: NoteData }) {
         {!data.secret && <button className="ib nodrag" title={raw ? "Ver formatada" : "Editar (raw)"} data-testid="note-mode" onClick={() => setRaw((v) => !v)}>{raw ? <Eye size={13} /> : <Pencil size={13} />}</button>}
         <button className={`ib nodrag ${data.secret ? "on" : ""}`} title={data.secret ? "Nota secreta (clique para tornar normal)" : "Tornar secreta: valor mascarado e injetado como env no agente ligado"} data-testid="note-secret" onClick={() => data.onSecret(!data.secret, envName)}><KeyRound size={13} /></button>
         {!data.secret && <button className="ib nodrag" title={data.locked ? "Desbloquear: agentes voltam a escrever" : "Bloquear: agentes só leem"} data-testid="note-lock" onClick={() => data.onLock(!data.locked)}>{data.locked ? <Unlock size={13} /> : <Lock size={13} />}</button>}
+        {!data.secret && <button className="ib nodrag" title="Copiar conteúdo (Markdown) — ou selecione um trecho e Ctrl+C" data-testid="note-copy" onClick={() => { void copyText(data.content).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1200); }); }}>{copied ? <Check size={13} /> : <Copy size={13} />}</button>}
         <button className="ib nodrag" title="Cor" onClick={() => setColors((v) => !v)}><Palette size={13} /></button>
         <button className="ib nodrag" title={data.filePath ? `Arquivo: ${data.filePath}\nMover para…` : "Mover para…"} onClick={data.onMove}>{data.filePath ? <FileText size={13} /> : <FolderInput size={13} />}</button>
         <button className="ib nodrag" title="Remover" onClick={data.onDelete}>✕</button>

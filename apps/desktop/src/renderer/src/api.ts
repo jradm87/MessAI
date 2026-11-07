@@ -22,6 +22,8 @@ declare global { interface Window { messai: {
   runtimeRestart?: () => Promise<boolean>; openExternal?: (url: string) => Promise<boolean>; runtimeLogTail?: (lines: number) => Promise<string>; saveText?: (suggestedName: string, text: string) => Promise<string | null>;
   // #85 — notificações do SO
   notifyOs?: (p: { title: string; body: string; workspaceId?: string; nodeId?: string; silent?: boolean }) => Promise<unknown>;
+  clipboardRead?: () => Promise<{ text: string; png: string | null }>;
+  clipboardWrite?: (text: string) => Promise<void>;
   notifyHistory?: () => Promise<{ title: string; body: string; workspaceId?: string; nodeId?: string; silent?: boolean; at: string }[]>;
 } } }
 export type BackupEntry = { name: string; path: string; bytes: number; manifest: { createdAt: string; buildVersion: number; counts: { workspaces: number; nodes: number; notes: number }; source: string } | null };

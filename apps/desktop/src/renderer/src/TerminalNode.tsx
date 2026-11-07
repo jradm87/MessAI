@@ -231,7 +231,7 @@ function TerminalNodeImpl({ id, data, selected }: NodeProps & { data: TerminalDa
             </div>
           </div>
         )}
-        <TerminalView ref={viewRef} sessionId={sessionId} nodeId={id} api={api} stream={stream} termTheme={data.termTheme ?? null}
+        <TerminalView ref={viewRef} sessionId={sessionId} nodeId={id} api={api} stream={stream} workspaceId={data.workspaceId} termTheme={data.termTheme ?? null}
           onSession={setSession} onResume={data.onResume} onFocus={data.onFocus} />
         {data.chatOpen && <ChatLayer nodeId={id} title={data.title} api={api} thread={thread} setThread={setThread} messages={chat} onClose={data.onChatClose} />}
       </div>

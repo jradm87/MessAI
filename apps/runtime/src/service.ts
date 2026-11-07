@@ -1,7 +1,7 @@
 import { AGENT_ENV, type TreeEntry, type FileContent, type FsOp, type SearchHit, type CreateFloor, type LandFloor, type LandResult, type Role, type CreateRole, type PatchRole, type ChatMessage, type SendChat, type Attachment, type CreateAttachment, type FileEntry, type Connection, type CreateConnection, type PatchConnection, type CreateDrawing, type PatchDrawing, type GroupDrawings, type CreateFolder, type CreateNode, type Drawing, type Folder, type Message, type PatchFolder, type SendMessage, type Sidebar, type CreateWorkspace, type Node, type PatchNode, type PatchWorkspace, type Session, type Workspace, type WorkspaceSnapshot, type TaskFinished, type TaskSummary } from "@messai/contracts";
 import type { RuntimeSettings, PatchRuntimeSettings, PresetInput, Skill, CreateSkill, PatchSkill, FindHit, FindKind, NodeGroup, CreateNodeGroup, PatchNodeGroup, AttentionItem, Score, ScoreNode, SaveScore, PatchScore, PlaceScore, PlaceScoreResult } from "@messai/contracts";
 import type { ChatAttachment, ExportAttachment, InstructionsStatus, InstructionFileInfo, PutInstructions, SyncInstructions } from "@messai/contracts";
-import type { Band, CreateBand, PatchBand, AskBand, BandAnswer, BandAskResult, MaestroRecruit } from "@messai/contracts";
+import type { Band, CreateBand, PatchBand, AskBand, BandAnswer, BandAskResult, MaestroRecruit, BinderOp, BinderView } from "@messai/contracts";
 import type { FloorHookSection, FloorHooksConfig, PutFloorHooks, FloorHookStatus, FloorHooksState, RunFloorHookInput, StopFloorHookInput, FloorCopyInfo, PutFloorExcludes, ConnectedPeer, CrossNodeCandidate, GitHostEntry, PutGitHostsInput, FloorPrState, CreateFloorPrInput, PatchFloorPrInput, FloorPrReviewStatus, FloorPrChecksStatus, EnvVarEntry, PutEnvVarsInput, EnvironmentsState, WorkspaceBundle, WorkspaceBundlePreview, ImportWorkspaceInput, DuplicateWorkspaceInput, BundleNode, BundleConnection, BundleGroup, BundleBand, BundleDrawing, NotificationItem, NotificationKind, SendNotifyInput, Routine, CreateRoutineInput, PatchRoutineInput, RoutineRunResult } from "@messai/contracts";
 import { WORKSPACE_BUNDLE_FORMAT } from "@messai/contracts";
 import type { AgentCapability, IssueAgentTokenInput, AgentTokenInfo, Approval, CreateApproval, NodeIsolation } from "@messai/contracts";
@@ -22,7 +22,7 @@ import { probeAccounts } from "./accounts.js";
 import { backupName, copyBackupFiles, dataStats, isBackupName, listBackups, validateBackup, validateMoveTarget, writeManifest, type BackupEntry } from "./data.js";
 import { BUILD_VERSION } from "@messai/contracts";
 import { defaultPresets, parsePresets, validatePresets, PRESETS_META_KEY } from "./presets.js";
-import { applyRole, withClaudeAutonomy, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, DEFAULT_FLOOR_EXCLUDES, normalizeFloorExcludes, shouldExcludeFloorDir, parseGitRemote, buildPrCompareUrl, normalizeEnvVars, mergeEnvLayers, safeRelPath, isWithinCanonicalRoot, looksBinary, canMessage, checkRevision, formatDelivery, normalizeGeometry, planLocalTerminal, resolveNodeRef, resolveCrossNodeRef, validateNewNode, agentKind, agentResume, stripAnsi, fail, succeed, type Result, applySkills, skillsText, placeGeometries, connectionsWithin } from "@messai/domain";
+import { applyRole, withAgentAutonomy, parseNodeColor, parseBinder, serializeBinder, binderAddPage, binderPatchPage, binderFindPage, binderDeletePage, binderMovePage, binderBringToFront, binderSetActive, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, DEFAULT_FLOOR_EXCLUDES, normalizeFloorExcludes, shouldExcludeFloorDir, parseGitRemote, buildPrCompareUrl, normalizeEnvVars, mergeEnvLayers, safeRelPath, isWithinCanonicalRoot, looksBinary, canMessage, checkRevision, formatDelivery, normalizeGeometry, planLocalTerminal, resolveNodeRef, resolveCrossNodeRef, validateNewNode, agentKind, agentResume, stripAnsi, fail, succeed, type Result, applySkills, skillsText, placeGeometries, connectionsWithin } from "@messai/domain";
 import { createHash, randomUUID, randomBytes, timingSafeEqual } from "node:crypto";
 import { Companion } from "./companion.js";
 import type { Store } from "@messai/storage";
@@ -133,6 +133,8 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
   constructor(private readonly cfg: Config, private readonly store: Store, readonly sessions: SessionManager) {
     super();
     this.companion = new Companion({ enabled: cfg.companionEnabled, ollamaUrl: cfg.ollamaUrl, ollamaModel: cfg.ollamaModel });
+    // notas secretas antigas com título automático podem ter herdado o valor como título (bug corrigido): limpa na partida
+    for (const n of this.store.listAllNodes()) if (n.kind === "note" && n.secret && n.title !== "Nota secreta" && this.store.isTitleAuto(n.nodeId)) this.store.updateNode(n.nodeId, { title: "Nota secreta" });
     // #65 → #66: cada turno concluído de agente vira (quando há modelo) um resumo + próximo passo, fora do caminho de requisição.
     this.sessions.on("taskFinished", (ev) => {
       const node = this.store.getNode(ev.nodeId);
@@ -1901,6 +1903,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     if (!w) return fail("NOT_FOUND", "espaço não encontrado");
     const rev = checkRevision(w, input.expectedRevision);
     if (!rev.ok) return rev;
+    if (input.color) { const c = parseNodeColor(input.color); if (c === null) return fail("INVALID", `cor inválida: ${input.color} (use um nome da paleta ou #rrggbb)`); input = { ...input, color: c }; }
     const valid = validateNewNode({ kind: input.kind, command: input.command });
     if (!valid.ok) return valid;
 
@@ -1928,7 +1931,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       ...(input.kind === "stack" ? { content: input.content ?? JSON.stringify({ childIds: [], active: "" }) } : {}),
       ...(input.kind === "terminal" && input.roleId ? { roleId: input.roleId } : {}),
       // #56 aparência do terminal (vinda do preset)
-      ...(input.kind === "terminal" && input.color ? { color: input.color } : {}),
+      ...(input.color ? { color: input.color } : {}), // qualquer nó (nota, terminal, portal, dispositivo…)
       ...(input.kind === "terminal" && input.icon ? { icon: input.icon } : {}),
       ...(input.kind === "terminal" && input.termTheme && input.termTheme !== "system" ? { termTheme: input.termTheme } : {}),
       ...(input.kind === "terminal" && input.skillIds?.length ? { skillIds: input.skillIds } : {}),
@@ -1943,9 +1946,9 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     if (node.roleId && !this.store.getRole(node.roleId)) return fail("NOT_FOUND", "papel não encontrado");
     let titleAuto = true;
     if (input.kind === "note") {
-      if (input.color) node.color = input.color;
       if (input.secret) {
         node.secret = true;
+        if (!input.title) node.title = "Nota secreta"; // nunca derivado do conteúdo (é o valor secreto)
         if (input.secretEnv) node.secretEnv = input.secretEnv.trim();
         // nota secreta: fica SÓ na base, nunca num .md no disco (evita vazar em disco/export). O valor veio em content.
       } else if (input.filePath) {
@@ -2068,7 +2071,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     };
     if (agentKind(s.command, s.args).agentType === "claudeCode") this.ensureClaudeTrust(s.cwd); // #6 pré-confia a pasta: evita o diálogo de trust (cujo default "No, exit" o briefing fechava)
     // Claude autônomo SÓ quando isolado (#93): no sandbox do MessAI o agente roda sem as perguntas de permissão do Claude Code; fora dele, mantém.
-    const termArgs = withClaudeAutonomy(s.command, applySkills(s.command, applyRole(s.command, s.args, role), skills));
+    const termArgs = withAgentAutonomy(s.command, applySkills(s.command, applyRole(s.command, s.args, role), skills));
     let plan = planLocalTerminal({ command: s.command, args: termArgs, cwd: s.cwd, defaultShell: this.cfg.defaultShell, baseEnv, inject });
     // #93 modo isolado: bubblewrap por fora (e tmux, se persistente, por fora dele). Falha FECHADA se o isolamento não for possível.
     if (node.kind === "terminal" && node.isolation) {
@@ -2751,7 +2754,8 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
         ? this.store.listNodeConnections(fromNodeId).map((c) => (c.sourceNodeId === fromNodeId ? c.targetNodeId : c.sourceNodeId))
         : [],
     );
-    return resolveCrossNodeRef(this.store.listAllNodes(), this.store.listWorkspaces(), fromWorkspaceId, connIds, ref);
+    // alvo de ask/check/mensagem é sempre um terminal — ignora notas com o mesmo título
+    return resolveCrossNodeRef(this.store.listAllNodes().filter((n) => n.kind === "terminal"), this.store.listWorkspaces(), fromWorkspaceId, connIds, ref);
   }
   private publishConnectionEndpoints(c: Pick<Connection, "workspaceId" | "sourceNodeId" | "targetNodeId">): void {
     const wsIds = new Set<string>([c.workspaceId]);
@@ -2990,6 +2994,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const w = this.store.getWorkspace(node.workspaceId)!;
     const rev = checkRevision(w, input.expectedRevision);
     if (!rev.ok) return rev;
+    if (typeof input.color === "string") { const c = parseNodeColor(input.color); if (c === null) return fail("INVALID", `cor inválida: ${input.color} (use um nome da paleta ou #rrggbb)`); input = { ...input, color: c || null }; }
     if (node.kind === "note" && byAgent && node.locked && (input.content !== undefined || input.title !== undefined || input.filePath !== undefined)) return fail("FORBIDDEN", "nota bloqueada: agentes só podem ler");
     if (typeof input.groupId === "string") { const g = this.store.getGroup(input.groupId); if (!g || g.workspaceId !== node.workspaceId) return fail("NOT_FOUND", "grupo não encontrado neste espaço"); } // #78
     // #93 um agente NUNCA mexe no próprio isolamento, no Maestro (ganharia capacidades) nem no limite de memória: só o app.
@@ -3019,8 +3024,12 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
         try { if (node.filePath.startsWith(this.notesDir(node.workspaceId))) unlinkSync(node.filePath); } catch { /* já removido */ }
         this.unwatchNote(node.filePath); this.noteMtime.delete(nodeId); filePath = "";
       }
+      const secret = input.secret ?? node.secret ?? false;
       if (input.title !== undefined) titleAuto = false;
-      else if (input.content !== undefined && this.store.isTitleAuto(nodeId)) title = deriveNoteTitle(input.content) ?? "Nota";
+      // nota secreta NUNCA deriva o título do conteúdo (o título aparece no canvas, no snapshot dos agentes e no export).
+      // Ao virar secreta (ou ao salvar uma secreta com título automático), o título vira genérico — limpa vazamento antigo.
+      else if (secret && this.store.isTitleAuto(nodeId) && (input.secret === true || input.content !== undefined)) title = "Nota secreta";
+      else if (!secret && input.content !== undefined && this.store.isTitleAuto(nodeId)) title = deriveNoteTitle(input.content) ?? "Nota";
       if (input.filePath && input.filePath !== node.filePath) {
         if (!/\.(md|markdown|txt)$/i.test(input.filePath)) return fail("INVALID", "o destino precisa ser .md ou .txt");
         if (existsSync(input.filePath)) return fail("CONFLICT", "já existe um arquivo nesse caminho");
@@ -3089,7 +3098,8 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     if (!this.store.getWorkspace(workspaceId)) return fail("NOT_FOUND", "espaço não encontrado");
     const name = input.name.trim(); if (!name) return fail("INVALID", "a banda precisa de um nome");
     if (this.store.listBands(workspaceId).some((b) => b.name.toLowerCase() === name.toLowerCase())) return fail("CONFLICT", `já existe uma banda "${name}" neste espaço`);
-    const b: Band = { bandId: newId(), workspaceId, name, color: input.color ?? "", nodeIds: this.validBandNodes(workspaceId, input.nodeIds), asking: [], createdAt: nowIso() };
+    const color = input.color ? parseNodeColor(input.color) : ""; if (color === null) return fail("INVALID", `cor inválida: ${input.color}`);
+    const b: Band = { bandId: newId(), workspaceId, name, color, nodeIds: this.validBandNodes(workspaceId, input.nodeIds), asking: [], createdAt: nowIso() };
     this.store.insertBand(b);
     this.publish(workspaceId);
     return succeed(this.bandView(b));
@@ -3099,9 +3109,10 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     if (!b) return fail("NOT_FOUND", "banda não encontrada");
     const name = input.name?.trim();
     if (name && this.store.listBands(b.workspaceId).some((o) => o.bandId !== id && o.name.toLowerCase() === name.toLowerCase())) return fail("CONFLICT", `já existe uma banda "${name}" neste espaço`);
+    const color = input.color !== undefined ? parseNodeColor(input.color) : undefined; if (color === null) return fail("INVALID", `cor inválida: ${input.color}`);
     const remove = new Set(input.removeNodeIds ?? []);
     const ids = [...new Set([...this.bandView(b).nodeIds, ...this.validBandNodes(b.workspaceId, input.addNodeIds)])].filter((n) => !remove.has(n));
-    this.store.updateBand(id, { name: name || undefined, color: input.color, nodeIds: ids });
+    this.store.updateBand(id, { name: name || undefined, color, nodeIds: ids });
     this.publish(b.workspaceId);
     return succeed(this.bandView(this.store.getBand(id)!));
   }
@@ -3237,7 +3248,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const geometry = this.freeSpotNear(maestro, this.store.listNodes(w.workspaceId), 560, 340);
     // `--persist` → recrutado PERSISTENTE (tmux): sobrevive a fechar/reabrir o app, como o condutor. Sem tmux, ignora (não falha o recruit).
     const persist = !!input.persistent && SessionManager.tmuxAvailable();
-    const made = this.createNode(w.workspaceId, { expectedRevision: w.revision, kind: "terminal", title: input.name ?? preset?.label ?? "Agente", geometry, command, args, ...(input.cwd ? { cwd: input.cwd } : {}), ...(roleId ? { roleId } : {}), ...(preset?.color ? { color: preset.color } : {}), ...(preset?.icon ? { icon: preset.icon } : {}), ...(preset && preset.theme !== "system" ? { termTheme: preset.theme } : {}), ...(persist ? { persistent: true } : {}) });
+    const made = this.createNode(w.workspaceId, { expectedRevision: w.revision, kind: "terminal", title: input.name ?? preset?.label ?? "Agente", geometry, command, args, ...(input.cwd ? { cwd: input.cwd } : {}), ...(roleId ? { roleId } : {}), ...((input.color ?? (preset?.color && parseNodeColor(preset.color))) ? { color: input.color ?? preset!.color } : {}), ...(preset?.icon ? { icon: preset.icon } : {}), ...(preset && preset.theme !== "system" ? { termTheme: preset.theme } : {}), ...(persist ? { persistent: true } : {}) });
     if (!made.ok) return made;
     const node = made.value.node;
     const link = this.createConnection(w.workspaceId, { expectedRevision: this.store.getWorkspace(w.workspaceId)!.revision, sourceNodeId: maestro.nodeId, targetNodeId: node.nodeId });
@@ -3268,6 +3279,34 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     return this.sessions.interrupt(node.sessionId, this.kindOfNode(node).isAgent).ok;
   }
   /** Interrompe (Esc nos agentes / Ctrl-C em shell, SEM matar) um recrutado — ou TODOS os ligados ao condutor (parada de emergência). */
+  /** #74 — uma operação no fichário (agente/CLI/UI). Lê-modifica-grava no runtime (síncrono, sem corrida) e devolve o fichário. */
+  binderOp(nodeId: string, input: BinderOp, byAgent = false): Result<BinderView> {
+    const node = this.store.getNode(nodeId);
+    if (!node || node.kind !== "binder") return fail("NOT_FOUND", "fichário não encontrado");
+    let b = parseBinder(node.content);
+    const page = input.page !== undefined ? binderFindPage(b, input.page) : undefined;
+    if (input.page !== undefined && !page) return fail("NOT_FOUND", `página não encontrada: ${input.page}`);
+    const need = () => (page ? null : fail("INVALID", "informe a página (id, posição ou título)"));
+    const color = (): Result<string> => { const c = parseNodeColor(input.color ?? ""); return c === null ? fail("INVALID", `cor inválida: ${input.color} (use um nome da paleta ou #rrggbb)`) : succeed(c); };
+    switch (input.op) {
+      case "get": break;
+      case "add": { const c = color(); if (!c.ok) return c; b = binderAddPage(b, { ...(input.title ? { title: input.title } : {}), content: input.content ?? "", ...(c.value ? { color: c.value } : {}) }); break; }
+      case "write": { const e = need(); if (e) return e; b = binderPatchPage(b, page!.id, { content: input.content ?? "" }); break; }
+      case "append": { const e = need(); if (e) return e; b = binderPatchPage(b, page!.id, { content: page!.content ? `${page!.content.replace(/\n*$/, "")}\n${input.content ?? ""}` : (input.content ?? "") }); break; }
+      case "rename": { const e = need(); if (e) return e; if (!input.title?.trim()) return fail("INVALID", "informe o novo título"); b = binderPatchPage(b, page!.id, { title: input.title.trim() }); break; }
+      case "color": { const c = color(); if (!c.ok) return c; b = page ? binderPatchPage(b, page.id, { color: c.value }) : { ...b, color: c.value }; break; }
+      case "delete": { const e = need(); if (e) return e; const nb = binderDeletePage(b, page!.id); if (!nb) return fail("INVALID", "o fichário precisa de pelo menos uma página"); b = nb; break; }
+      case "open": { const e = need(); if (e) return e; b = binderSetActive(b, page!.id); break; }
+      case "front": { const e = need(); if (e) return e; b = binderBringToFront(b, page!.id); break; }
+      case "move": { const e = need(); if (e) return e; if (!input.to) return fail("INVALID", "informe a posição (to, 1-based)"); b = binderMovePage(b, page!.id, input.to - 1); break; }
+    }
+    if (input.op !== "get") {
+      const w = this.store.getWorkspace(node.workspaceId)!;
+      const r = this.patchNode(nodeId, { expectedRevision: w.revision, content: serializeBinder(b) }, byAgent);
+      if (!r.ok) return r;
+    }
+    return succeed({ nodeId, title: node.title, color: b.color, active: b.active, pages: b.pages.map((p) => ({ id: p.id, title: p.title, ...(p.color ? { color: p.color } : {}), content: p.content })) });
+  }
   maestroInterrupt(maestroId: string, input: { ref?: string; all?: boolean; notify?: boolean }): Result<{ interrupted: number; titles: string[] }> {
     const m = this.requireMaestro(maestroId); if (!m.ok) return m;
     let targets: Node[];

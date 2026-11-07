@@ -6,7 +6,7 @@ user-invocable: true
 
 # MessAI — Maestro mode, bands and roles
 
-This skill is for **conducting other agents**: recruiting terminals, grouping them, and briefing them. The command is **`mess`** (if not on `PATH`, use `"$MESS_CLI"`).
+This skill is for **conducting other agents**: recruiting terminals, grouping them, and briefing them. The command is **`mess`** (call it as a plain single command — no `||`, `;`, `$(...)` or variables — so allowlists approve it; only after an actual `command not found`, use `"$MESS_CLI"`).
 
 ## Maestro mode (recruit / dismiss / reassign)
 
@@ -20,7 +20,11 @@ mess maestro assign <id|title> <roleName|->                # (re)assign a role; 
 mess maestro interrupt <id|title>                          # interrupt a recruit mid-action (Esc/Ctrl-C) WITHOUT killing it
 mess maestro interrupt --all                               # emergency: interrupt ALL your recruits at once
 mess close <id|title>                                      # delete a NON-terminal node (note / portal / device / binder)
+mess color <id|title> <color>                              # recolor ANY node (e.g. group helpers/findings by color)
+mess binder new "<Title>" · mess binder "<Title>" add|write|rename|color|move|delete ...   # multi-page report (see the messai skill)
 ```
+
+`--color <color>` also works on `maestro recruit`, `band create`, `note write`, `portal new`/`device new`. Colors: `cinza vermelho laranja amarelo verde ciano azul roxo rosa` (or English: gray red orange yellow green cyan blue purple pink), `#rrggbb`, or `-` to clear.
 
 Recruited terminals are **auto-linked to you** and placed in a free spot (no overlap). For a **long run that must survive closing/reopening the app**, recruit with **`--persist`** (wraps the agent in tmux); without it, the terminal dies when the app/runtime stops. To clean up: a **terminal** goes via `mess maestro dismiss`; a **note, portal or device** goes via `mess close` (terminals are refused by `close` on purpose).
 

@@ -59,6 +59,28 @@ describe("papéis (responsabilidades)", () => {
     const snap = (await api("GET", `/v1/workspaces/${ws}`)).json as { nodes: { roleId?: string }[] };
     expect(snap.nodes.every((n) => !n.roleId)).toBe(true);
   });
+  it("nota secreta: o título nunca vem do conteúdo (colar a senha não vira título)", async () => {
+    const rev = async () => ((await api("GET", `/v1/workspaces/${ws}`)).json as { workspace: { revision: number } }).workspace.revision;
+    const title = async (id: string) => ((await api("GET", `/v1/workspaces/${ws}`)).json as { nodes: { nodeId: string; title: string }[] }).nodes.find((n) => n.nodeId === id)!.title;
+    const g = { x: 0, y: 900, w: 300, h: 200 };
+    const created = ((await api("POST", `/v1/workspaces/${ws}/nodes`, { expectedRevision: await rev(), kind: "note", content: "hunter2", secret: true, geometry: g })).json as { node: { nodeId: string } }).node;
+    expect(await title(created.nodeId)).toBe("Nota secreta");
+    // nota normal → vira secreta → cola o valor: título não muda para o valor
+    const n = ((await api("POST", `/v1/workspaces/${ws}/nodes`, { expectedRevision: await rev(), kind: "note", content: "", geometry: g })).json as { node: { nodeId: string } }).node;
+    await api("PATCH", `/v1/nodes/${n.nodeId}`, { expectedRevision: await rev(), secret: true });
+    await api("PATCH", `/v1/nodes/${n.nodeId}`, { expectedRevision: await rev(), content: "MinhaSenh@Forte" });
+    expect(await title(n.nodeId)).toBe("Nota secreta");
+    // colou ANTES de tornar secreta (título já tinha vazado) → ao virar secreta, o título é limpo
+    const m = ((await api("POST", `/v1/workspaces/${ws}/nodes`, { expectedRevision: await rev(), kind: "note", content: "", geometry: g })).json as { node: { nodeId: string } }).node;
+    await api("PATCH", `/v1/nodes/${m.nodeId}`, { expectedRevision: await rev(), content: "token-abc123" });
+    expect(await title(m.nodeId)).toBe("token-abc123");
+    await api("PATCH", `/v1/nodes/${m.nodeId}`, { expectedRevision: await rev(), secret: true });
+    expect(await title(m.nodeId)).toBe("Nota secreta");
+    // título escolhido pelo usuário é respeitado
+    await api("PATCH", `/v1/nodes/${m.nodeId}`, { expectedRevision: await rev(), title: "Senha do banco" });
+    await api("PATCH", `/v1/nodes/${m.nodeId}`, { expectedRevision: await rev(), content: "outra" });
+    expect(await title(m.nodeId)).toBe("Senha do banco");
+  });
   it("nota secreta: mascarada no snapshot, revela só por HTTP, e injeta a env no agente ligado", async () => {
     const rev = async () => ((await api("GET", `/v1/workspaces/${ws}`)).json as { workspace: { revision: number } }).workspace.revision;
     const note = ((await api("POST", `/v1/workspaces/${ws}/nodes`, { expectedRevision: await rev(), kind: "note", content: "s3cr3t!", secret: true, secretEnv: "SENHA", geometry: { x: 0, y: 0, w: 300, h: 200 } })).json as { node: { nodeId: string } }).node;

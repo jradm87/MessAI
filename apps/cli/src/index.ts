@@ -5,6 +5,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import { AGENT_ENV, type Band, type BandAskResult, type AskResult, type ChatMessage, type EnvVarEntry, type FloorCopyInfo, type FloorHooksState, type FloorPrState, type GitHostEntry, type Message, type Node, type NotificationItem, type Routine, type RoutineRunResult, type Session, type Workspace, type WorkspaceBundle, type WorkspaceBundlePreview, type WorkspaceSnapshot } from "@messai/contracts";
 
+import type { BinderView } from "@messai/contracts";
 import type { PortalActResult, PortalSnapshot, PortalScreenshot, DeviceList, DeviceActResult, DeviceUiTree, DeviceScreenshot, DeviceState } from "@messai/contracts";
 
 const env = (k: keyof typeof AGENT_ENV) => process.env[AGENT_ENV[k]];
@@ -34,6 +35,11 @@ function call<T>(method: string, path: string, body?: unknown): Promise<T> {
 
 const snapshot = () => call<WorkspaceSnapshot>("GET", `/v1/workspaces/${workspaceId}`);
 const findNode = (nodes: Node[], ref: string) => nodes.find((n) => n.nodeId === ref || n.nodeId.startsWith(ref) || n.title.toLowerCase() === ref.toLowerCase());
+/** Nota por id/título — ignora terminais com o mesmo título (é comum o agente "X" ter a nota "X"). */
+const findNote = (nodes: Node[], ref: string) => findNode(nodes.filter((n) => n.kind === "note"), ref);
+/** tira `--color <cor>` de uma lista de args (mutável) → `{ color }` para o corpo da requisição (nome da paleta ou #rrggbb; o runtime valida) */
+const takeColor = (args: (string | undefined)[]) => { const i = args.indexOf("--color"); if (i < 0) return {}; const v = args[i + 1]; args.splice(i, 2); if (!v) throw new Error("--color precisa de uma cor (ex.: azul, #5aa9ff)"); return { color: v }; };
+const COLOR_HELP = "cores: cinza vermelho laranja amarelo verde ciano azul roxo rosa (ou en) · #rrggbb · - (sem cor)";
 const short = (id: string) => id.slice(0, 8);
 
 try {
@@ -42,10 +48,13 @@ try {
   mess context                      espaço, seu nó e notas conectadas (com conteúdo)
   mess nodes                        lista nós do espaço
   mess note read <id|título>        conteúdo de uma nota
-  mess note write <título> <texto>  cria nota ligada ao seu nó
+  mess note write <título> <texto> [--color cor]  cria nota ligada ao seu nó
   mess note append <id|título> <texto>
   mess note path <id|título>        caminho do arquivo .md da nota (edite direto se preferir)
   mess connect <id|título>          liga seu nó a outro nó
+  mess color <id|título> <cor>      pinta qualquer nó · --color <cor> também em note write, portal/device new, recruit, band create
+                                      (${COLOR_HELP})
+  mess binder list|new <título> · <fichário> pages|read|add|write|append|rename|color|delete|open|front|move   fichários (páginas)
   mess close <id|título>            apaga uma nota/portal/dispositivo (terminal: use mess maestro dismiss)
   mess peers                        terminais conectados a você (com quem pode falar)
   mess ask <id|título> <texto>      pergunta a um nó conectado e ESPERA a resposta (última tela)
@@ -60,7 +69,7 @@ try {
   mess band create <nome> [nó...]   cria uma banda · add/remove <banda> <nó> · delete <banda>
   mess band ask <banda> <texto>     pergunta a TODOS os membros e espera as respostas [--timeout seg]
   mess band say <banda> <texto>     transmite (broadcast) sem esperar resposta
-  mess maestro recruit (--preset p | --command c [--arg a]...) [--name n] [--role r] [--band b] [--cwd d] [--persist]
+  mess maestro recruit (--preset p | --command c [--arg a]...) [--name n] [--role r] [--band b] [--cwd d] [--color cor] [--persist]
                                     (só condutor) recruta um terminal ligado a você · --persist = tmux (sobrevive a fechar/reabrir o app)
   mess maestro dismiss <nó>         (só condutor) encerra e remove um terminal ligado a você
   mess maestro assign <nó> <papel|->  (só condutor) reatribui o papel (- remove)
@@ -230,24 +239,25 @@ try {
     const s = await snapshot();
     for (const n of s.nodes) console.log(`${short(n.nodeId)}  ${n.kind.padEnd(8)} ${n.title}${n.nodeId === nodeId ? "  (você)" : ""}`);
   } else if (cmd === "note" && sub === "read") {
-    const s = await snapshot(); const n = findNode(s.nodes, rest[0] ?? "");
+    const s = await snapshot(); const n = findNote(s.nodes, rest[0] ?? "");
     if (!n || n.kind !== "note") throw new Error("nota não encontrada");
     if (n.secret) { console.log(`[oculto] nota secreta — o valor não é exposto.${n.secretEnv ? ` Use por referência: $${n.secretEnv} (já no seu ambiente).` : ""}`); }
     else console.log(n.content ?? "");
   } else if (cmd === "note" && sub === "path") {
-    const s = await snapshot(); const n = findNode(s.nodes, rest[0] ?? "");
+    const s = await snapshot(); const n = findNote(s.nodes, rest[0] ?? "");
     if (!n || n.kind !== "note") throw new Error("nota não encontrada");
     console.log(n.filePath ?? "(sem arquivo)");
   } else if (cmd === "note" && sub === "write") {
-    const [title, ...text] = rest; if (!title) throw new Error("uso: mess note write <título> <texto>");
+    const args = [...rest]; const col = takeColor(args);
+    const [title, ...text] = args; if (!title) throw new Error("uso: mess note write <título> <texto> [--color cor]");
     let s = await snapshot();
     const me = s.nodes.find((n) => n.nodeId === nodeId);
     const g = me ? { x: me.geometry.x + me.geometry.w + 40, y: me.geometry.y, w: 280, h: 180 } : { x: 40, y: 40, w: 280, h: 180 };
-    const r = await call<{ node: Node; revision: number }>("POST", `/v1/workspaces/${workspaceId}/nodes`, { expectedRevision: s.workspace.revision, kind: "note", title, geometry: g, autoPlace: true, content: text.join(" ") });
+    const r = await call<{ node: Node; revision: number }>("POST", `/v1/workspaces/${workspaceId}/nodes`, { expectedRevision: s.workspace.revision, kind: "note", title, geometry: g, autoPlace: true, content: text.join(" "), ...col });
     if (nodeId) { s = await snapshot(); await call("POST", `/v1/workspaces/${workspaceId}/connections`, { expectedRevision: s.workspace.revision, sourceNodeId: nodeId, targetNodeId: r.node.nodeId }); }
     console.log(`nota criada [${short(r.node.nodeId)}]${nodeId ? " e ligada ao seu nó" : ""}`);
   } else if (cmd === "note" && sub === "append") {
-    const [ref, ...text] = rest; const s = await snapshot(); const n = findNode(s.nodes, ref ?? "");
+    const [ref, ...text] = rest; const s = await snapshot(); const n = findNote(s.nodes, ref ?? "");
     if (!n || n.kind !== "note") throw new Error("nota não encontrada");
     await call("PATCH", `/v1/nodes/${n.nodeId}`, { expectedRevision: s.workspace.revision, content: `${n.content ?? ""}${n.content ? "\n" : ""}${text.join(" ")}` });
     console.log("ok");
@@ -314,8 +324,9 @@ try {
       if (!list.length) console.log("nenhuma banda");
       for (const b of list) console.log(`${short(b.bandId)}  ${b.name.padEnd(20)} ${b.nodeIds.map((id) => s.nodes.find((n) => n.nodeId === id)?.title ?? short(id)).join(", ") || "(vazia)"}`);
     } else if (op === "create") {
-      const [name, ...members] = args; if (!name) throw new Error("uso: mess band create <nome> [nó...]");
-      const b = await call<Band>("POST", `/v1/workspaces/${workspaceId}/bands`, { name, nodeIds: await ids(members) });
+      const col = takeColor(args);
+      const [name, ...members] = args; if (!name) throw new Error("uso: mess band create <nome> [nó...] [--color cor]");
+      const b = await call<Band>("POST", `/v1/workspaces/${workspaceId}/bands`, { name, nodeIds: await ids(members), ...col });
       console.log(`banda "${b.name}" criada [${short(b.bandId)}] com ${b.nodeIds.length} membro(s)`);
     } else if (op === "add" || op === "remove") {
       const [ref, ...members] = args; const b = await needBand(ref); if (!members.length) throw new Error(`uso: mess band ${op} <banda> <nó...>`);
@@ -344,10 +355,10 @@ try {
       if (!ps.length) console.log("Nenhum portal neste espaço. Crie com `mess portal new [url]`.");
       for (const n of ps) { let u = ""; try { u = (JSON.parse(n.content ?? "{}") as { url?: string }).url ?? ""; } catch { /* sem url */ } console.log(`${short(n.nodeId)}  ${n.title.padEnd(24)} ${u || "(em branco)"}`); }
     } else if (first === "new" || first === "create") {
-      args.shift(); const name = flagVal("--name") ?? (args[1] && !args[1].startsWith("-") ? args.splice(1,1)[0] : undefined); const url = args[0] ?? "";
+      args.shift(); const col = takeColor(args); const name = flagVal("--name") ?? (args[1] && !args[1].startsWith("-") ? args.splice(1,1)[0] : undefined); const url = args[0] ?? "";
       const s = await snapshot(); const me = s.nodes.find((n) => n.nodeId === nodeId);
       const g = me ? { x: me.geometry.x + me.geometry.w + 40, y: me.geometry.y, w: 560, h: 400 } : { x: 40, y: 40, w: 560, h: 400 };
-      const r = await call<{ node: Node }>("POST", `/v1/workspaces/${workspaceId}/nodes`, { expectedRevision: s.workspace.revision, kind: "portal", ...(name ? { title: name } : {}), geometry: g, autoPlace: true, content: JSON.stringify({ url }) });
+      const r = await call<{ node: Node }>("POST", `/v1/workspaces/${workspaceId}/nodes`, { expectedRevision: s.workspace.revision, kind: "portal", ...(name ? { title: name } : {}), geometry: g, autoPlace: true, content: JSON.stringify({ url }), ...col });
       if (nodeId) { const s2 = await snapshot(); await call("POST", `/v1/workspaces/${workspaceId}/connections`, { expectedRevision: s2.workspace.revision, sourceNodeId: nodeId, targetNodeId: r.node.nodeId }).catch(() => {}); }
       console.log(`portal criado [${short(r.node.nodeId)}] "${r.node.title}"${url ? ` → ${url}` : ""}${nodeId ? " e ligado ao seu nó" : ""}`);
     } else {
@@ -401,10 +412,10 @@ try {
       const s = await snapshot(); const ds = s.nodes.filter((n) => n.kind === "device");
       if (ds.length) { console.log("\nNós de dispositivo neste espaço:"); for (const n of ds) console.log(`${short(n.nodeId)}  ${n.title}`); }
     } else if (first === "new") {
-      args.shift(); const name = flagVal("--name"); const serial = flagVal("--serial"); const avd = flagVal("--avd");
+      args.shift(); const col = takeColor(args); const name = flagVal("--name"); const serial = flagVal("--serial"); const avd = flagVal("--avd");
       const s = await snapshot(); const me = s.nodes.find((n) => n.nodeId === nodeId);
       const g = me ? { x: me.geometry.x + me.geometry.w + 40, y: me.geometry.y, w: 360, h: 640 } : { x: 40, y: 40, w: 360, h: 640 };
-      const r = await call<{ node: Node }>("POST", `/v1/workspaces/${workspaceId}/nodes`, { expectedRevision: s.workspace.revision, kind: "device", ...(name ? { title: name } : {}), geometry: g, autoPlace: true, content: JSON.stringify({ ...(serial ? { serial } : {}), ...(avd ? { avd } : {}) }) });
+      const r = await call<{ node: Node }>("POST", `/v1/workspaces/${workspaceId}/nodes`, { expectedRevision: s.workspace.revision, kind: "device", ...(name ? { title: name } : {}), geometry: g, autoPlace: true, content: JSON.stringify({ ...(serial ? { serial } : {}), ...(avd ? { avd } : {}) }), ...col });
       if (nodeId) { const s2 = await snapshot(); await call("POST", `/v1/workspaces/${workspaceId}/connections`, { expectedRevision: s2.workspace.revision, sourceNodeId: nodeId, targetNodeId: r.node.nodeId }).catch(() => {}); }
       console.log(`dispositivo criado [${short(r.node.nodeId)}] "${r.node.title}"${nodeId ? " e ligado ao seu nó" : ""}`);
     } else {
@@ -447,9 +458,9 @@ try {
     const flags = (f: string) => { const out: string[] = []; for (let i = args.indexOf(f); i >= 0; i = args.indexOf(f)) { const v = args[i + 1]; args.splice(i, 2); if (v !== undefined) out.push(v); } return out; };
     if (op === "recruit") {
       const persist = (() => { const i = args.indexOf("--persist"); if (i < 0) return false; args.splice(i, 1); return true; })();
-      const [preset] = flags("--preset"), [command] = flags("--command"), [name] = flags("--name"), [roleName] = flags("--role"), [band] = flags("--band"), [cwd] = flags("--cwd"); const a = flags("--arg");
-      if (!preset && !command) throw new Error("uso: mess maestro recruit (--preset <id> | --command <cmd> [--arg a]...) [--name n] [--role r] [--band b] [--cwd d] [--persist]");
-      const r = await call<{ node: Node; bandId?: string }>("POST", `/v1/nodes/${nodeId}/maestro/recruit`, { ...(preset ? { preset } : {}), ...(command ? { command } : {}), ...(a.length ? { args: a } : {}), ...(name ? { name } : {}), ...(roleName ? { roleName } : {}), ...(band ? { band } : {}), ...(cwd ? { cwd } : {}), ...(persist ? { persistent: true } : {}) });
+      const [preset] = flags("--preset"), [command] = flags("--command"), [name] = flags("--name"), [roleName] = flags("--role"), [band] = flags("--band"), [cwd] = flags("--cwd"), [color] = flags("--color"); const a = flags("--arg");
+      if (!preset && !command) throw new Error("uso: mess maestro recruit (--preset <id> | --command <cmd> [--arg a]...) [--name n] [--role r] [--band b] [--cwd d] [--color cor] [--persist]");
+      const r = await call<{ node: Node; bandId?: string }>("POST", `/v1/nodes/${nodeId}/maestro/recruit`, { ...(preset ? { preset } : {}), ...(command ? { command } : {}), ...(a.length ? { args: a } : {}), ...(name ? { name } : {}), ...(roleName ? { roleName } : {}), ...(band ? { band } : {}), ...(cwd ? { cwd } : {}), ...(color ? { color } : {}), ...(persist ? { persistent: true } : {}) });
       console.log(`recrutado "${r.node.title}" [${short(r.node.nodeId)}]${r.bandId ? ` na banda ${band}` : ""}`);
     } else if (op === "dismiss") {
       const [ref] = args; if (!ref) throw new Error("uso: mess maestro dismiss <nó>");
@@ -463,6 +474,69 @@ try {
       const r = await call<{ interrupted: number; titles: string[] }>("POST", `/v1/nodes/${nodeId}/maestro/interrupt`, { ...(all ? { all: true } : { ref }) });
       console.log(r.interrupted ? `interrompido(s) ${r.interrupted}: ${r.titles.join(", ")}` : "nenhum recrutado em execução para interromper");
     } else throw new Error("uso: mess maestro recruit|dismiss|assign|interrupt");
+  } else if (cmd === "binder" || cmd === "fichario" || cmd === "fichário") {
+    // #74 fichários: várias páginas num nó — o Maestro/agentes criam, escrevem, renomeiam, colorem, ordenam e apagam páginas
+    const args = [sub, ...rest].filter((a): a is string => a !== undefined);
+    const usage = `uso: mess binder list · new <título> [--color c] · <fichário> [pages] · <fichário> read <pág>
+     <fichário> add <título> [texto] [--color c] · write|append <pág> <texto> · rename <pág> <novo título>
+     <fichário> color [<pág>] <cor> · delete|open|front <pág> · move <pág> <posição>
+     (<pág> = posição 1,2,3…, id p2 ou título) (${COLOR_HELP})`;
+    const s = await snapshot(); const binders = s.nodes.filter((n) => n.kind === "binder");
+    const first = args.shift();
+    const show = (v: BinderView) => { console.log(`fichário "${v.title}" [${short(v.nodeId)}]${v.color ? ` cor ${v.color}` : ""} — ${v.pages.length} pág.`); v.pages.forEach((p, i) => console.log(`${p.id === v.active ? "*" : " "} ${String(i + 1).padStart(2)}. ${p.id.padEnd(4)} ${p.title}${p.color ? `  (${p.color})` : ""}  · ${p.content.length} chars`)); };
+    if (!first || first === "help" || first === "--help") throw new Error(usage);
+    if (first === "list") {
+      if (!binders.length) console.log("nenhum fichário neste espaço (crie com: mess binder new <título>)");
+      for (const n of binders) { const pages = (() => { try { return (JSON.parse(n.content ?? "{}") as { pages?: unknown[] }).pages?.length ?? 0; } catch { return 0; } })(); console.log(`${short(n.nodeId)}  ${n.title}  · ${pages} pág.`); }
+    } else if (first === "new" || first === "create") {
+      const col = takeColor(args); const title = args.join(" ").trim() || "Fichário";
+      const me = s.nodes.find((n) => n.nodeId === nodeId);
+      const g = me ? { x: me.geometry.x + me.geometry.w + 40, y: me.geometry.y, w: 520, h: 360 } : { x: 40, y: 40, w: 520, h: 360 };
+      const r = await call<{ node: Node }>("POST", `/v1/workspaces/${workspaceId}/nodes`, { expectedRevision: s.workspace.revision, kind: "binder", title, geometry: g, autoPlace: true });
+      if (col.color) await call("POST", `/v1/nodes/${r.node.nodeId}/binder`, { op: "color", color: col.color });
+      if (nodeId) { const s2 = await snapshot(); await call("POST", `/v1/workspaces/${workspaceId}/connections`, { expectedRevision: s2.workspace.revision, sourceNodeId: nodeId, targetNodeId: r.node.nodeId }).catch(() => {}); }
+      console.log(`fichário "${r.node.title}" criado [${short(r.node.nodeId)}]${nodeId ? " e ligado ao seu nó" : ""}`);
+    } else {
+      const bn = findNode(binders, first); if (!bn) throw new Error(`fichário não encontrado: ${first}\n${usage}`);
+      const op = args.shift() ?? "pages";
+      const run = (b: Record<string, unknown>) => call<BinderView>("POST", `/v1/nodes/${bn.nodeId}/binder`, b);
+      if (op === "pages" || op === "list" || op === "get") show(await run({ op: "get" }));
+      else if (op === "read") {
+        const [pg] = args; if (!pg) throw new Error(usage);
+        const v = await run({ op: "get", page: pg }); const lo = pg.toLowerCase();
+        const p = v.pages.find((x) => x.id === pg) ?? (/^\d+$/.test(pg) ? v.pages[Number(pg) - 1] : undefined) ?? v.pages.find((x) => x.title.toLowerCase() === lo) ?? v.pages.find((x) => x.title.toLowerCase().startsWith(lo));
+        console.log(p?.content ?? "");
+      } else if (op === "add") {
+        const col = takeColor(args); const [title, ...text] = args; if (!title) throw new Error(usage);
+        const v = await run({ op: "add", title, content: text.join(" "), ...col }); console.log(`página "${v.pages.at(-1)!.title}" adicionada (${v.pages.length}ª)`);
+      } else if (op === "write" || op === "append") {
+        const [pg, ...text] = args; if (!pg) throw new Error(usage);
+        await run({ op, page: pg, content: text.join(" ") }); console.log(op === "write" ? `página "${pg}" reescrita` : `texto anexado à página "${pg}"`);
+      } else if (op === "rename") {
+        const [pg, ...t] = args; if (!pg || !t.length) throw new Error(usage);
+        await run({ op, page: pg, title: t.join(" ") }); console.log(`página renomeada para "${t.join(" ")}"`);
+      } else if (op === "color" || op === "colour") {
+        const color = args.pop(); const pg = args.join(" ").trim(); if (color === undefined) throw new Error(usage);
+        await run({ op: "color", color, ...(pg ? { page: pg } : {}) }); console.log(pg ? `página "${pg}" com cor ${color}` : `fichário com cor ${color}`);
+      } else if (op === "delete" || op === "remove" || op === "rm" || op === "open" || op === "front") {
+        const pg = args.join(" ").trim(); if (!pg) throw new Error(usage);
+        const o = op === "remove" || op === "rm" ? "delete" : op; await run({ op: o, page: pg });
+        console.log(o === "delete" ? `página "${pg}" apagada` : o === "open" ? `página "${pg}" aberta` : `página "${pg}" na frente`);
+      } else if (op === "move") {
+        const to = Number(args.pop()); const pg = args.join(" ").trim(); if (!pg || !Number.isInteger(to) || to < 1) throw new Error(usage);
+        await run({ op: "move", page: pg, to }); console.log(`página "${pg}" na posição ${to}`);
+      } else throw new Error(usage);
+    }
+  } else if (cmd === "color" || cmd === "colour") {
+    // pinta qualquer nó do espaço (nota, terminal, portal, dispositivo, fichário…)
+    const args = [sub, ...rest].filter((a): a is string => a !== undefined);
+    const color = args.pop(); const ref = args.join(" ").trim();
+    if (!ref || color === undefined) throw new Error(`uso: mess color <id|título> <cor>   (${COLOR_HELP})`);
+    const s = await snapshot();
+    const n = findNode(s.nodes, ref);
+    if (!n) throw new Error(`nó não encontrado: ${ref}`);
+    await call("PATCH", `/v1/nodes/${n.nodeId}`, { expectedRevision: s.workspace.revision, color });
+    console.log(`"${n.title}" ${["-", "none", "nenhuma"].includes(color.toLowerCase()) ? "sem cor" : `pintado de ${color}`}`);
   } else if (cmd === "close" || cmd === "delete" || cmd === "rm") {
     // apaga um nó não-terminal do espaço (nota, portal, dispositivo, fichário…); terminais vão por `mess maestro dismiss`
     const ref = [sub, ...rest].filter((a): a is string => a !== undefined).join(" ").trim();

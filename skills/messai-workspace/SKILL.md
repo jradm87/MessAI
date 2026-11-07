@@ -6,7 +6,7 @@ user-invocable: true
 
 # MessAI — floors, workspaces and environments
 
-The command is **`mess`** (if not on `PATH`, use `"$MESS_CLI"`).
+The command is **`mess`** (call it as a plain single command — no `||`, `;`, `$(...)` or variables — so allowlists approve it; only after an actual `command not found`, use `"$MESS_CLI"`).
 
 ## Floors (isolated worktrees of the workspace)
 

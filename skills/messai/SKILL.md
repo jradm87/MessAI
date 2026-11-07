@@ -12,7 +12,8 @@ You are running inside a **terminal node of MessAI**, a spatial workspace where 
 
 Every action uses the `mess` command-line tool, pre-installed and on your `PATH`.
 
-- **If `mess` is not found**, use the absolute path in the `$MESS_CLI` environment variable: `"$MESS_CLI" context`.
+- **Call `mess` as a plain, single command** — e.g. `mess note read "X"`. Do **not** wrap it in `||`, `;`, `&&`, `$(...)`, subshells or variables (no `command -v mess || ...`, no `mess ... || "$MESS_CLI" ...`). Permission allowlists such as `Bash(mess:*)` only auto-approve simple commands; compound ones make the user approve each call.
+- **Only if you actually got `command not found`**, switch to the absolute path in `$MESS_CLI` for the rest of the session: `"$MESS_CLI" context`.
 - `mess` only works from inside a MessAI terminal (the `MESS_*` environment variables carry your credential). Run `mess --help` any time to see every command.
 
 ## See where you are
@@ -34,7 +35,28 @@ mess note append <id|title> "<text>"      # append to an existing note
 mess note path <id|title>                 # the .md file path (you may edit it directly)
 ```
 
+Add `--color <color>` to `note write` to tint it, and recolor any node (note, terminal, portal, device, binder) with `mess color <id|title> <color>`. Colors: `cinza vermelho laranja amarelo verde ciano azul roxo rosa` (or English: gray red orange yellow green cyan blue purple pink), `#rrggbb`, or `-` to clear.
+
 Notes are Markdown (support `#` headings, lists, links, and ```mermaid``` diagrams). `mess note write` always connects the new note to you, so the user sees it hanging off your terminal.
+
+## Binders (one node, many pages)
+
+A **binder** keeps several pages (notes) in one node with side tabs — good for a report with sections, or one page per finding/agent.
+
+```
+mess binder list                                   # binders in this workspace
+mess binder new "<Title>" [--color c]              # create one, auto-linked to YOUR node
+mess binder "<Binder>" pages                       # list pages (position, id, title, color; * = open)
+mess binder "<Binder>" read <page>                 # print a page
+mess binder "<Binder>" add "<Title>" "<text>" [--color c]
+mess binder "<Binder>" write|append <page> "<text>"
+mess binder "<Binder>" rename <page> "<New title>"
+mess binder "<Binder>" color <page> <color>        # page color · `color <color>` alone colors the whole binder
+mess binder "<Binder>" move <page> <position>      # reorder · open <page> shows it · front <page> moves it first
+mess binder "<Binder>" delete <page>               # the last page can't be deleted
+```
+
+`<page>` = position (`1`, `2`…), id (`p2`) or title (prefix works). One `mess` call per command (no `;`/`&&`).
 
 ## Talk to connected agents
 

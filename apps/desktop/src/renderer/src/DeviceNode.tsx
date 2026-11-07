@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState, type KeyboardEvent as RKeyboardEvent, type MouseEvent as RMouseEvent } from "react";
+import { memo, useCallback, useEffect, useRef, useState, type KeyboardEvent as RKeyboardEvent, type MouseEvent as RMouseEvent, type CSSProperties } from "react";
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
 import { AppWindow, ArrowLeft, Cast, Circle, Crosshair, Loader, Power, RefreshCw, Smartphone, Square, Unplug } from "lucide-react";
 import { uiNodeAt } from "@messai/domain";
@@ -8,7 +8,7 @@ import { EditableTitle } from "./EditableTitle.js";
 import type { NodeExtras } from "./TerminalNode.js";
 
 export type DeviceData = {
-  title: string; content: string; workspaceId: string; api: Api; stream: Stream; peers: { id: string; title: string }[];
+  title: string; content: string; color?: string; workspaceId: string; api: Api; stream: Stream; peers: { id: string; title: string }[];
   onDelete: () => void; onRename: (t: string) => void; editSignal?: number; toast: (m: string, k?: "info" | "err" | "ok") => void;
 } & NodeExtras;
 
@@ -124,7 +124,7 @@ function DeviceNodeImpl({ id, data, selected }: NodeProps & { data: DeviceData }
   return (
     <div className={`node device ${selected ? "sel" : ""}`} data-testid="device-node">
       <NodeResizer minWidth={240} minHeight={360} isVisible={selected} />
-      <div className="bar">
+      <div className={`bar ${data.color ? "tinted" : ""}`} style={data.color ? ({ "--node-color": data.color } as CSSProperties) : undefined}>
         <Smartphone size={13} className="mut" />
         <EditableTitle value={data.title} onSave={data.onRename} editSignal={data.editSignal ?? 0} />
         <span className="sp" />

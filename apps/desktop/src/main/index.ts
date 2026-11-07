@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, powerSaveBlocker, screen, shell, Tray } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, powerSaveBlocker, screen, shell, Tray } from "electron";
 import electronUpdater from "electron-updater";
 import { spawn, execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, openSync, readFileSync, readdirSync, readlinkSync, writeFileSync } from "node:fs";
@@ -304,6 +304,20 @@ ipcMain.handle("mess:runtime-log-tail", (_e, lines: unknown) => {
   const n = Math.max(1, Math.min(2000, typeof lines === "number" ? Math.floor(lines) : 200));
   try { const all = readFileSync(join(DATA_DIR, "runtime.log"), "utf8").split("\n"); return all.slice(-n).join("\n"); } catch { return ""; }
 });
+// Área de transferência do SO pelo processo principal (o navigator.clipboard do renderer não lê imagem e falha sem foco)
+ipcMain.handle("mess:clipboard-read", async () => {
+  const text = await clipboard.readText().catch(() => "");
+  let png: string | null = null;
+  try {
+    for (const item of await clipboard.read()) {
+      const t = item.types.find((x) => x.startsWith("image/")); if (!t) continue;
+      const blob = await item.getType(t);
+      if (blob instanceof Blob) { const buf = Buffer.from(await blob.arrayBuffer()); png = (t === "image/png" ? buf : nativeImage.createFromBuffer(buf).toPNG()).toString("base64"); break; }
+    }
+  } catch { /* sem imagem / formato não suportado */ }
+  return { text, png };
+});
+ipcMain.handle("mess:clipboard-write", async (_e, text: unknown) => { if (typeof text === "string") await clipboard.writeText(text); });
 ipcMain.handle("mess:save-text", async (_e, suggested: unknown, text: unknown) => {
   if (typeof text !== "string") return null;
   const name = typeof suggested === "string" && suggested && !suggested.includes("/") ? suggested : "messai.txt";

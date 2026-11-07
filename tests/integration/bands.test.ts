@@ -143,4 +143,40 @@ describe("#29 modo maestro", () => {
     const bad = await cli(["maestro", "recruit", "--command", "cat"], { ...env, MESS_NODE_ID: plain.nodeId });
     expect(bad.code).toBe(1); expect(bad.out).toContain("FORBIDDEN");
   });
+  it("cores: recruit/note/portal com --color, mess color recolore qualquer nó, cor inválida é recusada", async () => {
+    const color = async (title: string) => ((await snap(ws)).nodes.find((n) => n.title === title) as (Node & { color?: string }) | undefined)?.color;
+    expect((await cli(["maestro", "recruit", "--command", "cat", "--name", "Pintado", "--color", "verde"], env)).code).toBe(0);
+    expect(await color("Pintado")).toBe("#4cd964");
+    expect((await cli(["note", "write", "Achados", "texto", "--color", "vermelho"], env)).code).toBe(0);
+    expect(await color("Achados")).toBe("#ef5350");
+    expect((await cli(["portal", "new", "--name", "Site", "--color", "#5aa9ff"], env)).code).toBe(0);
+    expect(await color("Site")).toBe("#5aa9ff");
+    expect((await cli(["color", "Achados", "roxo"], env)).code).toBe(0);
+    expect(await color("Achados")).toBe("#a66bff");
+    expect((await cli(["color", "Achados", "-"], env)).code).toBe(0);
+    expect(await color("Achados")).toBeUndefined();
+    const bad = await cli(["color", "Site", "url(http://x)"], env);
+    expect(bad.code).toBe(1); expect(bad.out).toContain("cor inválida");
+    expect((await api("POST", `/v1/workspaces/${ws}/bands`, { name: "Cor", color: "azul" })).json).toMatchObject({ color: "#5aa9ff" });
+    await cli(["maestro", "dismiss", "Pintado"], env);
+  });
+  it("fichário pela CLI: cria, adiciona/escreve/renomeia/colore/move/apaga páginas", async () => {
+    const ok = async (a: string[]) => { const r = await cli(a, env); expect(r.code, r.out).toBe(0); return r.out; };
+    await ok(["binder", "new", "Relatório", "--color", "azul"]);
+    await ok(["binder", "Relatório", "add", "Achados", "SQLi em /login", "--color", "vermelho"]);
+    await ok(["binder", "Relatório", "append", "Achados", "XSS em /busca"]);
+    await ok(["binder", "Relatório", "rename", "1", "Escopo"]);
+    await ok(["binder", "Relatório", "write", "Escopo", "web.exemplo"]);
+    await ok(["binder", "Relatório", "color", "Escopo", "verde"]);
+    await ok(["binder", "Relatório", "move", "Achados", "1"]);
+    expect(await ok(["binder", "Relatório", "read", "achados"])).toContain("SQLi em /login\nXSS em /busca");
+    const pages = await ok(["binder", "Relatório", "pages"]);
+    expect(pages).toMatch(/1\. p2\s+Achados\s+\(#ef5350\)/); expect(pages).toMatch(/2\. p1\s+Escopo\s+\(#4cd964\)/); expect(pages).toContain("cor #5aa9ff");
+    await ok(["binder", "Relatório", "delete", "Escopo"]);
+    const last = await cli(["binder", "Relatório", "delete", "Achados"], env); // a última página não sai
+    expect(last.code).toBe(1); expect(last.out).toContain("pelo menos uma página");
+    const bad = await cli(["binder", "Relatório", "color", "Achados", "url(x)"], env);
+    expect(bad.code).toBe(1); expect(bad.out).toContain("cor inválida");
+    expect((await cli(["binder", "Relatório", "read", "Nada"], env)).out).toContain("página não encontrada");
+  });
 });
