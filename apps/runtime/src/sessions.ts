@@ -48,6 +48,12 @@ export type SessionEvents = {
 /** Dono dos PTYs. Nunca depende do cliente estar conectado. */
 export class SessionManager extends EventEmitter<SessionEvents> {
   private live = new Map<string, Live>();
+  /** Saídas de PTY ainda não confirmadas (dispose → kill → onExit). */
+  private exiting = new Set<Promise<void>>();
+  /** Espera os PTYs mortos confirmarem a saída (até `ms`). Windows: sair antes disso trava o processo (node-pty/ConPTY). */
+  async drained(ms: number): Promise<void> {
+    await Promise.race([Promise.all([...this.exiting]), new Promise((r) => setTimeout(r, ms))]);
+  }
   /** #69 sessões de agente que concluíram um turno e ainda não foram vistas (sessionId → quando). */
   private readonly awaiting = new Map<string, string>();
   markSeen(sessionId: string): boolean { return this.awaiting.delete(sessionId); }
@@ -304,6 +310,9 @@ export class SessionManager extends EventEmitter<SessionEvents> {
     if (!keepTmux && this.store.getSession(sessionId)?.persistent) this.tmuxKill(sessionId);
     if (l) {
       if (l.idleTimer) clearTimeout(l.idleTimer);
+      // #4/J: acompanha a saída real do PTY — no Windows o runtime só pode sair depois (ver drained()).
+      const gone: Promise<void> = new Promise<void>((res) => { try { l.proc.onExit(() => res()); } catch { res(); } });
+      this.exiting.add(gone); void gone.then(() => this.exiting.delete(gone));
       try { l.proc.kill(); } catch { /* já encerrado */ }
       l.term.dispose();
       this.live.delete(sessionId);
