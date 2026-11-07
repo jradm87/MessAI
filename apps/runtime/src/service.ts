@@ -38,6 +38,7 @@ import { fileURLToPath } from "node:url";
 const CLI_DIR = process.env["MESS_RESOURCES"] ? join(process.env["MESS_RESOURCES"], "cli") : join(dirname(fileURLToPath(import.meta.url)), "../../cli/bin");
 import { SessionManager } from "./sessions.js";
 import { fitAppendPrompt } from "./spawncmd.js";
+import { getPath, prependPath } from "./platform.js";
 import { watch, type FSWatcher } from "chokidar";
 
 const MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", svg: "image/svg+xml", pdf: "application/pdf", md: "text/markdown", markdown: "text/markdown", txt: "text/plain", json: "application/json", csv: "text/csv", html: "text/html", log: "text/plain", ts: "text/plain", js: "text/plain", py: "text/plain", sh: "text/plain", yml: "text/plain", yaml: "text/plain" };
@@ -1535,9 +1536,9 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     return { setup: get("setup"), run: get("run"), teardown: get("teardown") };
   }
   private hookEnv(w: Workspace, section: FloorHookSection): Record<string, string> {
-    const baseEnv: Record<string, string> = {};
+    let baseEnv: Record<string, string> = {};
     for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !/^(CLAUDECODE|CLAUDE_CODE_|CODEX_)/.test(k)) baseEnv[k] = v;
-    baseEnv["PATH"] = `${CLI_DIR}${delimiter}${baseEnv["PATH"] ?? ""}`;
+    baseEnv = prependPath(baseEnv, CLI_DIR); // C: no Windows a chave é "Path" — não criar uma segunda "PATH"
     const ground = w.parentId ? this.store.getWorkspace(w.parentId) : undefined;
     return {
       ...baseEnv,
@@ -2046,10 +2047,10 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     return succeed({ value: n.content ?? "", ...(n.secretEnv ? { envName: n.secretEnv } : {}) });
   }
   private plan(w: Workspace, node: Node, s: Session, opts: { reattach?: boolean } = {}) {
-    const baseEnv: Record<string, string> = {};
+    let baseEnv: Record<string, string> = {};
     // Não herdar marcadores de sessão de agentes que possam ter lançado o runtime.
     for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !/^(CLAUDECODE|CLAUDE_CODE_|CODEX_)/.test(k)) baseEnv[k] = v;
-    baseEnv["PATH"] = `${CLI_DIR}${delimiter}${baseEnv["PATH"] ?? ""}`;
+    baseEnv = prependPath(baseEnv, CLI_DIR); // C
     const role = node.roleId ? this.store.getRole(node.roleId) : undefined;
     const skills = (node.skillIds ?? []).map((id) => this.store.getSkill(id)).filter((k): k is Skill => !!k); // #57
     const ground = w.parentId ? this.store.getWorkspace(w.parentId) : undefined;
@@ -2084,7 +2085,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       plan = buildIsolatedPlan({ plan, iso: node.isolation, home: homedir(), baseEnv, inject, workspaceCwd: w.cwd, groundCwd: ground?.cwd, socketPath: this.cfg.socketPath,
         cliRoot: process.env["MESS_RESOURCES"] ?? join(CLI_DIR, "../../.."), globalRo: st.isolationRo ?? [], globalRw: st.isolationRw ?? [] });
     }
-    return s.persistent ? wrapInTmux(plan, tmuxSessionName(s.sessionId), { ...inject, PATH: baseEnv["PATH"]! }, this.cfg.tmuxSocket) : plan;
+    return s.persistent ? wrapInTmux(plan, tmuxSessionName(s.sessionId), { ...inject, PATH: getPath(baseEnv) }, this.cfg.tmuxSocket) : plan;
   }
 
   // ---- #72 Ambientes: variáveis de ambiente por espaço e global ----
