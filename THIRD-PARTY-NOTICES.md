@@ -197,9 +197,9 @@ Gerado por `node scripts/licenses.mjs` — não edite à mão.
 | marked | 16.4.2 | MIT | https://github.com/markedjs/marked |
 | mermaid | 11.12.0 | MIT | https://github.com/mermaid-js/mermaid |
 | ms | 2.1.3 | MIT | vercel/ms |
-| nan | 2.30.0 | MIT | https://github.com/nodejs/nan |
+| node-addon-api | 7.1.1 | MIT | https://github.com/nodejs/node-addon-api |
 | node-addon-api | 8.9.2 | MIT | https://github.com/nodejs/node-addon-api |
-| node-pty | 1.0.0 | MIT | https://github.com/microsoft/node-pty |
+| node-pty | 1.1.0 | MIT | https://github.com/microsoft/node-pty |
 | on-exit-leak-free | 2.1.2 | MIT | https://github.com/mcollina/on-exit-or-gc |
 | once | 1.4.0 | ISC | https://github.com/isaacs/once |
 | package-manager-detector | 1.9.0 | MIT | https://github.com/antfu-collective/package-manager-detector |
