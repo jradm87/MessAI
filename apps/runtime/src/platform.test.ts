@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { join } from "node:path";
-import { getPath, isPathLike, pathExts, pathKey, prependPath, socketPathFor, toPosixPath } from "./platform.js";
+import { getPath, isPathLike, pathExts, pathKey, prependPath, shellCommandArgs, socketPathFor, toPosixPath } from "./platform.js";
 
 describe("platform (porte Windows)", () => {
   it("pathKey/getPath: Windows acha a chave em qualquer caixa; fora dele é sempre PATH", () => {
@@ -29,6 +29,14 @@ describe("platform (porte Windows)", () => {
     expect(a).toMatch(/^\\\\\.\\pipe\\messai-[0-9a-f]{16}$/);
     expect(socketPathFor("c:/users/u/.messai/", true)).toBe(a);
     expect(socketPathFor("D:\\MessAI", true)).not.toBe(a);
+  });
+  it("shellCommandArgs (F): flag certa por shell", () => {
+    expect(shellCommandArgs("/bin/sh", "echo a")).toEqual(["-c", "echo a"]);
+    const utf8 = "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; ";
+    expect(shellCommandArgs("C:\\Program Files\\PowerShell\\7\\pwsh.exe", "echo a")).toEqual(["-NoProfile", "-NonInteractive", "-Command", `${utf8}echo a`]);
+    expect(shellCommandArgs("C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "x")).toEqual(["-NoProfile", "-NonInteractive", "-Command", `${utf8}x`]);
+    expect(shellCommandArgs("C:\\Windows\\system32\\cmd.exe", "dir")).toEqual(["/d", "/s", "/c", "dir"]);
+    expect(shellCommandArgs("C:\\Program Files\\Git\\bin\\bash.exe", "ls")).toEqual(["-c", "ls"]);
   });
   it("isPathLike e toPosixPath", () => {
     expect(isPathLike("claude", true)).toBe(false);

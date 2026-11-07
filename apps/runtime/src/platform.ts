@@ -54,6 +54,18 @@ export function socketPathFor(dataDir: string, win = IS_WIN): string {
   return `\\\\.\\pipe\\messai-${createHash("sha1").update(norm).digest("hex").slice(0, 16)}`;
 }
 
+/**
+ * Argumentos para "rode este comando" em cada shell (F): sh/bash/zsh → `-c`; pwsh/powershell → `-NoProfile -NonInteractive -Command`;
+ * cmd.exe → `/d /s /c`. Desconhecido → `-c` (shells POSIX).
+ */
+export function shellCommandArgs(shell: string, cmd: string): string[] {
+  const name = (shell.split(/[\\/]/).pop() ?? shell).toLowerCase().replace(/\.exe$/, "");
+  // H: com a saída capturada, o PowerShell 5.1 escreve em codepage OEM (acentos viram "�") → força UTF-8 antes do comando
+  if (name === "pwsh" || name === "powershell") return ["-NoProfile", "-NonInteractive", "-Command", `[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; ${cmd}`];
+  if (name === "cmd") return ["/d", "/s", "/c", cmd];
+  return ["-c", cmd];
+}
+
 /** Converte `C:\a\b` → `/c/a/b` (Git Bash/MSYS). Caminho que não começa com letra de drive só troca `\` por `/`. */
 export function toPosixPath(p: string): string {
   const s = p.replace(/\\/g, "/");

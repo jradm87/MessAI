@@ -38,7 +38,8 @@ import { fileURLToPath } from "node:url";
 const CLI_DIR = process.env["MESS_RESOURCES"] ? join(process.env["MESS_RESOURCES"], "cli") : join(dirname(fileURLToPath(import.meta.url)), "../../cli/bin");
 import { restorable, SessionManager } from "./sessions.js";
 import { fitAppendPrompt } from "./spawncmd.js";
-import { getPath, IS_WIN, prependPath } from "./platform.js";
+import { getPath, IS_WIN, prependPath, shellCommandArgs } from "./platform.js";
+import { killTree } from "./killtree.js";
 import { watch, type FSWatcher } from "chokidar";
 
 const MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", svg: "image/svg+xml", pdf: "application/pdf", md: "text/markdown", markdown: "text/markdown", txt: "text/plain", json: "application/json", csv: "text/csv", html: "text/html", log: "text/plain", ts: "text/plain", js: "text/plain", py: "text/plain", sh: "text/plain", yml: "text/plain", yaml: "text/plain" };
@@ -409,7 +410,8 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     } else {
       const env = { ...process.env, ...this.effectiveEnvForWorkspace(w) } as NodeJS.ProcessEnv;
       try {
-        const { stdout } = await execFileP("/bin/sh", ["-c", r.payload], { cwd: w.cwd, env, timeout: 15_000, maxBuffer: 2 * 1024 * 1024, encoding: "utf8" });
+        const sh = IS_WIN ? this.cfg.defaultShell : "/bin/sh"; // F: rotina de comando roda em PowerShell no Windows
+        const { stdout } = await execFileP(sh, shellCommandArgs(sh, r.payload), { cwd: w.cwd, env, timeout: 15_000, maxBuffer: 2 * 1024 * 1024, encoding: "utf8", windowsHide: true });
         status = "ok";
         output = String(stdout ?? "").trim().slice(0, 500);
       } catch (e) {
@@ -1585,7 +1587,8 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const promise = new Promise<FloorHookStatus>((resolveP) => {
       let proc: ChildProcess;
       try {
-        proc = spawn(this.cfg.defaultShell || "/bin/sh", ["-c", cmd], { cwd: w.cwd, env: this.hookEnv(w, section), detached: true, stdio: ["ignore", "pipe", "pipe"] });
+        const sh = this.cfg.defaultShell || "/bin/sh"; // F/N: flag por shell; sem janela; grupo próprio só fora do Windows
+        proc = spawn(sh, shellCommandArgs(sh, cmd), { cwd: w.cwd, env: this.hookEnv(w, section), detached: !IS_WIN, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
       } catch (e) {
         status.state = "failed"; status.exitCode = 1; status.finishedAt = nowIso();
         status.log = String((e as Error).message ?? e);
@@ -1627,7 +1630,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     entry.status.finishedAt = nowIso();
     const pid = entry.proc?.pid;
     if (pid) {
-      try { process.kill(-pid, "SIGTERM"); } catch { /* grupo já saiu */ }
+      killTree(pid, "SIGTERM"); // #5: grupo (Linux) / taskkill /T (Windows)
       try { entry.proc?.kill("SIGTERM"); } catch { /* processo já saiu */ }
     }
     delete entry.proc;
@@ -1875,7 +1878,8 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     if (w.parentId) {
       const hk = this.readHooksConfig(id);
       if (hk.teardown.trim() && existsSync(w.cwd)) {
-        spawnSync(this.cfg.defaultShell || "/bin/sh", ["-c", hk.teardown], { cwd: w.cwd, env: this.hookEnv(w, "teardown"), stdio: "ignore", timeout: GIT_SYNC_TIMEOUT_MS });
+        const sh = this.cfg.defaultShell || "/bin/sh";
+        spawnSync(sh, shellCommandArgs(sh, hk.teardown), { cwd: w.cwd, env: this.hookEnv(w, "teardown"), stdio: "ignore", timeout: GIT_SYNC_TIMEOUT_MS, windowsHide: true });
         this.revokeHookToken(`${id}:teardown`); // #87
       }
     }
