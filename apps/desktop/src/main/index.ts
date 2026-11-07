@@ -345,7 +345,8 @@ function ensureTray(): void {
 
 ipcMain.handle("mess:connection", async (event) => {
   // Só os renderers das nossas janelas (principal e HUD) recebem a conexão.
-  if (event.senderFrame?.url && !event.senderFrame.url.startsWith("file://") && !event.senderFrame.url.startsWith("http://localhost")) return null;
+  const from = event.senderFrame?.url;
+  if (from && !from.startsWith("file://") && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//.test(from)) return null; // dev server do Vite (localhost ou 127.0.0.1)
   // A janela já apareceu; aqui esperamos o runtime ficar pronto (token disponível) antes de conectar.
   if (runtimeReady) await runtimeReady;
   return { baseUrl: BASE, wsUrl: `ws://127.0.0.1:${PORT}/v1/ws`, token: readToken() ?? "", homeDir: homedir() };
