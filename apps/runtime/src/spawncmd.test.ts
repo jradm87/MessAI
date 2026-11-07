@@ -3,6 +3,17 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cmdlineLength, fitAppendPrompt, npmShimTarget, resolveSpawnCommand, WIN_CMDLINE_BUDGET } from "./spawncmd.js";
+import { restorable } from "./sessions.js";
+
+describe("restorable: o que volta quando o runtime sobe de novo", () => {
+  it("Linux: só persistente (tmux); Windows: também agente, nunca shell", () => {
+    expect(restorable({ persistent: true, command: "bash", args: [] }, false)).toBe(true);
+    expect(restorable({ persistent: false, command: "claude", args: [] }, false)).toBe(false);
+    expect(restorable({ persistent: false, command: "claude", args: ["--session-id", "x"] }, true)).toBe(true);
+    expect(restorable({ persistent: false, command: "codex", args: [] }, true)).toBe(true);
+    expect(restorable({ persistent: false, command: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", args: [] }, true)).toBe(false);
+  });
+});
 
 let dir: string;
 beforeAll(() => { dir = mkdtempSync(join(tmpdir(), "mess-spawn-")); });

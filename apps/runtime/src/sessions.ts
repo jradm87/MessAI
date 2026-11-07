@@ -11,6 +11,15 @@ import { homedir } from "node:os";
 import type { Store } from "@messai/storage";
 import { nowIso } from "./config.js";
 import { resolveSpawnCommand } from "./spawncmd.js";
+import { IS_WIN } from "./platform.js";
+
+/**
+ * A sessão volta sozinha quando o runtime sobe de novo? Persistente (tmux) sim. No Windows não há tmux:
+ * agente (claude/codex/...) conta como restaurável — o boot o RE-SOBE retomando a conversa (claude --resume).
+ */
+export function restorable(s: Pick<Session, "persistent" | "command" | "args">, win = IS_WIN): boolean {
+  return !!s.persistent || (win && agentKind(s.command, s.args).isAgent);
+}
 
 type Live = {
   proc: pty.IPty;
@@ -49,7 +58,7 @@ export class SessionManager extends EventEmitter<SessionEvents> {
     // Sessões gravadas como running por um runtime anterior não existem mais neste processo,
     // exceto as persistentes (tmux), que o serviço tenta reanexar na subida.
     for (const s of store.listSessions()) {
-      if ((s.state === "running" || s.state === "starting") && !s.persistent) store.updateSession(s.sessionId, { state: "lost", pid: null });
+      if ((s.state === "running" || s.state === "starting") && !restorable(s)) store.updateSession(s.sessionId, { state: "lost", pid: null });
     }
   }
 
@@ -62,7 +71,7 @@ export class SessionManager extends EventEmitter<SessionEvents> {
   tmuxKill(sessionId: string): void {
     try { execFileSync("tmux", ["-L", this.tmuxSocket, "kill-session", "-t", tmuxSessionName(sessionId)], { stdio: "ignore" }); } catch { /* já não existe */ }
   }
-  static tmuxAvailable(): boolean { try { execFileSync("tmux", ["-V"], { stdio: "ignore" }); return true; } catch { return false; } }
+  static tmuxAvailable(): boolean { if (IS_WIN) return false; /* tmux do MSYS2 no PATH não roda sobre ConPTY */ try { execFileSync("tmux", ["-V"], { stdio: "ignore" }); return true; } catch { return false; } }
 
   get(sessionId: string): Session | undefined {
     const s = this.store.getSession(sessionId);
@@ -303,7 +312,7 @@ export class SessionManager extends EventEmitter<SessionEvents> {
 
   shutdownAll(): void {
     // Sessões tmux continuam vivas: o próximo runtime reanexa.
-    for (const id of [...this.live.keys()]) { const p = this.store.getSession(id)?.persistent; this.dispose(id, true); if (p) this.store.updateSession(id, { state: "starting", pid: null }); }
+    for (const id of [...this.live.keys()]) { const s = this.store.getSession(id); const p = !!s && restorable(s); this.dispose(id, true); if (p) this.store.updateSession(id, { state: "starting", pid: null }); }
   }
 
   /**
@@ -312,7 +321,7 @@ export class SessionManager extends EventEmitter<SessionEvents> {
    */
   disposeAllHard(): void {
     for (const id of [...this.live.keys()]) {
-      const persistent = this.store.getSession(id)?.persistent;
+      const s = this.store.getSession(id); const persistent = !!s && restorable(s);
       this.dispose(id, false);
       this.store.updateSession(id, { state: persistent ? "starting" : "exited", pid: null });
     }

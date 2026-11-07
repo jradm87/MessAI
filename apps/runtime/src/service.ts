@@ -36,7 +36,7 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 // Dev: CLI em apps/cli/bin. Empacotado: resources/cli (MESS_RESOURCES vem do main).
 const CLI_DIR = process.env["MESS_RESOURCES"] ? join(process.env["MESS_RESOURCES"], "cli") : join(dirname(fileURLToPath(import.meta.url)), "../../cli/bin");
-import { SessionManager } from "./sessions.js";
+import { restorable, SessionManager } from "./sessions.js";
 import { fitAppendPrompt } from "./spawncmd.js";
 import { getPath, IS_WIN, prependPath } from "./platform.js";
 import { watch, type FSWatcher } from "chokidar";
@@ -2489,7 +2489,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     let reattached = 0, respawned = 0, lost = 0, skipped = 0;
     const restore = this.settings().restoreSessions; // #55: desligado → não RE-SOBE após reboot (tmux vivo ainda reanexa)
     for (const s of this.store.listSessions()) {
-      if (!s.persistent || (s.state !== "running" && s.state !== "starting")) continue;
+      if (!restorable(s) || (s.state !== "running" && s.state !== "starting")) continue; // Windows: agente sem tmux também volta
       const node = this.store.getNode(s.nodeId); const w = node && this.store.getWorkspace(node.workspaceId);
       if (!node || !w) { this.store.updateSession(s.sessionId, { state: "lost", pid: null }); lost++; continue; }
       if (this.sessions.tmuxAlive(s.sessionId)) { this.sessions.start({ ...s, state: "starting" }, this.plan(w, node, s, { reattach: true })); reattached++; }
@@ -2520,7 +2520,9 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     if (s.state === "unloaded") return this.reloadNode(nodeId);
     this.sessions.dispose(s.sessionId);
     this.store.updateSession(s.sessionId, { state: "starting", exitCode: null, pid: null });
-    return succeed(this.sessions.start({ ...s, state: "starting" }, this.plan(w, node, s)));
+    // Claude com id fixo: repetir --session-id falha ("Session ID ... is already in use") → retoma a conversa (--resume <id>).
+    const r = s.resumeId ? this.resumeSession(s) : s;
+    return succeed(this.sessions.start({ ...r, state: "starting" }, this.plan(w, node, r)));
   }
 
   // ---- #84 Descarregar/recarregar espaços e terminais (poupar recursos) ----
