@@ -10,6 +10,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import type { Store } from "@messai/storage";
 import { nowIso } from "./config.js";
+import { resolveSpawnCommand } from "./spawncmd.js";
 
 type Live = {
   proc: pty.IPty;
@@ -76,7 +77,9 @@ export class SessionManager extends EventEmitter<SessionEvents> {
     // Diretório inexistente faria o pty falhar com "chdir(2) failed"; cai para o home e avisa.
     const wantedCwd = plan.cwd;
     const cwd = wantedCwd && existsSync(wantedCwd) ? wantedCwd : homedir();
-    const proc = pty.spawn(plan.command, plan.args, {
+    // Windows (A): resolve PATHEXT/shim npm só aqui; session.command continua o nome lógico (M).
+    const sp = resolveSpawnCommand(plan.command, plan.args, plan.env);
+    const proc = pty.spawn(sp.command, sp.args, {
       name: "xterm-256color",
       cols: session.cols,
       rows: session.rows,

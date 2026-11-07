@@ -37,6 +37,7 @@ import { fileURLToPath } from "node:url";
 // Dev: CLI em apps/cli/bin. Empacotado: resources/cli (MESS_RESOURCES vem do main).
 const CLI_DIR = process.env["MESS_RESOURCES"] ? join(process.env["MESS_RESOURCES"], "cli") : join(dirname(fileURLToPath(import.meta.url)), "../../cli/bin");
 import { SessionManager } from "./sessions.js";
+import { fitAppendPrompt } from "./spawncmd.js";
 import { watch, type FSWatcher } from "chokidar";
 
 const MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", svg: "image/svg+xml", pdf: "application/pdf", md: "text/markdown", markdown: "text/markdown", txt: "text/plain", json: "application/json", csv: "text/csv", html: "text/html", log: "text/plain", ts: "text/plain", js: "text/plain", py: "text/plain", sh: "text/plain", yml: "text/plain", yaml: "text/plain" };
@@ -2071,7 +2072,11 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     };
     if (agentKind(s.command, s.args).agentType === "claudeCode") this.ensureClaudeTrust(s.cwd); // #6 pré-confia a pasta: evita o diálogo de trust (cujo default "No, exit" o briefing fechava)
     // Claude autônomo SÓ quando isolado (#93): no sandbox do MessAI o agente roda sem as perguntas de permissão do Claude Code; fora dele, mantém.
-    const termArgs = withAgentAutonomy(s.command, applySkills(s.command, applyRole(s.command, s.args, role), skills));
+    // Windows (A): papel+skills longos não cabem na linha de comando → --append-system-prompt-file <dataDir>/prompts/<sessão>.md
+    const termArgs = fitAppendPrompt(s.command, withAgentAutonomy(s.command, applySkills(s.command, applyRole(s.command, s.args, role), skills)), (text) => {
+      const dir = join(this.cfg.dataDir, "prompts"); mkdirSync(dir, { recursive: true });
+      const f = join(dir, `${s.sessionId}.md`); writeFileSync(f, text, { mode: 0o600 }); return f;
+    });
     let plan = planLocalTerminal({ command: s.command, args: termArgs, cwd: s.cwd, defaultShell: this.cfg.defaultShell, baseEnv, inject });
     // #93 modo isolado: bubblewrap por fora (e tmux, se persistente, por fora dele). Falha FECHADA se o isolamento não for possível.
     if (node.kind === "terminal" && node.isolation) {
