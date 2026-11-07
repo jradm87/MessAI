@@ -35,6 +35,8 @@ mess note append <id|title> "<text>"      # append to an existing note
 mess note path <id|title>                 # the .md file path (you may edit it directly)
 ```
 
+Add `--color <color>` to `note write` to tint it, and recolor any node (note, terminal, portal, device, binder) with `mess color <id|title> <color>`. Colors: `cinza vermelho laranja amarelo verde ciano azul roxo rosa` (or English: gray red orange yellow green cyan blue purple pink), `#rrggbb`, or `-` to clear.
+
 Notes are Markdown (support `#` headings, lists, links, and ```mermaid``` diagrams). `mess note write` always connects the new note to you, so the user sees it hanging off your terminal.
 
 ## Talk to connected agents

@@ -846,6 +846,21 @@ export function withClaudeAutonomy(command: string, args: string[]): string[] {
   return [...args, "--dangerously-skip-permissions"];
 }
 
+/** Paleta do canvas (a mesma dos seletores de cor da UI) com nomes pt/en, para agentes pedirem cor por nome. */
+export const NODE_COLORS: Record<string, string> = {
+  cinza: "#8a93a6", gray: "#8a93a6", grey: "#8a93a6", vermelho: "#ef5350", red: "#ef5350", laranja: "#ff9f43", orange: "#ff9f43",
+  amarelo: "#f6c344", yellow: "#f6c344", verde: "#4cd964", green: "#4cd964", ciano: "#2bc8b3", cyan: "#2bc8b3", teal: "#2bc8b3",
+  azul: "#5aa9ff", blue: "#5aa9ff", roxo: "#a66bff", purple: "#a66bff", rosa: "#ff6bb5", pink: "#ff6bb5",
+};
+/** Cor de nó: nome da paleta ou hex (#rgb/#rrggbb) → hex; "", "-", "none", "nenhuma", "padrao" → "" (sem cor); inválida → null.
+ * Só hex entra no banco: o valor vai parar em CSS (color-mix), então nada de `url(...)`/expressões arbitrárias. */
+export function parseNodeColor(input: string): string | null {
+  const v = input.trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  if (["", "-", "none", "nenhuma", "padrao", "default"].includes(v)) return "";
+  if (NODE_COLORS[v]) return NODE_COLORS[v]!;
+  return /^#([0-9a-f]{3}|[0-9a-f]{6})$/.test(v) ? v : null;
+}
+
 /** Autonomia por CLI: flag de "não perguntar" + flags que, se presentes, significam controle explícito (aí não mexe). */
 const AGENT_AUTONOMY: Record<string, { add: string[]; already: RegExp }> = {
   codex: {

@@ -14,6 +14,7 @@ The command is **`mess portal`** (call it as a plain single command — no `||`,
 
 ```
 mess portal create <url> ["Name"]         # opens the url in a new portal, LINKED to your node
+# add --color <color> to tint it (palette name or #rrggbb); recolor later with `mess color <portal> <color>`
 mess portal create https://example.com "Docs"
 ```
 

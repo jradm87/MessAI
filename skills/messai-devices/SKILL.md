@@ -14,6 +14,7 @@ A **device** node drives an Android phone/emulator over `adb`, shown live on the
 mess device list                              # connected devices + available AVDs (emulators)
 mess device new --serial <serial>             # create a device node bound to a connected phone/emulator
 mess device new --avd <AvdName>               # create a node that will boot that emulator
+# add --color <color> to tint it (palette name or #rrggbb); recolor later with `mess color <node> <color>`
 ```
 `new` creates the node auto-linked to you. Then:
 

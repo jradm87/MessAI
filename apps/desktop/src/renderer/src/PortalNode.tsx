@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState, type KeyboardEvent as RKeyboardEvent, type MouseEvent as RMouseEvent } from "react";
+import { memo, useCallback, useEffect, useRef, useState, type KeyboardEvent as RKeyboardEvent, type MouseEvent as RMouseEvent, type CSSProperties } from "react";
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
 import { ArrowLeft, ArrowRight, Crosshair, ExternalLink, Globe, Play, RotateCw, Square } from "lucide-react";
 import type { PortalAct, PortalInspect, PortalState } from "@messai/contracts";
@@ -7,7 +7,7 @@ import { EditableTitle } from "./EditableTitle.js";
 import type { NodeExtras } from "./TerminalNode.js";
 
 export type PortalData = {
-  title: string; content: string; workspaceId: string; api: Api; stream: Stream; peers: { id: string; title: string }[];
+  title: string; content: string; color?: string; workspaceId: string; api: Api; stream: Stream; peers: { id: string; title: string }[];
   onDelete: () => void; onRename: (t: string) => void; editSignal?: number; toast: (m: string, k?: "info" | "err" | "ok") => void;
 } & NodeExtras;
 
@@ -93,7 +93,7 @@ function PortalNodeImpl({ id, data, selected }: NodeProps & { data: PortalData }
   return (
     <div className={`node portal ${selected ? "sel" : ""}`} data-testid="portal-node">
       <NodeResizer minWidth={320} minHeight={240} isVisible={selected} />
-      <div className="bar">
+      <div className={`bar ${data.color ? "tinted" : ""}`} style={data.color ? ({ "--node-color": data.color } as CSSProperties) : undefined}>
         <Globe size={13} className="mut" />
         <EditableTitle value={data.title} onSave={data.onRename} editSignal={data.editSignal ?? 0} />
         <span className="sp" />

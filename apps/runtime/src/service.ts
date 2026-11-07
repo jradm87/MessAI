@@ -22,7 +22,7 @@ import { probeAccounts } from "./accounts.js";
 import { backupName, copyBackupFiles, dataStats, isBackupName, listBackups, validateBackup, validateMoveTarget, writeManifest, type BackupEntry } from "./data.js";
 import { BUILD_VERSION } from "@messai/contracts";
 import { defaultPresets, parsePresets, validatePresets, PRESETS_META_KEY } from "./presets.js";
-import { applyRole, withAgentAutonomy, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, DEFAULT_FLOOR_EXCLUDES, normalizeFloorExcludes, shouldExcludeFloorDir, parseGitRemote, buildPrCompareUrl, normalizeEnvVars, mergeEnvLayers, safeRelPath, isWithinCanonicalRoot, looksBinary, canMessage, checkRevision, formatDelivery, normalizeGeometry, planLocalTerminal, resolveNodeRef, resolveCrossNodeRef, validateNewNode, agentKind, agentResume, stripAnsi, fail, succeed, type Result, applySkills, skillsText, placeGeometries, connectionsWithin } from "@messai/domain";
+import { applyRole, withAgentAutonomy, parseNodeColor, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, DEFAULT_FLOOR_EXCLUDES, normalizeFloorExcludes, shouldExcludeFloorDir, parseGitRemote, buildPrCompareUrl, normalizeEnvVars, mergeEnvLayers, safeRelPath, isWithinCanonicalRoot, looksBinary, canMessage, checkRevision, formatDelivery, normalizeGeometry, planLocalTerminal, resolveNodeRef, resolveCrossNodeRef, validateNewNode, agentKind, agentResume, stripAnsi, fail, succeed, type Result, applySkills, skillsText, placeGeometries, connectionsWithin } from "@messai/domain";
 import { createHash, randomUUID, randomBytes, timingSafeEqual } from "node:crypto";
 import { Companion } from "./companion.js";
 import type { Store } from "@messai/storage";
@@ -1901,6 +1901,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     if (!w) return fail("NOT_FOUND", "espaço não encontrado");
     const rev = checkRevision(w, input.expectedRevision);
     if (!rev.ok) return rev;
+    if (input.color) { const c = parseNodeColor(input.color); if (c === null) return fail("INVALID", `cor inválida: ${input.color} (use um nome da paleta ou #rrggbb)`); input = { ...input, color: c }; }
     const valid = validateNewNode({ kind: input.kind, command: input.command });
     if (!valid.ok) return valid;
 
@@ -1928,7 +1929,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       ...(input.kind === "stack" ? { content: input.content ?? JSON.stringify({ childIds: [], active: "" }) } : {}),
       ...(input.kind === "terminal" && input.roleId ? { roleId: input.roleId } : {}),
       // #56 aparência do terminal (vinda do preset)
-      ...(input.kind === "terminal" && input.color ? { color: input.color } : {}),
+      ...(input.color ? { color: input.color } : {}), // qualquer nó (nota, terminal, portal, dispositivo…)
       ...(input.kind === "terminal" && input.icon ? { icon: input.icon } : {}),
       ...(input.kind === "terminal" && input.termTheme && input.termTheme !== "system" ? { termTheme: input.termTheme } : {}),
       ...(input.kind === "terminal" && input.skillIds?.length ? { skillIds: input.skillIds } : {}),
@@ -1943,7 +1944,6 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     if (node.roleId && !this.store.getRole(node.roleId)) return fail("NOT_FOUND", "papel não encontrado");
     let titleAuto = true;
     if (input.kind === "note") {
-      if (input.color) node.color = input.color;
       if (input.secret) {
         node.secret = true;
         if (input.secretEnv) node.secretEnv = input.secretEnv.trim();
@@ -2991,6 +2991,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const w = this.store.getWorkspace(node.workspaceId)!;
     const rev = checkRevision(w, input.expectedRevision);
     if (!rev.ok) return rev;
+    if (typeof input.color === "string") { const c = parseNodeColor(input.color); if (c === null) return fail("INVALID", `cor inválida: ${input.color} (use um nome da paleta ou #rrggbb)`); input = { ...input, color: c || null }; }
     if (node.kind === "note" && byAgent && node.locked && (input.content !== undefined || input.title !== undefined || input.filePath !== undefined)) return fail("FORBIDDEN", "nota bloqueada: agentes só podem ler");
     if (typeof input.groupId === "string") { const g = this.store.getGroup(input.groupId); if (!g || g.workspaceId !== node.workspaceId) return fail("NOT_FOUND", "grupo não encontrado neste espaço"); } // #78
     // #93 um agente NUNCA mexe no próprio isolamento, no Maestro (ganharia capacidades) nem no limite de memória: só o app.
@@ -3090,7 +3091,8 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     if (!this.store.getWorkspace(workspaceId)) return fail("NOT_FOUND", "espaço não encontrado");
     const name = input.name.trim(); if (!name) return fail("INVALID", "a banda precisa de um nome");
     if (this.store.listBands(workspaceId).some((b) => b.name.toLowerCase() === name.toLowerCase())) return fail("CONFLICT", `já existe uma banda "${name}" neste espaço`);
-    const b: Band = { bandId: newId(), workspaceId, name, color: input.color ?? "", nodeIds: this.validBandNodes(workspaceId, input.nodeIds), asking: [], createdAt: nowIso() };
+    const color = input.color ? parseNodeColor(input.color) : ""; if (color === null) return fail("INVALID", `cor inválida: ${input.color}`);
+    const b: Band = { bandId: newId(), workspaceId, name, color, nodeIds: this.validBandNodes(workspaceId, input.nodeIds), asking: [], createdAt: nowIso() };
     this.store.insertBand(b);
     this.publish(workspaceId);
     return succeed(this.bandView(b));
@@ -3100,9 +3102,10 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     if (!b) return fail("NOT_FOUND", "banda não encontrada");
     const name = input.name?.trim();
     if (name && this.store.listBands(b.workspaceId).some((o) => o.bandId !== id && o.name.toLowerCase() === name.toLowerCase())) return fail("CONFLICT", `já existe uma banda "${name}" neste espaço`);
+    const color = input.color !== undefined ? parseNodeColor(input.color) : undefined; if (color === null) return fail("INVALID", `cor inválida: ${input.color}`);
     const remove = new Set(input.removeNodeIds ?? []);
     const ids = [...new Set([...this.bandView(b).nodeIds, ...this.validBandNodes(b.workspaceId, input.addNodeIds)])].filter((n) => !remove.has(n));
-    this.store.updateBand(id, { name: name || undefined, color: input.color, nodeIds: ids });
+    this.store.updateBand(id, { name: name || undefined, color, nodeIds: ids });
     this.publish(b.workspaceId);
     return succeed(this.bandView(this.store.getBand(id)!));
   }
@@ -3238,7 +3241,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const geometry = this.freeSpotNear(maestro, this.store.listNodes(w.workspaceId), 560, 340);
     // `--persist` → recrutado PERSISTENTE (tmux): sobrevive a fechar/reabrir o app, como o condutor. Sem tmux, ignora (não falha o recruit).
     const persist = !!input.persistent && SessionManager.tmuxAvailable();
-    const made = this.createNode(w.workspaceId, { expectedRevision: w.revision, kind: "terminal", title: input.name ?? preset?.label ?? "Agente", geometry, command, args, ...(input.cwd ? { cwd: input.cwd } : {}), ...(roleId ? { roleId } : {}), ...(preset?.color ? { color: preset.color } : {}), ...(preset?.icon ? { icon: preset.icon } : {}), ...(preset && preset.theme !== "system" ? { termTheme: preset.theme } : {}), ...(persist ? { persistent: true } : {}) });
+    const made = this.createNode(w.workspaceId, { expectedRevision: w.revision, kind: "terminal", title: input.name ?? preset?.label ?? "Agente", geometry, command, args, ...(input.cwd ? { cwd: input.cwd } : {}), ...(roleId ? { roleId } : {}), ...((input.color ?? (preset?.color && parseNodeColor(preset.color))) ? { color: input.color ?? preset!.color } : {}), ...(preset?.icon ? { icon: preset.icon } : {}), ...(preset && preset.theme !== "system" ? { termTheme: preset.theme } : {}), ...(persist ? { persistent: true } : {}) });
     if (!made.ok) return made;
     const node = made.value.node;
     const link = this.createConnection(w.workspaceId, { expectedRevision: this.store.getWorkspace(w.workspaceId)!.revision, sourceNodeId: maestro.nodeId, targetNodeId: node.nodeId });

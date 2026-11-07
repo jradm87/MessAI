@@ -2,7 +2,7 @@ import { Type, type Static } from "@sinclair/typebox";
 
 export const PROTOCOL_VERSION = 1 as const;
 /** Incrementar a cada mudança de snapshot/rotas; o cliente avisa quando o runtime está atrás. */
-export const BUILD_VERSION = 48 as const;
+export const BUILD_VERSION = 49 as const;
 
 // ---------- Identidades ----------
 export const Id = Type.String({ minLength: 8, maxLength: 64 });
@@ -389,6 +389,7 @@ export const MaestroRecruit = Type.Object({
   preset: Type.Optional(Type.String({ maxLength: 60 })), command: Type.Optional(Type.String({ maxLength: 300 })), args: Type.Optional(Type.Array(Type.String({ maxLength: 4000 }), { maxItems: 50 })),
   name: Type.Optional(Type.String({ maxLength: 60 })), roleName: Type.Optional(Type.String({ maxLength: 60 })), band: Type.Optional(Type.String({ maxLength: 40 })),
   cwd: Type.Optional(Type.String({ minLength: 1 })), persistent: Type.Optional(Type.Boolean()),
+  color: Type.Optional(Type.String({ maxLength: 20 })), // nome da paleta ou #rrggbb
 });
 export type MaestroRecruit = Static<typeof MaestroRecruit>;
 export const MaestroTarget = Type.Object({ ref: Type.String({ minLength: 1 }) });

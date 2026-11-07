@@ -143,4 +143,21 @@ describe("#29 modo maestro", () => {
     const bad = await cli(["maestro", "recruit", "--command", "cat"], { ...env, MESS_NODE_ID: plain.nodeId });
     expect(bad.code).toBe(1); expect(bad.out).toContain("FORBIDDEN");
   });
+  it("cores: recruit/note/portal com --color, mess color recolore qualquer nó, cor inválida é recusada", async () => {
+    const color = async (title: string) => ((await snap(ws)).nodes.find((n) => n.title === title) as (Node & { color?: string }) | undefined)?.color;
+    expect((await cli(["maestro", "recruit", "--command", "cat", "--name", "Pintado", "--color", "verde"], env)).code).toBe(0);
+    expect(await color("Pintado")).toBe("#4cd964");
+    expect((await cli(["note", "write", "Achados", "texto", "--color", "vermelho"], env)).code).toBe(0);
+    expect(await color("Achados")).toBe("#ef5350");
+    expect((await cli(["portal", "new", "--name", "Site", "--color", "#5aa9ff"], env)).code).toBe(0);
+    expect(await color("Site")).toBe("#5aa9ff");
+    expect((await cli(["color", "Achados", "roxo"], env)).code).toBe(0);
+    expect(await color("Achados")).toBe("#a66bff");
+    expect((await cli(["color", "Achados", "-"], env)).code).toBe(0);
+    expect(await color("Achados")).toBeUndefined();
+    const bad = await cli(["color", "Site", "url(http://x)"], env);
+    expect(bad.code).toBe(1); expect(bad.out).toContain("cor inválida");
+    expect((await api("POST", `/v1/workspaces/${ws}/bands`, { name: "Cor", color: "azul" })).json).toMatchObject({ color: "#5aa9ff" });
+    await cli(["maestro", "dismiss", "Pintado"], env);
+  });
 });

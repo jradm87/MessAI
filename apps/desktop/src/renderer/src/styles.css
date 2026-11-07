@@ -562,7 +562,7 @@ button.danger:hover { border-color: var(--danger); color: var(--danger-fg); }
 .pt-input { width: 90px; }
 .hint { font-size: 12px; line-height: 1.4; }
 /* tinta do nó terminal pela cor do preset/nó e ícone no cabeçalho */
-.node.terminal .bar.tinted { background: color-mix(in srgb, var(--node-color) 24%, var(--bar)); }
+.node.terminal .bar.tinted, .node.portal .bar.tinted, .node.device .bar.tinted { background: color-mix(in srgb, var(--node-color) 24%, var(--bar)); }
 .node.terminal .bar .node-ic { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 5px; padding: 0; border: 0; background: transparent; color: var(--fg); cursor: pointer; }
 .node.terminal .bar .node-ic:hover { background: var(--hover-2); }
 .appearance-menu { position: absolute; top: 28px; left: 6px; z-index: 12; width: 300px; display: flex; flex-direction: column; gap: 8px; padding: 8px; }
