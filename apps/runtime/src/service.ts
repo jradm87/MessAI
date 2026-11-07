@@ -133,6 +133,8 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
   constructor(private readonly cfg: Config, private readonly store: Store, readonly sessions: SessionManager) {
     super();
     this.companion = new Companion({ enabled: cfg.companionEnabled, ollamaUrl: cfg.ollamaUrl, ollamaModel: cfg.ollamaModel });
+    // notas secretas antigas com título automático podem ter herdado o valor como título (bug corrigido): limpa na partida
+    for (const n of this.store.listAllNodes()) if (n.kind === "note" && n.secret && n.title !== "Nota secreta" && this.store.isTitleAuto(n.nodeId)) this.store.updateNode(n.nodeId, { title: "Nota secreta" });
     // #65 → #66: cada turno concluído de agente vira (quando há modelo) um resumo + próximo passo, fora do caminho de requisição.
     this.sessions.on("taskFinished", (ev) => {
       const node = this.store.getNode(ev.nodeId);
@@ -1946,6 +1948,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     if (input.kind === "note") {
       if (input.secret) {
         node.secret = true;
+        if (!input.title) node.title = "Nota secreta"; // nunca derivado do conteúdo (é o valor secreto)
         if (input.secretEnv) node.secretEnv = input.secretEnv.trim();
         // nota secreta: fica SÓ na base, nunca num .md no disco (evita vazar em disco/export). O valor veio em content.
       } else if (input.filePath) {
@@ -3021,8 +3024,12 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
         try { if (node.filePath.startsWith(this.notesDir(node.workspaceId))) unlinkSync(node.filePath); } catch { /* já removido */ }
         this.unwatchNote(node.filePath); this.noteMtime.delete(nodeId); filePath = "";
       }
+      const secret = input.secret ?? node.secret ?? false;
       if (input.title !== undefined) titleAuto = false;
-      else if (input.content !== undefined && this.store.isTitleAuto(nodeId)) title = deriveNoteTitle(input.content) ?? "Nota";
+      // nota secreta NUNCA deriva o título do conteúdo (o título aparece no canvas, no snapshot dos agentes e no export).
+      // Ao virar secreta (ou ao salvar uma secreta com título automático), o título vira genérico — limpa vazamento antigo.
+      else if (secret && this.store.isTitleAuto(nodeId) && (input.secret === true || input.content !== undefined)) title = "Nota secreta";
+      else if (!secret && input.content !== undefined && this.store.isTitleAuto(nodeId)) title = deriveNoteTitle(input.content) ?? "Nota";
       if (input.filePath && input.filePath !== node.filePath) {
         if (!/\.(md|markdown|txt)$/i.test(input.filePath)) return fail("INVALID", "o destino precisa ser .md ou .txt");
         if (existsSync(input.filePath)) return fail("CONFLICT", "já existe um arquivo nesse caminho");
