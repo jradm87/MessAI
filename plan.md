@@ -1,74 +1,82 @@
 # Plano — Porte do MessAI para Windows (`windows_version`)
 
-> Branch: **`windows_version`** (da `main` em `841f02d` / v0.0.14). **Rev. 5** — rev. 4 auditada contra o código em `5b46fa6` numa máquina **Windows 11 Pro** (Git 2.56; sem Node/pwsh instalados — nada foi executado além de `git`). Novidades: CRLF já no working tree (K), nome do binário `.exe/.cmd` (M), `windowsHide` (N), tmux forçado off, CI que não dispara em `windows_version`, testes de integração tratados como suíte Linux (não 43 `skipIf`), e **execução simplificada para 2 trilhas** (seção final) em vez de 7 papéis.
+> Branch: **`windows_version`** (base: `main` em `eb953f7` / v0.0.15, mesclado em `83c1234`). **Rev. 6** — auditoria da rev. 5 contra o código **atual** (Linux, só leitura; o que depende de executar em Windows continua **hipótese**).
+> O que mudou na rev. 6: (1) todas as referências `arquivo:linha` reconferidas e corrigidas para o `main` atual (`withAgentAutonomy`, clipboard pelo processo principal, `mess binder`/`mess color`, hint com `"$MESS_CLI"` entre aspas); (2) **sete achados novos** (O–T, V): testes unitários que leem `/proc`, `O_NOFOLLOW` inexistente no Windows, `SHELL=pwsh` exportado ao agente, e2e Playwright Linux-only, reflink/symlink na cópia de andares, chave do `~/.claude.json`; (3) a seção de execução foi **reescrita para 2 trilhas** (a rev. 5 prometia isso no cabeçalho mas ainda trazia os 7 papéis da rev. 4 — o modelo antigo virou nota histórica); (4) **seção nova "Guia prático para os agentes executores"**: instalação com `winget`, `.gitattributes` exato, renormalização, roteiro de teste passo a passo com resultado esperado, checklist de aceite por fase e regras de trabalho; (5) estimativa ajustada (12–21 dias-pessoa).
 > Objetivo: instalador Windows (`.exe`) reaproveitando o código atual, sem reescrever o app.
-> Convenção: toda referência a código é `arquivo:linha`; o que depende de executar em Windows está marcado como **hipótese**. Repositório local: `C:\Users\ctscs\Documents\MessAI` (a rev. 4 chamava de `koba`, nome antigo).
+> Convenção: toda referência a código é `arquivo:linha` no estado de `83c1234`; `service.ts` = `apps/runtime/src/service.ts`, `domain` = `packages/domain/src/index.ts`, `contracts` = `packages/contracts/src/index.ts`, `desktop/main` = `apps/desktop/src/main/index.ts`. Repositório na máquina Windows: `C:\Users\ctscs\Documents\MessAI`.
 
 ## Decisão (ADR)
 **Build nativo do Electron para Windows** (electron-builder **`nsis`**; `portable` opcional, ver Fase 3).
 
 Por quê (verificado no código):
-- Tudo que é pesado já roda em Node e tem suporte Windows: node-pty (ConPTY), better-sqlite3, Fastify (named pipe), electron-updater (NSIS).
-- **Tauri** ainda precisaria do runtime Node como sidecar e da reimplementação do host do xterm/React Flow — mais trabalho, mesmo risco. Fica como otimização futura (binário/RAM-base).
-- **Portais NÃO dependem do Electron:** cada portal é um **Chromium headless separado dirigido por CDP via pipe** (`apps/runtime/src/portal.ts:11-14,97-103`), não `BrowserView`. (A rev. 1/2 dizia o contrário — corrigido.)
+- Tudo que é pesado já roda em Node e tem suporte Windows: node-pty 1.0.0 (ConPTY), better-sqlite3 13.0.3, Fastify (named pipe), electron-updater 6.3.9 (NSIS). Electron **45.1.0**, electron-builder 25.1.8, `@electron/rebuild` 3.7.1 (`package-lock.json`).
+- **Tauri** ainda precisaria do runtime Node como sidecar e da reimplementação do host do xterm/React Flow — mais trabalho, mesmo risco. Fica como otimização futura.
+- **Portais NÃO dependem do Electron:** cada portal é um **Chromium headless separado dirigido por CDP via pipe** (`apps/runtime/src/portal.ts:12`, `:98`, `:101`), não `BrowserView`.
 - **GUI nativa Rust**: reescrita total → descartada.
-- **WSL2 (AppImage + WSLg) = caminho suportado oficialmente**, não só "alternativa": é o único modo em que tmux, bubblewrap (modo isolado), hooks/rotinas em `sh` e a suíte de integração funcionam 100%. Ganha página de instalação enquanto o nativo amadurece. (Híbrido "`.exe` nativo + runtime no WSL" é possível via HTTP em localhost, mas é over-engineering agora.)
-- **Segurança no Windows:** o named pipe não tem `chmod`; a autenticação fica no **Bearer** + credencial por terminal com escopo (`server.ts:38-55`, `service.ts:2054`). Decisão registrada.
+- **WSL2 (AppImage + WSLg) = caminho suportado oficialmente**, não só "alternativa": é o único modo em que tmux, bubblewrap (modo isolado), hooks/rotinas em `sh` e a suíte de integração funcionam 100%. Ganha página de instalação enquanto o nativo amadurece.
+- **Segurança no Windows:** o named pipe não tem `chmod`; a autenticação fica no **Bearer** + credencial por terminal com escopo (`apps/runtime/src/server.ts:35-45`, `service.ts:2057` `agentTokenForSpawn`). Decisão registrada.
 
 ## Degradações aceitas no Windows (feature-flags)
-- **tmux** ausente → sem sessões duráveis / `--persist`. `tmuxAvailable()` (`sessions.ts:64`) já desliga quando não há `tmux` no PATH, mas um tmux do MSYS2 no PATH ligaria `terminal.tmux` (`server.ts:123`) e `persist` (`service.ts:1964,3239`) sobre um ConPTY — **forçar `false` em `win32`**.
-- **bubblewrap** ausente → sem modo isolado. A API deve **rejeitar** `isolation` no Windows (hoje cai em `/bin/sh` e o terminal nasce "exited" sem mensagem — `isolation.ts:51`, `service.ts:2074`).
-- **Monitor de processos (#80)**: v1 só raiz/memória (sem `/proc`) ou oculto.
+- **tmux** ausente → sem sessões duráveis / `--persist`. `SessionManager.tmuxAvailable()` (`apps/runtime/src/sessions.ts:64`) já desliga quando não há `tmux` no PATH, mas um tmux do MSYS2 no PATH ligaria `terminal.tmux` (`server.ts:123`) e `persist` (`service.ts:1967`, `:3250`) sobre um ConPTY — **forçar `false` em `win32`**.
+- **bubblewrap** ausente → sem modo isolado. A API deve **rejeitar** `isolation` no Windows (hoje `probeIsolation()` devolve `available=false` e `buildIsolatedPlan` cai em `/bin/sh -c "echo …; exec sleep 3600"` — `apps/runtime/src/isolation.ts:47-51`; chamado em `service.ts:2077-2081`; o terminal nasce "exited" sem mensagem porque `/bin/sh` não existe).
+- **Monitor de processos (#80)**: v1 só raiz/memória (sem `/proc`) ou oculto (`apps/runtime/src/procs.ts:12-23`).
 - **Hooks e rotinas** rodam em **PowerShell** no Windows (decisão de produto; documentar).
-- Shell padrão: `MESS_SHELL` > `pwsh` > `powershell.exe` > `%COMSPEC%`. **Verificado nesta máquina: Windows 11 Pro não traz `pwsh`** (só `powershell.exe` 5.1); o caminho padrão para a maioria dos usuários será o PowerShell 5.1, que usa codepage OEM por padrão — reforça H.
+- **Cópia de andares (floors) sem reflink**: a sonda `COPYFILE_FICLONE_FORCE` (`service.ts:1360`) sempre falha em NTFS → cópia integral; `symlinkSync` na cópia (`:1442`) exige privilégio/Modo Desenvolvedor e já está em `try/catch` → o link vira ausência silenciosa (ver S/T).
+- Shell padrão: `MESS_SHELL` > `pwsh` > `powershell.exe` > `%COMSPEC%`. **Verificado na máquina: Windows 11 Pro não traz `pwsh`** (só `powershell.exe` 5.1), que usa codepage OEM por padrão — reforça H.
 
 ---
 
 ## Diagnóstico consolidado (o que quebra no Windows)
 
 ### Bloqueantes
-| ID | Problema | Evidência | Correção |
+| ID | Problema | Evidência (`83c1234`) | Correção |
 |---|---|---|---|
-| A | **Spawn do agente no ConPTY**: `pty.spawn("claude", …)` → `CreateProcess` não resolve `.cmd` (instalação via `npm i -g` gera `claude.cmd`/`codex.cmd`) → `ENOENT`. E o `--append-system-prompt` multilinha gigante (hint + papel + skills) vai num único argv: via shim `.cmd` quebras de linha e `% ^ & \| "` corrompem o argumento, e a linha tem teto de 32 767 chars. | `sessions.ts:79-85`, `presets.ts:9,17`, `node-pty/lib/windowsPtyAgent.js:76,257-300`, `domain/index.ts:290-308`, `contracts:973` | `resolveSpawnCommand()` com `PATHEXT` aplicado ao `plan.command` (preferir `.exe`; se `.cmd`, chamar `node <cli.js>` do pacote). **Tirar texto longo do argv no Windows**: papel/skills/hint por `MESS_ROLE_INSTRUCTIONS`/`MESS_SKILLS_TEXT` (já existem, `contracts:962,965`) ou arquivo. Teste que falha se a linha gerada passar de ~30 k. |
-| B | **`$MESS_CLI` com `\` quebra o launcher sh no Git Bash**: `dirname 'C:\a\mess'` = `.` → procura `./cli.mjs`. As skills/hint mandam usar `"$MESS_CLI"`. Hint usa `$MESS_CLI` **sem aspas** (quebra com espaços, até no Linux). | `service.ts:2063`, `package.mjs:31`, `apps/cli/bin/mess:2`, `presets.ts:9`, `skills/messai-manager/SKILL.md:9` | Exportar `MESS_CLI` em forma POSIX (`/c/Users/...`) para o Git Bash **e** `MESS_CLI_CMD` (`mess.cmd`) para pwsh; launcher robusto a `\`; aspas no hint/skills. |
-| 1 | CLI `mess` é `#!/bin/sh` (dev e pacote). | `apps/cli/bin/mess:1-2`, `package.mjs:31` | Gerar `mess.cmd` e manter o `sh` (Claude Code no Windows executa via Git Bash). |
-| 2 | `whichOnPath` ignora `PATHEXT` e `X_OK`; `includes("/")` não reconhece `\`. É só a **sonda** de disponibilidade (ver A). | `providers.ts:18-27`; usado em `portal.ts:21`, `device.ts:18,24,30`, `isolation.ts:12,67,73` | `PATHEXT` + sem `X_OK` no Windows + reconhecer `\`. |
-| 6 | Socket unix `agent.sock` + `chmod`/`unlink`; `existsSync` num named pipe **abre uma conexão cliente** (efeito colateral). | `config.ts:58`, `runtime/index.ts:32,46,62,65-66`, `cli/index.ts:12-13,22` | Pipe `\\.\pipe\messai-<hash(dataDir)>`; pular `chmod`/`unlink`/`existsSync` no Windows; `defaultSocket()` do CLI com `USERPROFILE`. |
+| A | **Spawn do agente no ConPTY**: `pty.spawn(plan.command, …)` com `plan.command = "claude"` → `CreateProcess` não resolve `.cmd` (instalação via `npm i -g` gera `claude.cmd`/`codex.cmd`; o instalador nativo do Claude Code gera `claude.exe` em `%USERPROFILE%\.local\bin` — **hipótese**) → `ENOENT`. E o `--append-system-prompt` multilinha gigante (hint + papel + skills) vai num único argv: via shim `.cmd` quebras de linha e `% ^ & \| "` corrompem o argumento, e a linha tem teto de 32 767 chars. | `sessions.ts:79-85`, `apps/runtime/src/presets.ts:9,17`, `domain:290-307` (`applySkills`/`applyRole`), `service.ts:2074-2075` (`withAgentAutonomy(applySkills(applyRole(…)))` → `planLocalTerminal`), `contracts:971,974` (`MESS_ROLE_INSTRUCTIONS`/`MESS_SKILLS_TEXT` já existem e já são injetados em `service.ts:2060-2061`) | `resolveSpawnCommand()` com `PATHEXT` aplicado ao `plan.command` no ponto do `pty.spawn` (preferir `.exe`; se `.cmd` de pacote npm, chamar `node <cli.js>` do pacote). **Tirar texto longo do argv no Windows**: papel/skills por env (já vão) e só o hint curto no argv; teste que falha se a linha gerada passar de ~30 k. |
+| B | **`$MESS_CLI` com `\` quebra o launcher sh no Git Bash**: `dirname 'C:\a\mess'` = `.` → procura `./dist/index.js`. As skills e o hint mandam usar `"$MESS_CLI"` (**rev. 6: o hint já usa aspas** — `presets.ts:9` tem `\"$MESS_CLI\"`; a rev. 5 dizia que não). No pacote, `MESS_ELECTRON=C:\…\MessAI.exe` entra no launcher sh (`package.mjs:31`) — em Git Bash funciona entre aspas duplas (**hipótese**). | `service.ts:2066` (`[AGENT_ENV.cli]: join(CLI_DIR,"mess")`), `:2070` (`MESS_ELECTRON`), `scripts/package.mjs:31`, `apps/cli/bin/mess:2`, `skills/*/SKILL.md` (7 arquivos, todos com `"$MESS_CLI"`) | Exportar `MESS_CLI` em forma POSIX (`/c/Users/...`) para o Git Bash **e** `MESS_CLI_CMD` (`mess.cmd`) para pwsh; launcher sh robusto a `\` (`cygpath -u`); `MESS_ELECTRON` idem. |
+| 1 | CLI `mess` é `#!/bin/sh` (dev e pacote); PowerShell não executa um arquivo sem extensão. (`npm ci` gera shims `node_modules/.bin/mess.cmd` via cmd-shim a partir do `bin` de `apps/cli/package.json:6`, mas o shebang é `/bin/sh`, não `node` — **hipótese**: o shim gerado chama `sh`, inútil fora do Git Bash; e `CLI_DIR` aponta para `apps/cli/bin`, não para `.bin`.) | `apps/cli/bin/mess:1-2`, `service.ts:38` (`CLI_DIR`), `package.mjs:31` | Gerar `mess.cmd` (dev e pacote) e manter o `sh` (Claude Code no Windows executa via Git Bash). |
+| 2 | `whichOnPath` ignora `PATHEXT` e usa `X_OK`; `includes("/")` não reconhece `\`. É só a **sonda** de disponibilidade (ver A), mas sem ela `findBrowser`/`findAdb`/`probeIsolation` nunca acham `.exe`. | `apps/runtime/src/providers.ts:18-24`; usado em `portal.ts:21`, `device.ts:18,24,30`, `isolation.ts:12,67,73`, `providers.ts:53-54` | `PATHEXT` + sem `X_OK` no Windows + reconhecer `\`. |
+| 6 | Socket unix `agent.sock` + `chmod`/`unlink`; `existsSync` num named pipe **abre uma conexão cliente** (efeito colateral). O CLI monta o caminho com concatenação `${d}/agent.sock` e `HOME`. | `config.ts:58`, `apps/runtime/src/index.ts:32,46,62,65-66`, `apps/cli/src/index.ts:12-14` | Pipe `\\.\pipe\messai-<hash(dataDir)>`; pular `chmod`/`unlink`/`existsSync` no Windows; `defaultSocket()` do CLI replicando a regra e usando `USERPROFILE`. `http.request({ socketPath })` e `listen({ path })` aceitam named pipe (suporte do `net` do Node — não é hipótese). |
 
 ### Alto
 | ID | Problema | Evidência | Correção |
 |---|---|---|---|
-| C | Chave **`PATH` vs `Path`**: copia `process.env` (`Path`) e grava `PATH` → duas chaves; `CLI_DIR` pode nunca entrar no PATH do terminal. | `service.ts:2047-2048`, `:1536-1537` | Normalizar a chave existente (case-insensitive). |
-| D | **Pasta de dados diverge**: desktop aceita ponteiro só se `startsWith("/")`; runtime aceita `isAbsolute`. Com `D:\MessAI`, desktop lê token no lugar errado → health falha → loop de restart. | `desktop/main/index.ts:15` vs `runtime/src/data.ts:20`, `index.ts:82-108` | Unificar com `isAbsolute`. |
-| E | **`findBrowser()` só conhece binários Linux**; Chrome/Edge não ficam no PATH no Windows → portais não funcionam. | `portal.ts:18-23` | Caminhos padrão de `msedge.exe` (presente em todo Win10/11) e `chrome.exe`; validar `--remote-debugging-pipe` (**hipótese**: funciona, é o que o Puppeteer usa). |
-| 3 | `resolveDefaultShell` → `$SHELL`/`/bin/bash`. | `config.ts:30-35` | Cadeia pwsh → powershell → `%COMSPEC%`. |
-| 4 | Desktop sobe runtime com `detached: true` → console; fallback `process.kill(pid,"SIGTERM")` vira `TerminateProcess` e o handler `SIGTERM` do runtime nunca roda (sem `shutdownAll()`). | `desktop/main/index.ts:101,75-76`, `runtime/index.ts:71` | `detached` só fora do Windows + `windowsHide: true`; fallback via `taskkill /T`. |
-| 5 | `/proc`/`ps` no monitor e em `pidOnPort`; `process.kill(-pid)` (grupo) lança e é engolido → Chrome headless, emulador e hooks órfãos. *(Correção: não há `kill(-pid)` em `sessions.ts` — lá é `proc.kill()` do node-pty, que funciona.)* | `procs.ts:12-23`, `desktop/main/index.ts:42-58`, `service.ts:1626`, `device.ts:196,242`, `portal.ts:256` | `killTree(pid)` → `taskkill /PID <pid> /T /F`; degradar monitor. |
-| K | **CRLF já está no working tree.** Este clone tem `core.autocrlf=true` e `git ls-files --eol` mostra `w/crlf` em `apps/cli/bin/mess`, `abrir.sh`, `scripts/package.mjs` e todos os `.ts`. Com `#!/bin/sh\r` o launcher não executa no Git Bash, e o launcher gerado por `package.mjs:31` herdaria o problema. Não há `.gitattributes` no repo. (**Verificado** nesta máquina.) | `apps/cli/bin/mess:1`, `package.mjs:31`, ausência de `.gitattributes` | `.gitattributes` (`* text=auto`, `*.sh`/`apps/cli/bin/mess`/`*.mjs` `eol=lf`, `*.cmd` `eol=crlf`) **e renormalizar o checkout** (`git add --renormalize .` + `git checkout -- .` ou re-clone com `core.autocrlf=false`). Teste no CI Windows: `bash.exe apps/cli/bin/mess --help`. |
-| M | **Nome do binário com `\` ou extensão quebra a detecção de agente.** `applyRole`/`applySkills` comparam `command.split("/").pop() === "claude"`; `agentKind` usa `/(^|[\s/])claude([\s/-]|$)/` — `C:\…\claude.cmd`, `claude.exe` ou `claude.cmd` não casam → sem papel/skills no system prompt, sem `--dangerously-skip-permissions`, sem pré-trust (`service.ts:2069-2071`), turno não detectado. Também vale se o usuário puser caminho completo no preset. | `domain:162-166`, `:292`, `:302`, `:841-845`; `sessions.ts:87` | `binaryName(command)` no `domain` (tira diretório por `/` **e** `\` e sufixo `.exe/.cmd/.ps1`) usado por `agentKind`/`applyRole`/`applySkills`. **E** o `resolveSpawnCommand()` de A roda só no `pty.spawn` (`sessions.ts:79`), nunca altera `session.command` gravado. Teste unitário com `C:\x\claude.cmd`. |
+| C | Chave **`PATH` vs `Path`**: copia `process.env` (`Path`) e grava `PATH` → duas chaves; `CLI_DIR` pode nunca entrar no PATH do terminal. | `service.ts:2050-2051` (`plan`), `:1538-1539` (`hookEnv`), `:2082` (`PATH: baseEnv["PATH"]!` no `wrapInTmux`) | Normalizar a chave existente (case-insensitive) num helper `prependPath`. |
+| D | **Pasta de dados diverge**: desktop aceita ponteiro só se `startsWith("/")`; runtime aceita `isAbsolute`. Com `D:\MessAI`, desktop lê token no lugar errado → health falha → loop de restart. | `desktop/main:15` vs `apps/runtime/src/data.ts:20`; `desktop/main:19` (`PORT`), `:24` (`runtime.token`) | Unificar com `isAbsolute` do `node:path`. |
+| E | **`findBrowser()` só conhece binários Linux**; Chrome/Edge não ficam no PATH no Windows → portais não funcionam. | `portal.ts:18-23`, erro em `:291` | Caminhos padrão de `msedge.exe` (presente em todo Win10/11) e `chrome.exe` (`Program Files`, `Program Files (x86)`, `LocalAppData`); validar `--remote-debugging-pipe` com fds 3/4 (**hipótese**: funciona, é o que o Puppeteer usa). |
+| 3 | `resolveDefaultShell` → `MESS_SHELL` > `userInfo().shell` (**rev. 6**: novo; no Windows devolve `null`) > `$SHELL` > `/bin/bash`. | `config.ts:31-35` | Cadeia pwsh → powershell → `%COMSPEC%` em `win32`. |
+| 4 | Desktop sobe runtime com `detached: true` → (**hipótese**) console; fallback `process.kill(pid,"SIGTERM")` vira `TerminateProcess` e o handler `SIGTERM` do runtime nunca roda (sem `shutdownAll()`). O caminho normal é o endpoint `/v1/shutdown` (`desktop/main:69`), que funciona no Windows. | `desktop/main:101`, `:75-76`, `apps/runtime/src/index.ts:71` | `detached` só fora do Windows + `windowsHide: true`; fallback via `taskkill /T`. |
+| 5 | `/proc`/`ps` no monitor e em `pidOnPort`; `process.kill(-pid)` (grupo) lança e é engolido → Chrome headless, emulador e hooks órfãos. | `procs.ts:12-23`, `desktop/main:42-57`, `service.ts:1628`, `device.ts:196,242`, `portal.ts:256` | `killTree(pid)` → `taskkill /PID <pid> /T /F`; degradar monitor. |
+| K | **CRLF já está no working tree da máquina Windows.** O clone lá tem `core.autocrlf=true` e `git ls-files --eol` mostra `w/crlf` em `apps/cli/bin/mess`, `abrir.sh`, `scripts/package.mjs` e todos os `.ts`. (**Verificado na máquina Windows**; no Linux o índice está `i/lf` em todos — conferido na rev. 6.) Com `#!/bin/sh\r` o launcher não executa no Git Bash, e o launcher gerado por `package.mjs:31` herdaria o problema. Não há `.gitattributes` no repo. | `apps/cli/bin/mess:1`, `package.mjs:31`, ausência de `.gitattributes` | `.gitattributes` (conteúdo exato na seção "Guia prático", §10.2) **e renormalizar o checkout**. Teste no CI Windows: `bash.exe apps/cli/bin/mess --help`. |
+| M | **Nome do binário com `\` ou extensão quebra a detecção de agente.** `applyRole`/`applySkills` comparam `command.split("/").pop() === "claude"`; `agentKind` usa `/(^|[\s/])claude([\s/-]|$)/` — `C:\…\claude.cmd`, `claude.exe` ou `claude.cmd` não casam → sem papel/skills, sem `--dangerously-skip-permissions` (**rev. 6**: agora via `withAgentAutonomy` → `withClaudeAutonomy`, que também depende de `agentKind`; o mesmo vale para codex/agy/opencode), sem pré-trust (`service.ts:2072`), turno não detectado (`sessions.ts:87`, `:326`). | `domain:161-172` (`AGENT_BINS`/`agentKind`), `:292`, `:302`, `:855-865` (`withClaudeAutonomy`), `:880-903` (`AGENT_AUTONOMY`/`withAgentAutonomy`); `sessions.ts:87` | `binaryName(command)` no `domain` (tira diretório por `/` **e** `\` e sufixo `.exe/.cmd/.ps1`) usado por `agentKind`/`applyRole`/`applySkills`. **E** o `resolveSpawnCommand()` de A roda só no `pty.spawn` (`sessions.ts:79`), nunca altera `session.command` gravado. Teste unitário com `C:\x\claude.cmd` e `codex.cmd`. |
 
 ### Médio
 | ID | Problema | Evidência | Correção |
 |---|---|---|---|
-| F | Rotinas com **`/bin/sh -c` fixo**; hooks com `<shell> -c` (pwsh aceita `-c`, `cmd` exige `/c`). | `service.ts:408`, `:1584`, `:1874` | Usar `defaultShell` com flag certa por shell; documentar "PowerShell no Windows". |
-| G | Hint/skills ensinam sintaxe POSIX (`$MESS_CLI`, aspas simples). Codex no Windows usa PowerShell (`$env:MESS_CLI`). | `presets.ts:9`, `skills/*/SKILL.md` | Variante do hint por plataforma/shell, ou exigir Git Bash. |
-| H | **Bracketed paste** (`\x1b[200~…`) no ConPTY depende da versão do Windows → briefing pode chegar solto/sem Enter (**hipótese**). **Encoding**: console em codepage OEM/1252 → mojibake em pt-BR. | `sessions.ts:226-230`, `:97`, `:171` | Testar `deliver` no ConPTY; forçar UTF-8 (`chcp 65001` / `[Console]::OutputEncoding`) no shell spawnado. |
-| N | **`detached: true` em processos de console abre janela de console no Windows** (hooks, emulador, scrcpy) e `stdio: "pipe"` não impede. Para o Chrome (GUI) não há janela, mas o `detached` deixa de fazer sentido sem `kill(-pid)`. | `service.ts:1584`, `device.ts:184,222`, `portal.ts:101`, `desktop/main/index.ts:101` | `windowsHide: true` em todo `spawn` de processo auxiliar; `detached` só fora do Windows (ver #4/F). |
-| I | `0o600`/`chmod` são no-op no Windows; fora de `%USERPROFILE%` (ex.: `D:\MessAI`) o `runtime.token` (token mestre) fica legível por `Users`. | `config.ts:46-53`, `runtime/index.ts:67`, `data.ts:20,96-99`, `service.ts:1330-1334` | Ajustar ACL (`icacls`) ou avisar na UI ao mover a pasta de dados para fora do perfil. |
-| J | Encerramento forçado/logoff deixa órfãos (claude.exe, pwsh, Chrome, emulador). | `desktop/main/index.ts:75-76` | Job Object (kill-on-close) amarrando filhos ao runtime; no mínimo `taskkill /T` também no fallback. |
-| L | Empacotamento: `package.mjs:50` `--linux` fixo; desktop só tem target `linux`, sem `.ico`. **node-pty 1.0.0 não tem prebuild Windows** → compila do fonte e exige VS Build Tools **com libs Spectre-mitigated** (ponto clássico de falha). **`portable` não tem auto-update.** SmartScreen bloqueia instalador **e cada update** sem assinatura. | `package.mjs:31,50`, `apps/desktop/package.json:45-53`, `desktop/main/index.ts:317` | Ver Fase 3. |
-| 7 | `abrir.sh` é bash (`ss`, `/proc`, `wmctrl`). | `abrir.sh:1` | `abrir.ps1` ou documentar `npm run dev`. |
+| F | Rotinas com **`/bin/sh -c` fixo**; hooks com `<defaultShell> -c` (pwsh aceita `-c`, `cmd` exige `/c`). | `service.ts:410` (rotinas), `:1586` (hook `run`), `:1876` (teardown) | `shellCommandArgs(shell, cmd)` por shell; documentar "PowerShell no Windows". |
+| G | Hint/skills ensinam sintaxe POSIX (`"$MESS_CLI"`, aspas simples). Codex no Windows usa PowerShell (`$env:MESS_CLI`). | `presets.ts:9`, `skills/*/SKILL.md:9-16` | Variante do hint por plataforma/shell, ou exigir Git Bash; `MESS_CLI_CMD` nas skills. |
+| H | **Bracketed paste** (`\x1b[200~…`) no ConPTY depende da versão do Windows → briefing pode chegar solto/sem Enter (**hipótese**). **Encoding**: console em codepage OEM/1252 → mojibake em pt-BR. | `sessions.ts:222-231` (`deliver`: paste + `\r` atrasado 2×), `:97` (`onData`) | Testar `deliver` no ConPTY; forçar UTF-8 (`chcp 65001` / `[Console]::OutputEncoding`) no shell spawnado. |
+| N | **`detached: true` em processos de console pode abrir janela de console no Windows** (hooks, emulador, scrcpy) — **hipótese** (a doc do Node diz "terá seu próprio console"; o libuv usa `DETACHED_PROCESS`, que *não* cria janela — só o teste decide). Nenhum `spawn` do repo usa `windowsHide`. | `service.ts:1586`, `device.ts:184,222`, `portal.ts:101`, `desktop/main:101`; `grep windowsHide` = 0 ocorrências | `windowsHide: true` em todo `spawn` auxiliar; `detached` só fora do Windows (ver #4/F). |
+| I | `0o600`/`0o700`/`chmod` são no-op no Windows; fora de `%USERPROFILE%` (ex.: `D:\MessAI`) o `runtime.token` (token mestre) fica legível por `Users`. | `config.ts:46-53`, `apps/runtime/src/index.ts:66-67`, `data.ts:20,96-99`, `service.ts:1332-1336` (anexos), `desktop/main:99` | Ajustar ACL (`icacls`) ou avisar na UI ao mover a pasta de dados para fora do perfil. |
+| J | Encerramento forçado/logoff deixa órfãos (claude.exe, pwsh, Chrome, emulador). | `desktop/main:75-76` | Job Object (kill-on-close) amarrando filhos ao runtime; no mínimo `taskkill /T` também no fallback. |
+| L | Empacotamento: `package.mjs:50` `--linux` fixo; desktop só tem target `linux` (`apps/desktop/package.json:45-53`), sem `.ico`. **node-pty 1.0.0 não tem prebuild Windows** (`hasInstallScript` no lock) → compila do fonte em todo `npm ci` e exige VS Build Tools **com libs Spectre-mitigated** (ponto clássico de falha). better-sqlite3 13 tem prebuild para Node e para Electron (**hipótese**: `electron-rebuild` aproveita via `prebuild-install`). **`portable` não tem auto-update.** SmartScreen bloqueia instalador **e cada update** sem assinatura. `execSync` com `"${bin("esbuild")}"` (sem `.cmd`) e `--banner:js="…;…"` passam pelo `cmd.exe` (**hipótese**: funciona, `cmd` aplica PATHEXT a caminho completo). | `package.mjs:26,30,31,41,50`, `apps/desktop/package.json:45-53`, `desktop/main:249-263,392-393` (auto-update) | Ver Fase 3. |
+| O | **Testes unitários Linux-only na suíte `packages apps`** (**rev. 6, novo**): `procs.test.ts` lê `/proc` e exige `rssKb > 0` → falha no Windows; `agents.test.ts:16` cria `fake-cli` com `#!/bin/sh` + `chmod 0o755` e espera `whichOnPath` achar (**hipótese**: passa, porque no Windows `accessSync(X_OK)` não verifica execução — mas vira teste sem sentido). O job `windows-latest` da Fase 2 roda exatamente essa suíte. | `apps/runtime/src/procs.test.ts:5-11`, `agents.test.ts:13-20` | `it.skipIf(process.platform === "win32")` nos casos `/proc`; no `agents.test`, criar `fake-cli.cmd` no Windows (cobre #2 com `PATHEXT`). `systemd.test.ts`, `presets.test.ts` (`"/bin/sh"` explícito), `data.test.ts` (`isAbsolute("/x/y")` é `true` em win32) e os testes puros do `domain`/`storage` passam. |
+| P | **`O_NOFOLLOW` não existe no Windows** (**rev. 6, novo**): `fs.constants.O_NOFOLLOW` é `undefined` → `flags | undefined` = `flags` (não lança), mas a proteção contra escrever através de symlink/junction no editor de arquivos some. `isWithinCanonicalRoot` compara caminhos com caixa sensível; NTFS não diferencia (`C:\Users` = `c:\users`) e `realpathSync` pode devolver caixa diferente da gravada no espaço (**hipótese**) → falso `FORBIDDEN`. | `service.ts:1069`, `:1076`; `domain:443-452` | No Windows: `lstatSync` + `isSymbolicLink()` antes do `openSync`; `isWithinCanonicalRoot` com `toLowerCase()` em `win32`. Teste com `C:\A\b` vs `c:\a\b`. |
+| Q | **`SHELL=<defaultShell>` é exportado ao agente** (**rev. 6, novo**): no Windows viraria `SHELL=…\pwsh.exe`. O Claude Code no Windows exige **Git Bash** e procura via `CLAUDE_CODE_GIT_BASH_PATH`/PATH; um `SHELL` apontando para pwsh pode confundir a detecção (**hipótese**). | `service.ts:2068` (`SHELL: this.cfg.defaultShell`) | Em `win32`, não exportar `SHELL` (ou exportar o `bash.exe` do Git quando existir); nunca pwsh. |
+| S | **Reflink e `MESS_FORCE_COW`** (**rev. 6, novo**): sonda `COPYFILE_FICLONE_FORCE` falha em NTFS → andares copiados integralmente (lento em repos grandes), sem erro. | `service.ts:1355-1364`, `:1448` | Aceitar a degradação; medir no smoke com um repo de ~500 MB; documentar. |
+| T | **Symlinks na cópia de andares** exigem privilégio ou Modo Desenvolvedor no Windows (**rev. 6, novo**); hoje `try/catch` engole → link some sem aviso. | `service.ts:1442`, `:1449` (`chmodSync` no-op) | Logar os links não copiados no status do andar; documentar "ative o Modo Desenvolvedor". |
+| 7 | `abrir.sh` é bash (`ss`, `/proc`, `wmctrl`). | `abrir.sh:1` | `abrir.ps1` ou documentar `npm run desktop`. |
 
 ### Baixo (fazer junto, custo mínimo)
-- `process.on("SIGUSR2")` no main do Electron — guardar por plataforma (**hipótese**: pode lançar no Windows) — `desktop/main/index.ts:394`.
-- Filtro de env de nota secreta é case-sensitive (`/^(PATH|SHELL)$/`, `MESS_`) → no Windows uma nota `path` sobrescreve o PATH — `service.ts:2034`.
-- Preset `shell` persiste `command: defaultShell` no banco; backup importado do Linux traz `/bin/bash` — normalizar no boot — `presets.ts:16`.
-- systemd: **nada a ocultar** — não há opção na UI; o desktop já guarda com `process.platform === "linux"` (`desktop/main/index.ts:87`) e a unidade só é instalada pelo CLI separado `messai-runtime-service` (`service-cli.ts`, `systemd.ts`). Opcional: mensagem "só Linux" nesse CLI. *(A rev. 4 mandava ocultar uma opção que não existe.)*
-- `HOME` inexistente no Windows (`cli/index.ts:12`); `expandHome` só trata `~/` (`domain:665`).
-- `split("/").pop()` / `includes("/")` para nomes — cosmético — `service.ts:1955`, `desktop/main/index.ts:309`, `TreeNode.tsx:39,45,54`, `PrefsAgents.tsx:167`.
-- `ci.yml:6` só dispara em push para `main`/`auto/**` — push em `windows_version` **não roda CI** (PR roda). Adicionar `windows_version` à lista.
-- Ícone: `build/icon.png` é **512×512** (verificado no cabeçalho PNG) — o electron-builder gera o `.ico` sozinho a partir dele; `.ico` próprio é opcional.
-- Já OK (verificado): `safeRelPath` trata `\` e drive (`domain:433-436`); `isWithinCanonicalRoot` normaliza `\` (`domain:444`); `COPYFILE_FICLONE`/`symlinkSync` degradam em `try/catch`; `git.ts` usa `execFile("git")` sem shell; `skills.ts` só usa `join`/`cpSync`; Fastify/`http.request` aceitam `\\.\pipe\…` (named pipe é suportado pelo `net` do Node — não é hipótese).
+- `process.on("SIGUSR2")` no main do Electron — guardar por plataforma (**hipótese**: no Windows o Node não define `SIGUSR2` em `os.constants.signals` → vira listener inerte, não lança; guardar mesmo assim por clareza) — `desktop/main:408`.
+- Filtro de env de nota secreta é case-sensitive (`/^(PATH|SHELL)$/`, `MESS_`) → no Windows uma nota `path` sobrescreve o PATH — `service.ts:2037`.
+- Preset `shell` persiste `command: defaultShell` no banco; backup importado do Linux traz `/bin/bash` — normalizar no boot — `presets.ts:14-16`.
+- systemd: **nada a ocultar** — não há opção na UI; o desktop já guarda com `process.platform === "linux"` (`desktop/main:87`) e a unidade só é instalada pelo CLI separado `messai-runtime-service` (`apps/runtime/src/service-cli.ts`, `systemd.ts`). Opcional: mensagem "só Linux" nesse CLI.
+- `HOME` inexistente no Windows (`apps/cli/src/index.ts:13`); `expandHome` só trata `~/` (`domain:684`).
+- `split("/").pop()` / `includes("/")` para nomes — cosmético — `service.ts:945`, `:1958`, `desktop/main:322`, `apps/desktop/src/renderer/src/TreeNode.tsx:39,45,54`, `PrefsAgents.tsx:167`.
+- `ci.yml:6` só dispara em push para `main`/`auto/**` — push em `windows_version` **não roda CI** (PR roda). Adicionar `windows_version` e `win/**` à lista.
+- **V** (**rev. 6, novo, hipótese**): `ensureClaudeTrust` grava `~/.claude.json` → `projects[cwd]` com o `cwd` como o Node devolve (`C:\Users\…`, barras invertidas). Se o Claude Code no Windows indexar com outra grafia (barra normal/caixa), o pré-trust não vale e o diálogo "trust this folder" volta a fechar o briefing. `service.ts:3204-3214`. Validar no smoke: recrutar Claude num diretório novo e ver se o diálogo aparece.
+- Ícone: `apps/desktop/build/icon.png` é **512×512** — o electron-builder gera o `.ico` sozinho; `.ico` próprio é opcional.
+- Já OK (verificado): `safeRelPath` trata `\` e drive (`domain:432-437`); `isWithinCanonicalRoot` normaliza `\` (`domain:444`, mas ver P); `COPYFILE_FICLONE`/`symlinkSync` degradam em `try/catch` (ver S/T); `git.ts:8` usa `execFile("git")` sem shell; `skills.ts` só usa `join`/`cpSync` e instala em `%USERPROFILE%\.claude\skills` etc. (`skills.ts:11-17,33-43`); `accounts.ts` só lê `~/.claude`/`~/.codex`; `rmSync` do perfil do Chrome tem `maxRetries` (`portal.ts:257`, bom para locks do Windows); `desktop/main:96` usa `node` do PATH (`MESS_NODE`) em dev e `process.execPath` + `ELECTRON_RUN_AS_NODE` empacotado — funciona no Windows; o endpoint `/v1/shutdown` é o caminho normal de parada (`desktop/main:69`).
 
 ---
 
@@ -76,306 +84,152 @@ Por quê (verificado no código):
 
 ### Fase 0 — Máquina Windows + ferramentas (0,5–1 dia) ⟵ começar aqui
 - [ ] Máquina: **esta** (Windows 11 Pro, Git for Windows 2.56 já instalado). VM só se o dono não quiser sujar a máquina de trabalho.
-- [ ] Instalar o que falta (**verificado ausente**): Node 22 (`engines` exige `>=22 <23`, `package.json:12`), `pwsh` 7 (opcional — o fallback é o 5.1), VS Build Tools (C++ + **Spectre libs**, exigido pelo `binding.gyp` do node-pty 1.0.0, que não traz prebuild e compila em todo `npm ci`), Claude Code, Codex, Chrome/Edge.
-- [ ] **`.gitattributes` + renormalizar o checkout (K)** antes de qualquer `npm ci` — o working tree já está em CRLF.
-- [ ] Validar hipóteses A, B, E, H com micro-scripts fora do repo (lista em §7 da seção de execução) **antes** de codar A/E/H.
+- [ ] Instalar o que falta (**verificado ausente**): Node 22 (`engines` exige `>=22 <23`, `package.json:12`), Python 3, VS Build Tools (C++ + **Spectre libs**), `pwsh` 7 (opcional), Claude Code, Codex, Chrome/Edge. Comandos em §10.1.
+- [ ] **`.gitattributes` + renormalizar o checkout (K)** antes de qualquer `npm ci` — o working tree já está em CRLF. Conteúdo em §10.2.
+- [ ] `npm ci` uma vez e ver o node-pty compilar; `npm run build`; `npx vitest run packages apps` (esperado: só `procs.test.ts` falha — item O).
+- [ ] Validar hipóteses A, B, E, H, N, Q, V com micro-scripts fora do repo (lista em §11) **antes** de codar A/E/H.
 
-### Fase 1 — Núcleo multiplataforma (runtime + CLI) (6–9 dias)
+### Fase 1 — Núcleo multiplataforma (runtime + CLI + domain) (3–5 dias)
 - [ ] `whichOnPath` com `PATHEXT`, sem `X_OK`, reconhecendo `\` (#2).
 - [ ] **`resolveSpawnCommand()`** no spawn do PTY + **texto longo fora do argv** no Windows (A).
-- [ ] Shell padrão Windows (#3).
-- [ ] Named pipe (#6), pulando `chmod`/`unlink`/`existsSync`.
-- [ ] Launcher `mess.cmd` + sh robusto a `\`; `MESS_CLI` POSIX + `MESS_CLI_CMD`; aspas no hint/skills (#1, B, G).
+- [ ] Shell padrão Windows (#3); não exportar `SHELL=pwsh` ao agente (Q).
+- [ ] Named pipe (#6), pulando `chmod`/`unlink`/`existsSync`; `defaultSocket` do CLI.
+- [ ] Launcher `mess.cmd` + sh robusto a `\`; `MESS_CLI` POSIX + `MESS_CLI_CMD`; nota pwsh nas skills (#1, B, G).
 - [ ] Normalizar chave `PATH` (C).
 - [ ] Unificar `resolveDataDir` desktop/runtime (D).
 - [ ] `findBrowser()` com Edge/Chrome do Windows (E).
-- [ ] Rotinas/hooks com `defaultShell` (F).
+- [ ] Rotinas/hooks com `shellCommandArgs` (F).
 - [ ] `killTree()` + monitor degradado (#5); `windowsHide` em hooks/emulador/scrcpy/Chrome (N); desktop `detached` só fora do Windows + fallback `taskkill` (#4).
-- [ ] `binaryName()` no `domain` para `agentKind`/`applyRole`/`applySkills` (M).
-- [ ] Rejeitar `isolation` no Windows; `tmuxAvailable()` → `false` em `win32`.
+- [ ] `binaryName()` no `domain` para `agentKind`/`applyRole`/`applySkills`/`withAgentAutonomy` (M).
+- [ ] Rejeitar `isolation` no Windows (`service.ts:1940-1942` e `:3004`); `tmuxAvailable()` → `false` em `win32`.
+- [ ] `O_NOFOLLOW` → `lstat` no Windows; `isWithinCanonicalRoot` sem caixa em `win32` (P).
 - [ ] Itens "Baixo" (SIGUSR2, filtro case-insensitive, preset shell, `HOME`/`expandHome`, `includes("/")`).
-- [ ] **Testes unitários** (rodam no Linux e no `windows-latest`): `whichOnPath`+`PATHEXT`; `resolveSpawnCommand`; `binaryName` com `C:\x\claude.cmd`; normalização `PATH`; nome do pipe; tamanho da linha de comando (papel+skills ≤ 30 k ou via env/arquivo); `resolveDataDir` com `C:\`; `shellCommandArgs` por shell.
+- [ ] **Testes unitários** (rodam no Linux e no `windows-latest`): `whichOnPath`+`PATHEXT`; `resolveSpawnCommand`; `binaryName` com `C:\x\claude.cmd`; normalização `PATH`; nome do pipe; tamanho da linha de comando (≤ 30 k ou via env); `resolveDataDir` com `C:\`; `shellCommandArgs` por shell; `isWithinCanonicalRoot` sem caixa. **E** `skipIf(win32)` em `procs.test.ts` + `fake-cli.cmd` em `agents.test.ts` (O).
 
-### Fase 3 — Empacotamento Windows (2–4 dias) ⟵ **em paralelo à Fase 1**
-> Antecipada: o `electron-rebuild` do node-pty no runner Windows é o risco de infra mais incerto e não depende do código do runtime. Um `.exe` cedo permite testar na VM.
-- [ ] `apps/desktop/package.json`: target `win` → **`nsis`** (auto-update); `portable` só se aceitarmos "sem auto-update"; ícone vem de `build/icon.png` (512 px, basta) — `.ico` só se quisermos arte própria.
-- [ ] `package.yml`: job `windows-latest` com `@electron/rebuild --force` (node-pty, better-sqlite3), cache, publish no mesmo release da tag (`latest.yml`). Conferir que o runner tem as **Spectre libs** (se não, instalar via `vs_installer modify` no job — **hipótese**: primeira falha provável do job).
-- [ ] `package.mjs`: remover `--linux` fixo (`:50`); gerar `mess.cmd` + `cli.mjs` em `resources/cli` (`:31`); skills incluídas. Conferir no Windows o `execSync` com aspas (`:26,:30`: o `.bin/esbuild` é `.cmd`, e o `--banner:js` leva aspas simples e `;` — **hipótese**: funciona via `cmd.exe`, mas é o ponto a testar primeiro).
-- [ ] Pós-build no CI: `MessAI.exe` com `ELECTRON_RUN_AS_NODE=1 resources\cli\cli.mjs --help` (validar stdout — **hipótese**: binário GUI pode não emitir no console).
+### Fase 3 — Empacotamento Windows (2–4 dias) ⟵ **em paralelo à Fase 1** (Trilha 2)
+> Antecipada: o `electron-rebuild` do node-pty no runner Windows é o risco de infra mais incerto e não depende do código do runtime. Um `.exe` cedo permite testar na máquina.
+- [ ] `apps/desktop/package.json`: bloco `build.win` com target **`nsis`** (auto-update); `portable` só se aceitarmos "sem auto-update"; ícone vem de `build/icon.png`.
+- [ ] `package.yml`: job `windows-latest` com `@electron/rebuild --force` (node-pty, better-sqlite3), cache, publish no mesmo release da tag (`latest.yml`). Conferir que o runner tem as **Spectre libs** (se não, `vs_installer modify` no job — **hipótese**: primeira falha provável do job).
+- [ ] `package.mjs`: remover `--linux` fixo (`:50`) e escolher por `process.platform`/flag; gerar `mess.cmd` + `cli.mjs` em `resources/cli` (`:31`); skills incluídas (`:44`). Conferir no Windows o `execSync` com aspas (`:26`, `:30`, `:41`).
+- [ ] Pós-build no CI: `ELECTRON_RUN_AS_NODE=1 MessAI.exe resources\cli\cli.mjs --help` (validar stdout — **hipótese**: binário GUI pode não emitir no console; alternativa: redirecionar para arquivo).
 
-### Fase 2 — CI Windows + smoke real (2–3 dias)
-- [ ] Job `windows-latest` em `ci.yml`: `npm ci`, `npm run build`, `vitest run packages apps` (**sem** `tests/integration`). Adicionar `windows_version` aos `branches` do `push` (`ci.yml:6`), senão só PR dispara.
-- [ ] Smoke headless **pelo caminho real** (`scripts/smoke-windows.mjs`): runtime → `/v1/health` → terminal **`powershell -NoProfile`** (e `pwsh` se houver) executando `mess context` e `mess note write`; o mesmo via **Git Bash** (`C:\Program Files\Git\bin\bash.exe`, existe no runner) chamando `"$MESS_CLI" context`; `deliver` com `\r` chegando como uma linha; saída com acento (`echo "diretório"`) correta no buffer.
-- [ ] e2e Playwright/Electron em `windows-latest` (há sessão gráfica): ao menos `pilot`, `prefs`, `portal`.
-- [ ] **Suíte de integração é Linux-only por construção**: **todos os 43** arquivos de `tests/integration` sobem o runtime com `spawn("node", …)` e dirigem terminais com `/bin/sh`/`MESS_SHELL=/bin/sh` (ex.: `shell.test.ts:18,26`). Não vale editar 43 arquivos com `skipIf`: basta **não incluir `tests/integration` no job Windows** (o `ci.yml` Linux continua rodando tudo). Em vez disso, o smoke acima cobre o caminho real no Windows; depois, portar 3–4 testes-chave (`shell`, `notes`, `lifecycle`, `routines`) para uma variante `*.win.test.ts` com `powershell`.
+### Fase 2 — CI Windows + smoke real (1,5–2,5 dias)
+- [ ] Job `windows-latest` em `ci.yml`: `npm ci`, `npm run build`, `npm rebuild node-pty better-sqlite3` (como o job Linux faz em `ci.yml:28`), `npx vitest run packages apps` (**sem** `tests/integration`). Adicionar `windows_version` e `win/**` aos `branches` do `push` (`ci.yml:6`).
+- [ ] Smoke headless **pelo caminho real** (`scripts/smoke-windows.mjs`): runtime → `/v1/health` → terminal **`powershell -NoProfile`** (e `pwsh` se houver) executando `mess context` e `mess note write`; o mesmo via **Git Bash** (`C:\Program Files\Git\bin\bash.exe`, existe no runner) chamando `"$MESS_CLI" context`; `deliver` com `\r` chegando como uma linha; saída com acento (`echo "diretório"`) correta no buffer. Roteiro manual equivalente em §10.3.
+- [ ] e2e Playwright/Electron em `windows-latest`: **R** (**rev. 6, novo**) — todos os `tests/e2e/*.test.ts` sobem o runtime com `spawn("node", …)` e `SHELL: "/bin/sh"` (ex.: `tests/e2e/about-updates.test.ts:17,21`) → portar o helper de boot para `MESS_SHELL` por plataforma antes de rodar `pilot`, `prefs`, `portal`.
+- [ ] **Suíte de integração é Linux-only por construção**: **todos os 43** arquivos de `tests/integration` dirigem terminais com `/bin/sh`/`MESS_SHELL=/bin/sh` (ex.: `shell.test.ts:18,26`). Não vale editar 43 arquivos com `skipIf`: basta **não incluir `tests/integration` no job Windows**. Depois, portar 3–4 testes-chave (`shell`, `notes`, `lifecycle`, `routines`) para uma variante `*.win.test.ts` com `powershell`.
 
-### Fase 4 — Portais, dispositivos, paste/encoding (3–5 dias)
+### Fase 4 — Portais, dispositivos, paste/encoding (2–4 dias)
 - [ ] Portais: CDP por pipe com Edge/Chrome no Windows.
-- [ ] adb/emulator/scrcpy `.exe` + `ANDROID_SDK_ROOT`/`MESS_*`; documentar instalação.
+- [ ] adb/emulator/scrcpy `.exe` + `ANDROID_SDK_ROOT`/`MESS_ADB`/`MESS_EMULATOR`/`MESS_SCRCPY` (`device.ts:15-30`); documentar instalação.
 - [ ] Bracketed paste e UTF-8 no ConPTY (H); ajustar `deliver` se preciso.
-- [ ] ACL da pasta de dados fora do perfil (I); Job Object para órfãos (J).
+- [ ] ACL da pasta de dados fora do perfil (I); Job Object para órfãos (J); log de symlinks não copiados (T); medir cópia de andar (S).
 
-### Fase 5 — Dev no Windows (0,5–1 dia)
-- [ ] `abrir.ps1` (build + subir app) ou documentar `npm run dev`.
+### Fase 5 — Dev no Windows (0,5 dia)
+- [ ] `abrir.ps1` (build + subir app) ou documentar `npm run desktop`.
 
-### Fase 6 — Release + teste manual (3–5 dias)
-- [ ] **Assinatura de código** (Azure Trusted Signing é barato) **antes do primeiro release público** — SmartScreen bloqueia instalação e cada update. Ao assinar, conferir o `publisherName` em `build.win` (o electron-updater no Windows valida a assinatura do instalador baixado contra ele — **inferência** da documentação do electron-updater, não verificada aqui).
+### Fase 6 — Release + teste manual (2–4 dias)
+- [ ] **Assinatura de código** (Azure Trusted Signing) **antes do primeiro release público** — SmartScreen bloqueia instalação e cada update. electron-builder 25 tem `win.azureSignOptions` (**hipótese**: disponível na 25.1.8; senão `signtool`/`AzureSignTool` em passo próprio). Conferir `publisherName` (o electron-updater valida a assinatura do instalador baixado — inferência da documentação).
 - [ ] Tag de pré-release com Linux + Windows no mesmo release.
-- [ ] Teste manual na VM **a cada fase** (não só no fim) + rodada final: instalar, espaço, terminal, nota, portal, recrutar agente (Claude e Codex), nota secreta, auto-update.
+- [ ] Teste manual na máquina **a cada fase** (não só no fim) + rodada final: instalar, espaço, terminal, nota, portal, recrutar agente (Claude e Codex), nota secreta, auto-update.
 - [ ] Página de instalação do **WSL2** como caminho suportado.
 
 ## Estimativa
-| Fase | Dias-pessoa (rev. 4) | Dias-pessoa (rev. 5) | Por quê mudou |
+| Fase | Dias-pessoa (rev. 5) | Dias-pessoa (rev. 6) | Por quê mudou |
 |---|---|---|---|
-| 0 — Máquina + ferramentas | 1 | 0,5–1 | máquina já é Windows; só instalar Node/VS Build Tools e normalizar CRLF |
-| 1 — Núcleo multiplataforma | 6–9 | **3–5** | o próprio mapa de acoplamento da rev. 4 mostra: 2 módulos novos (~200 linhas), ~10 call-sites de 1 linha em `service.ts`, ajustes pontuais em ~12 arquivos, mais testes. 6–9 dias assumia coordenação entre 3 agentes |
-| 3 — Empacotamento (paralelo à 1) | 2–4 | 2–4 | inalterado: é a incerteza de infra (node-pty + MSVC + Spectre no runner) |
-| 2 — CI + smoke real | 2–3 | 1–2 | sem os 43 `skipIf`; smoke é um script |
-| 4 — Portais/dispositivos/encoding | 3–5 | 2–4 | portais dependem da hipótese E; se confirmada, é `findBrowser` + teste |
-| 5 — Dev no Windows | 0,5–1 | 0,5 | `abrir.ps1` mínimo ou só `npm run dev` documentado |
-| 6 — Release + teste manual | 3–5 | 2–4 | + espera externa da assinatura |
-| **Total** | **17–28** | **11–20** | julgamento a partir do código lido, não medido |
+| 0 — Máquina + ferramentas | 0,5–1 | 0,5–1 | — |
+| 1 — Núcleo multiplataforma | 3–5 | **3,5–5,5** | + P (lstat/caixa) + Q + ajustes de testes unitários (O) |
+| 3 — Empacotamento (paralelo à 1) | 2–4 | 2–4 | inalterado: incerteza de infra (node-pty + MSVC + Spectre no runner) |
+| 2 — CI + smoke real | 1–2 | **1,5–2,5** | + porte do helper e2e (R) |
+| 4 — Portais/dispositivos/encoding | 2–4 | 2–4 | — |
+| 5 — Dev no Windows | 0,5 | 0,5 | — |
+| 6 — Release + teste manual | 2–4 | 2–4 | + espera externa da assinatura |
+| **Total** | **11–20** | **12–21** | julgamento a partir do código lido, não medido |
+
+Relógio de parede com 2 trilhas em paralelo (§9): **8–12 dias úteis**.
 
 ## Riscos & mitigação
 | Risco | Mitigação |
 |---|---|
-| Sem máquina Windows | **Resolvido**: esta máquina é Windows 11. Smoke pelo caminho real (PTY→shell→`mess`→pipe) no CI complementa, não substitui. |
 | CRLF (K) | `.gitattributes` + renormalizar antes do primeiro `npm ci`; `bash.exe apps/cli/bin/mess --help` no CI Windows. |
 | Detecção de agente com `.exe/.cmd` (M) | `binaryName()` + `session.command` sempre o nome lógico (`claude`), resolução só no `pty.spawn`. |
 | Spawn/argv do agente (A) | `resolveSpawnCommand` + texto longo fora do argv + teste de tamanho. |
-| Agentes via Git Bash (B, C) | `MESS_CLI` POSIX, chave `PATH` normalizada, smoke via `bash.exe`. |
-| Addons nativos | Runner Windows + Spectre libs + `electron-rebuild --force` + cache; **nunca `npm run package` na máquina de dev** (lição da ABI). |
-| SmartScreen/Defender | Assinar antes do 1º release público; Defender pode flagar `winpty-agent.exe`/Chrome headless. |
+| Agentes via Git Bash (B, C, Q) | `MESS_CLI` POSIX, chave `PATH` normalizada, sem `SHELL=pwsh`, smoke via `bash.exe`. |
+| Addons nativos | Runner Windows + Spectre libs + `electron-rebuild --force` + cache; **nunca `npm run package` na máquina de dev** (lição da ABI — §10.2). |
+| SmartScreen/Defender | Assinar antes do 1º release público; Defender pode flagar `winpty-agent.exe`/Chrome headless — exclusão da pasta do repo. |
 | Encoding/paste (H) | UTF-8 forçado + teste de `deliver` no ConPTY. |
 | Órfãos (J) | Job Object; `taskkill /T` no fallback. |
+| Suíte unitária vermelha no Windows (O) | `skipIf` cirúrgico nos casos `/proc`; contagem de testes Linux inalterada. |
+| Hipótese refutada no meio da Fase 1 (ex.: ConPTY sem bracketed paste) | Fase 0 existe para isso; quem cair vira item isolado; a outra trilha não para. |
 
 ## Fora de escopo (por ora)
 Tauri / GUI nativa · Windows Sandbox/Job Objects como *modo isolado* (o Job Object da Fase 4 é só ciclo de vida) · runtime híbrido no WSL.
 
 ## Prioridades (próximos passos, em ordem)
-0. `.gitattributes` + renormalizar o checkout (K); instalar Node 22 e VS Build Tools; `npm ci` uma vez e ver o node-pty compilar.
-1. Validar hipóteses A/B/E/H com micro-scripts (meio dia).
+0. `.gitattributes` + renormalizar o checkout (K); instalar Node 22, Python, VS Build Tools; `npm ci` uma vez e ver o node-pty compilar.
+1. Validar hipóteses A/B/E/H/N/Q/V com micro-scripts (meio dia).
 2. `resolveSpawnCommand()` + texto longo fora do argv (A) + `binaryName()` (M).
-3. Chave `PATH` + `MESS_CLI` POSIX/`.cmd` + aspas no hint (B, C, G).
+3. Chave `PATH` + `MESS_CLI` POSIX/`.cmd` + `SHELL` (B, C, G, Q).
 4. `resolveDataDir` unificado (D).
 5. Named pipe sem `existsSync`/`chmod`/`unlink` (#6).
 6. `killTree()` + fallback do desktop (#4, #5, J).
 7. `findBrowser()` Windows (E).
-8. Hooks/rotinas em `defaultShell` (F).
-9. Empacotamento NSIS em paralelo desde já (Fase 3).
-10. UTF-8/paste (H) · ACL (I) · assinatura · itens baixos.
+8. Hooks/rotinas em `shellCommandArgs` (F).
+9. Empacotamento NSIS em paralelo desde já (Fase 3, Trilha 2).
+10. UTF-8/paste (H) · `O_NOFOLLOW`/caixa (P) · ACL (I) · assinatura · itens baixos.
 
 ---
 
-## Execução multi-agente (100% IA numa máquina Windows)
+## 9. Execução em 2 trilhas (agentes de IA na máquina Windows)
 
-> Como executar este plano com vários agentes de IA em paralelo (Orquestrador + sub-agents em worktrees). Referências ao código são do estado da branch em `074e34c`.
+> Substitui o modelo de 7 papéis/ondas da rev. 4 (resumo histórico em §12). Duas trilhas de código em worktrees separados, um integrador (que pode ser a sessão da Trilha 1 em modo "integrar"), revisão cruzada opcional por Codex. Referências ao código são de `83c1234`.
 
-### 0. Resumo executivo
+### 9.1 Resumo
 
 | Pergunta | Resposta |
 |---|---|
-| Quantos agentes | **7 papéis, no máximo 6 sessões vivas ao mesmo tempo** (1 Orquestrador + 4 trilhas de código + 1 Revisor Codex + 1 QA/Smoke que entra na Onda 0 como "validador de hipóteses" e volta na Onda 2) |
-| Por que não mais | Os itens do plan.md se concentram em **4 conjuntos de arquivos disjuntos**; o quinto conjunto (`service.ts`) é serial por natureza. Mais agentes = mais rebase em `service.ts` e `packages/domain/src/index.ts`, e mais `tsc -b`/`vitest`/`node-gyp` disputando CPU |
-| Por que não menos | Fase 3 (empacotamento/`electron-rebuild`) é independente e é a maior incerteza de infra — tem que começar no dia 1 em worktree próprio. `service.ts` precisa de um dono único. Spawn/PTY (A) e ciclo de vida/pipe (#6, #5, #4) não se tocam e são os dois maiores blocos de código |
-| Ondas | **Onda 0** (preparo + validar hipóteses A/B/E/H + contrato) → **Onda 1** (Fase 1 em 3 trilhas + Fase 3 em paralelo) → **Onda 2** (integração, Fase 2 CI/smoke, Fase 4, skipIf) → **Onda 3** (Fase 5/6: assinatura, pré-release, teste manual) |
-| Relógio de parede | **9–14 dias úteis** (vs. 17–28 dias-pessoa sequenciais); cenário agressivo 7–8 dias se as hipóteses A/E/H se confirmarem na Onda 0 e a assinatura (Azure Trusted Signing) for contratada no dia 1 |
-| Caminho crítico | `Fase 3 (.exe no CI) → smoke no .exe real → A/H (spawn, paste, encoding) → assinatura → pré-release`. O código do `service.ts` (trilha A3) é o segundo caminho mais longo |
+| Quantas sessões | **2 trilhas de código** (uma sessão Claude Code cada, em worktree próprio) + **o humano** como integrador final. Opcional: uma sessão Codex de revisão entre as fases. |
+| Por que 2 | O mapa de acoplamento da rev. 4 mostrou 4 "ilhas" de arquivos, mas três delas (spawn/PTY, ciclo de vida/I-O, `service.ts`+CLI) se encontram em `service.ts` e em `packages/domain` — dividi-las entre 3 agentes gerava mais rebase do que código. A quarta ilha (empacotamento/CI/desktop main) é disjunta de verdade e tem o maior risco de infra: merece uma trilha só dela, desde o dia 1. |
+| Trilha 1 — Núcleo | runtime + CLI + domain + contracts: itens **#1, #2, #3, #5 (runtime), #6, A, B, C, D (lado runtime), E, F, G, H, M, O, P, Q, S, T** e os Baixo do runtime/CLI. Branch `win/core`. |
+| Trilha 2 — Empacotamento/CI/Desktop | `scripts/package.mjs`, `apps/desktop/package.json`, `.github/workflows/*`, `apps/desktop/src/main/index.ts`, `abrir.ps1`, `README`: itens **L, #4, #5 (`pidOnPort` do desktop), D (lado desktop), J, N (desktop), R, #7**, Fase 2, Fase 3, Fase 5, Fase 6. Branch `win/package`. |
+| Ordem de merge | `win/core` → `windows_version` primeiro (Fase 1 verde), depois `win/package` rebaseado. Antes disso a Trilha 2 pode validar o `.exe` com o runtime ainda Linux-only (o instalador abre; o terminal falha — isso é esperado e é o que o smoke da Fase 2 vai medir). |
+| Relógio | **8–12 dias úteis** (12–21 dias-pessoa). Caminho crítico: `Fase 3 (.exe no CI) → merge de win/core → smoke no .exe real → A/H → assinatura → pré-release`. |
 
----
+### 9.2 Propriedade de arquivos
 
-### 1. Mapa de acoplamento (evidência do código)
+| Trilha | Worktree / branch | **Pode editar** | **Não edita** |
+|---|---|---|---|
+| **T1 Núcleo** | `..\MessAI-wt\core` → `win/core` | `apps/runtime/src/**` (inclui novos `platform.ts`, `killtree.ts` e testes), `apps/cli/**`, `packages/domain/src/**`, `packages/contracts/src/index.ts` (só `AGENT_ENV`, aditivo), `skills/*/SKILL.md`, testes unitários em `packages/apps`, `tests/integration/*.win.test.ts` (novos) | `apps/desktop/**`, `scripts/**`, `.github/**`, `tests/e2e/**` |
+| **T2 Empacotamento** | `..\MessAI-wt\package` → `win/package` — **único worktree onde `npm run package`/`electron-rebuild` podem rodar** | `scripts/package.mjs`, novo `scripts/smoke-windows.mjs`, `apps/desktop/package.json` (bloco `build` e devDeps de build), `apps/desktop/src/main/index.ts`, `apps/desktop/build/**`, `.github/workflows/*.yml`, `tests/e2e/**` (helper de boot), `abrir.ps1`, `README.md` | `apps/runtime/**`, `apps/cli/**`, `packages/**`, `skills/**` |
+| **Integrador** (humano, ou T1 em modo integrar) | raiz `C:\Users\ctscs\Documents\MessAI` em `windows_version` | `.gitattributes`, `plan.md` (caixinhas e hipóteses), `PROGRESS-windows.md`, resolução de conflitos | código de produto |
 
-O que define paralelismo é **quem toca qual arquivo**. Levantamento por item do plan.md:
+Regra: se um arquivo não está na sua coluna, você não edita — deixa `TODO(trilha:T2): …` no commit e registra no `PROGRESS-windows.md`. Exceção combinada: T2 precisa de `killTree`/`pidOnPort` (contrato §9.4) — T1 os cria em `apps/runtime/src/killtree.ts`; até o merge, T2 usa `taskkill` inline em `desktop/main` e troca pelo helper depois (o desktop não importa o runtime, então pode até ficar inline).
 
-| Item | Arquivos que precisa tocar | Observação de acoplamento |
-|---|---|---|
-| **A** spawn no ConPTY + argv longo | `sessions.ts:84-90` (`pty.spawn(plan.command, …)`), `packages/domain/src/index.ts:290-310` (`applySkills`/`applyRole` concatenam no `--append-system-prompt`), `service.ts:2066-2068` (chama `applyRole`/`applySkills`/`planLocalTerminal`), `presets.ts:9,17` | Cruza 3 donos. Solução: `resolveSpawnCommand()` vive em módulo novo e é chamado em **`sessions.ts:84`** (não em `service.ts`); `applyRole`/`applySkills` ganham opção `{ inline: boolean }`; `service.ts` só passa a flag |
-| **B** `MESS_CLI` POSIX + `MESS_CLI_CMD` | `service.ts:2063` (`[AGENT_ENV.cli]: join(CLI_DIR,"mess")`), `apps/cli/bin/mess:2`, `scripts/package.mjs:31`, `presets.ts:9` (hint), `skills/*/SKILL.md` (7 arquivos, já usam `"$MESS_CLI"` com aspas; só o hint não usa), `packages/contracts/src/index.ts:960` (novo `AGENT_ENV.cliCmd`) | `contracts` é importado por todos; adicionar uma chave em `AGENT_ENV` é aditivo e seguro, mas só **um** agente deve editar `contracts` |
-| **C** `PATH` vs `Path` | `service.ts:1536-1537` (`hookEnv`) e `:2047-2048` (`plan`) | Mesmo padrão nos dois lugares; extrair `withCliOnPath(baseEnv, CLI_DIR)` |
-| **D** pasta de dados | `apps/desktop/src/main/index.ts:15` (`startsWith("/")`) vs `apps/runtime/src/data.ts:20` (`isAbsolute`) | Desktop e runtime; o desktop não importa `data.ts` — basta `isAbsolute` do `node:path` |
-| **E** `findBrowser()` | `portal.ts:18-23` | Depende de `whichOnPath` (#2) só para a sonda; os caminhos fixos de `msedge.exe`/`chrome.exe` são independentes |
-| **F** rotinas/hooks shell | `service.ts:408` (`execFileP("/bin/sh",["-c",…])`), `:1584` (`spawn(defaultShell,["-c",cmd],{detached:true})`), `:1874` (teardown) | Só `service.ts` + helper `shellCommandArgs(shell, cmd)` em módulo novo |
-| **G** hint/skills POSIX | `presets.ts:9`, `skills/*/SKILL.md:9-15` | Texto; zero acoplamento de código |
-| **H** paste/UTF-8 | `sessions.ts:226-230` (bracketed paste), `:92` (`onData`); env do shell em `service.ts` `plan()` (ex.: `PYTHONIOENCODING`/`chcp`) | Depende de hipótese validada na Onda 0 |
-| **I** ACL do token | `config.ts:46-53`, `data.ts:96-99`, `service.ts:1330-1334` (anexos `0o600`) | Baixo risco de conflito; `icacls` em helper |
-| **J** órfãos / Job Object | `apps/desktop/src/main/index.ts:75-76`, `index.ts` do runtime (`shutdown`) | Job Object puro em Node não existe sem addon → ver risco §6 |
-| **L** empacotamento | `scripts/package.mjs:31,50`, `apps/desktop/package.json:45-53`, `.github/workflows/package.yml`, `build/icon.ico` | Totalmente disjunto do runtime |
-| **#1** `mess.cmd` | `apps/cli/bin/mess`, novo `apps/cli/bin/mess.cmd`, `package.mjs:31` | O launcher dev (A3) e o empacotado (A4) têm que ter a **mesma semântica** → contrato |
-| **#2** `whichOnPath` | `providers.ts:18-27`; consumidores `portal.ts:21`, `device.ts:18,24,30`, `isolation.ts:12,67,73` | Mudança interna; assinatura mantida → não quebra ninguém |
-| **#3** shell padrão | `config.ts:30-35` | Isolado |
-| **#4** `detached`/`SIGTERM` | `apps/desktop/src/main/index.ts:75-76,101` | Isolado no desktop |
-| **#5** `/proc`, `kill(-pid)` | `procs.ts:12-23`, `desktop/main/index.ts:46-54` (`pidOnPort`), `service.ts:1626` (`stopFloorHook`), `device.ts:196,242`, `portal.ts:256` | `killTree()` em módulo novo; 4 call-sites em 4 arquivos (3 donos diferentes) → contrato |
-| **#6** named pipe | `config.ts:58`, `runtime/index.ts:32,46,62,65-66`, `cli/index.ts:12-13` | `socketPathFor(dataDir)` em módulo novo; CLI replica a regra (CLI não importa runtime) |
-| **#7** `abrir.sh` | novo `abrir.ps1` | Isolado |
-| Baixo | `desktop/main/index.ts:394` (SIGUSR2), `service.ts:2034` (filtro secreto), `presets.ts:16` (preset shell), `systemd.ts` + `desktop/main/index.ts:87`, `cli/index.ts:12` (`HOME`), `domain:665` (`expandHome`), `service.ts:1955` (`split("/")`) | Espalhado, mas cada um cai no dono natural do arquivo |
-
-**Conclusão:** `service.ts` é tocado por B, C, F, #5, rejeição de `isolation`, 2 itens Baixo e indiretamente por A/H. Todos esses cabem num único agente **se os helpers forem extraídos para módulos novos** — aí o `service.ts` recebe apenas chamadas de uma linha, e o agente dono dele faz esses commits em ordem.
-
----
-
-### 2. Agentes: quantidade, papéis, propriedade de arquivos
-
-#### 2.1 Quantos e por quê
-
-**7 papéis; 6 sessões concorrentes no pico (Onda 1); 4–5 na média.**
-
-Justificativa por restrição:
-
-1. **Conflitos de merge.** Há exatamente quatro "ilhas" de arquivos que podem avançar sem rebase entre si: (i) spawn/PTY/domínio puro, (ii) ciclo de vida + I/O (config/index/data/procs/portal/device + desktop main), (iii) `service.ts` + CLI + textos, (iv) empacotamento/CI. Um quinto agente de código só entraria em alguma dessas ilhas → conflito.
-2. **Máquina.** Uma sessão do Claude Code/Codex ocupa ~0,5–1 GB; cada worktree precisa de `node_modules` próprio (~1,5 GB em disco, não RAM); `tsc -b` do monorepo pega ~1–2 GB por rodada; `electron-rebuild` do node-pty com MSVC e o `electron-builder` saturam todos os núcleos por 5–15 min. Com 32 GB/8+ núcleos, 6 sessões + 1 build nativo por vez cabem. Com 16 GB, reduzir a 4 sessões (ver §2.4).
-3. **Caminho crítico.** Fase 3 não depende de código e é a maior incerteza → precisa de um agente dedicado desde o dia 1. Revisão cruzada por outra família de modelo (Codex) é o gate que mais barra regressão → agente próprio, não "mais um dev".
-
-#### 2.2 Papéis e propriedade de arquivos (quem pode editar o quê)
-
-| Agente | Modelo sugerido | Worktree / branch | **Arquivos que PODE editar** | Itens do plan.md |
-|---|---|---|---|---|
-| **O — Orquestrador/Integrador** | Claude Code (sessão principal, no repo raiz `koba` em `windows_version`) | `koba/` (raiz) | `windows-contract.md` (novo, na raiz), stubs iniciais de `apps/runtime/src/platform.ts`, `apps/runtime/src/killtree.ts`, `apps/runtime/src/platform.test.ts`, `apps/runtime/src/killtree.test.ts`, `.gitattributes`; **resolução de conflitos** em merges; `PROGRESS-windows.md` (status) | Fase 0 (setup), integração de todas as ondas, decisão de "pronto" junto com o humano |
-| **A1 — Spawn/PTY/Domínio** | Claude Code | `../koba-wt/a1-spawn` → `wt/a1-spawn` | `apps/runtime/src/platform.ts` (após stub), `apps/runtime/src/platform.test.ts`, `apps/runtime/src/sessions.ts`, `apps/runtime/src/providers.ts`, `apps/runtime/src/isolation.ts`, `apps/runtime/src/presets.ts` (+ `presets.test.ts`), `packages/domain/src/index.ts` **somente** nas funções `applyRole`, `applySkills`, `skillsText`, `roleText`, `expandHome` (+ testes em `packages/domain`) | **#2, A, G (hint), Baixo: preset `shell` normalizado no boot, `expandHome` com `~\`; rejeição de `isolation` no Windows (lado `buildIsolatedPlan`/`probeIsolation`); H (Onda 2)** |
-| **A2 — Ciclo de vida/I-O/Desktop main** | Claude Code | `../koba-wt/a2-lifecycle` → `wt/a2-lifecycle` | `apps/runtime/src/killtree.ts` (+ test), `apps/runtime/src/config.ts`, `apps/runtime/src/index.ts`, `apps/runtime/src/data.ts` (+ test), `apps/runtime/src/procs.ts` (+ test), `apps/runtime/src/portal.ts`, `apps/runtime/src/device.ts`, `apps/runtime/src/systemd.ts`, `apps/desktop/src/main/index.ts` | **#3, #6 (runtime), D (ambos os lados), #4, #5 (procs/portal/device/pidOnPort), E, Baixo: SIGUSR2, ocultar systemd; I e J (Onda 2); Fase 4 portais/dispositivos (Onda 2)** |
-| **A3 — Service + CLI + textos** | Claude Code | `../koba-wt/a3-service` → `wt/a3-service` | `apps/runtime/src/service.ts` (**dono único**), `apps/cli/src/index.ts`, `apps/cli/bin/mess`, `apps/cli/bin/mess.cmd` (novo), `packages/contracts/src/index.ts` **somente** `AGENT_ENV` (aditivo), `skills/*/SKILL.md`, `tests/integration/*.test.ts` (só para `skipIf`, Onda 2) | **B, C, F, #1, #5 (call-site `service.ts:1626`), #6 (lado CLI: `defaultSocket`, `HOME`), rejeição de `isolation` na API (`service.ts:1939`, `:3003`, `:2074`), Baixo: filtro de secreto case-insensitive, `split("/")`; `skipIf(win32)` nos ~43 testes de integração (Onda 2)** |
-| **A4 — Empacotamento/CI** | Claude Code (ou Codex — tarefa é de infra/YAML) | `../koba-wt/a4-package` → `wt/a4-package` — **único worktree onde `npm run package`/`electron-rebuild` podem rodar** | `scripts/package.mjs`, `apps/desktop/package.json` (bloco `build` e devDeps de build), `apps/desktop/build/icon.ico`, `.github/workflows/package.yml`, `.github/workflows/ci.yml`, novo `scripts/smoke-windows.mjs`, novo `abrir.ps1`, `README.md` (seção Windows/WSL2) | **L, Fase 3 inteira, Fase 2 (job CI + script de smoke), #7/Fase 5, Fase 6 (pipeline de assinatura + pré-release)** |
-| **R — Revisor** | **Codex** (`codex` CLI, família diferente da que escreve) | `../koba-wt/review` → checkout da branch sob revisão (somente leitura) | **Nenhum arquivo do repo.** Escreve revisão via `gh pr review` (comentários inline) ou em `../koba-wt/review/REVIEW-<branch>.md` fora do repo | Revisa **toda** PR antes do merge; checa conformidade com `windows-contract.md` e com o mapa de propriedade |
-| **QA — Validador/Smoke** | Codex (Onda 0 e 2–3) — pode ser a mesma sessão de R quando ociosa, mas com prompt distinto | `../koba-wt/qa` → checkout de `windows_version` integrado; **roda runtime com `MESS_PORT`/`MESS_DATA_DIR` próprios** | Scripts de prova em `../koba-qa/` (fora do repo); relatório `../koba-qa/REPORT-onda<N>.md`. Nada no repo | Onda 0: valida hipóteses A, B, E, H. Onda 2–3: smoke PTY → pwsh/Git Bash → `mess` → named pipe; e2e; checklist de teste manual (Fase 6) |
-
-Regra de ouro: **se um arquivo não está na sua coluna, você não edita — pede ao dono via Orquestrador.** Para mudanças fora da coluna o agente comita um `TODO(owner:A2): …` na própria branch e avisa.
-
-#### 2.3 Por que esta divisão e não outra
-
-- **`service.ts` com dono único (A3)** e **helpers em módulos novos** (`platform.ts`, `killtree.ts`). Com isso, as alterações de B/C/F/#5/isolation no `service.ts` viram ~10 linhas em 6 pontos (`:408`, `:1536`, `:1584`, `:1626`, `:1874`, `:2034`, `:2047`, `:2063`, `:2074`) feitas por quem tem o arquivo inteiro em contexto.
-- **`sessions.ts` com A1, não A3**: o `resolveSpawnCommand()` tem que acontecer no ponto do `pty.spawn` (`sessions.ts:84`), inclusive no reattach/respawn (`recoverPersistent`), senão o plano gravado no banco continua com `claude` sem `.cmd`.
-- **`desktop/main/index.ts` com A2, não A4**: os itens do desktop main (D, #4, `pidOnPort`, SIGUSR2, J) são de ciclo de vida de processo — a mesma cabeça que faz `killTree`/named pipe. A4 fica só com empacotamento, que é lento, bloqueante e precisa de worktree isolado.
-- **`packages/contracts` e `packages/domain` praticamente congelados**: só A3 adiciona chaves em `AGENT_ENV`; só A1 mexe em `applyRole`/`applySkills`/`expandHome`. Qualquer outra mudança nesses pacotes passa pelo Orquestrador (eles são importados por tudo e um conflito ali cascateia).
-
-#### 2.4 Variante para máquina de 16 GB / 4 núcleos
-
-4 sessões: **O**, **A1+A3 fundidos** (spawn + service + CLI; serial, mas é o mesmo agente), **A2**, **A4**. R e QA rodam **entre** ondas, não durante (o Codex revisa quando as trilhas estão paradas aguardando merge). Custo: +2–3 dias de relógio.
-
----
-
-### 3. Ondas de paralelismo, grafo de dependências, caminho crítico
-
-#### 3.1 Grafo de dependências entre itens
-
-```
-Onda 0 (preparo)
-  CONTRATO ─────────────┬──────────────┬──────────────┬─────────────┐
-  (platform.ts stub,    │              │              │             │
-   killtree.ts stub,    ▼              ▼              ▼             ▼
-   mess/mess.cmd spec) A1            A2             A3            A4
-                      #2 ──► A       #3   #6   D   #1 ◄─(spec)─ Fase 3 (nsis, icon,
-                      G(hint)        E ◄─(#2)       B ◄─(A1 opt)   package.mjs, package.yml)
-                      preset shell   #5 killTree ──► #5 call-site   │
-                      isolation(bwrap)   #4         C, F            │
-                                         SIGUSR2    isolation(API)  │
-                                         systemd    Baixo(secret,split)
-                                                    CLI defaultSocket/HOME
-         │               │               │              │           │
-         ▼               ▼               ▼              ▼           ▼
-Onda 1 → INTEGRAÇÃO 1 (ordem de merge: A2 → A1 → A3 → A4)  ──► Fase 1 "verde" (build + vitest win+linux)
-         │
-         ├─► Fase 2 (A4: job windows-latest em ci.yml + scripts/smoke-windows.mjs; QA roda smoke real)
-         ├─► H (A1)  ◄── precisa do resultado da hipótese H (Onda 0) e do runtime integrado
-         ├─► I, J (A2) · Fase 4 portais/adb (A2)
-         ├─► skipIf(win32) (A3) · e2e Playwright win (A4/QA)
-         ▼
-Onda 2 → INTEGRAÇÃO 2 ──► .exe do CI instala e passa no smoke
-         │
-         ├─► Fase 5 abrir.ps1 (A4) · Fase 6 assinatura (A4 + humano) · pré-release (A4) · WSL2 doc (A4)
-         ├─► teste manual (QA + humano) → bugs voltam aos donos
-         ▼
-Onda 3 → RELEASE
-```
-
-Dependências "duras" (precisa do merge do outro para **rodar**, não para compilar — os stubs garantem compilação):
-
-| Depende | De | Por quê |
-|---|---|---|
-| A3 #5 (call-site `service.ts:1626`) | A2 `killTree()` | Assinatura no stub; comportamento só após merge de A2 |
-| A3 C (`PATH` key) | A1 `platform.ts` (`pathKey(env)`) | Mesmo motivo |
-| A2 E (`findBrowser`) | A1 #2 (`whichOnPath` com `PATHEXT`) | Para a sonda; os caminhos fixos de Edge/Chrome funcionam antes |
-| A4 Fase 3 `package.mjs` launcher | A3 #1 (spec do `mess.cmd`) | Resolvido pelo contrato (texto dos dois launchers fixado na Onda 0) |
-| Fase 2 smoke | Integração 1 | Precisa do pipe, do shell e do CLI funcionando juntos |
-| H | Onda 0 (hipótese) + Integração 1 | Precisa de PTY real com `pwsh` e do `deliver` |
-| Fase 6 assinatura | Conta Azure Trusted Signing (**humano**, lead time de dias) | Começar o cadastro no dia 1 |
-
-#### 3.2 Ondas (o que roda junto)
-
-**Onda 0 — Preparo e hipóteses (dia 1; 0,5–1 dia)**
-- **O**: cria `.gitattributes` (`eol=lf` para `*.sh`, `apps/cli/bin/mess`, `*.mjs`), configura `core.autocrlf=false` e `core.longpaths=true`; cria os 4 worktrees; roda `npm ci` **um worktree por vez** (node-pty 1.0.0 compila do fonte no Windows — plan.md L; 4 compilações simultâneas travam a máquina); escreve `windows-contract.md` + stubs + testes `it.todo` (ver §4.3); abre `PROGRESS-windows.md`.
-- **QA**: valida hipóteses com micro-scripts fora do repo: (A) `node-pty` spawn de `claude` vs `claude.cmd` vs `node <cli.js>` com argumento multilinha de 20 k; (B) `dirname 'C:\…'` no Git Bash e `MSYS_NO_PATHCONV`; (E) `msedge.exe --headless=new --remote-debugging-pipe` respondendo `Target.getTargets` por fds 3/4; (H) `\x1b[200~…\x1b[201~` no ConPTY com `pwsh` e com `claude`; encoding com `echo "diretório"`. Entrega `REPORT-onda0.md` com "confirmada/refutada/parcial" por hipótese.
-- **A4**: começa Fase 3 imediatamente (não depende de nada): target `nsis`, `.ico`, `package.mjs` sem `--linux` fixo, job `windows-latest` em `package.yml` com `@electron/rebuild --force`; primeiro `.exe` no CI (ou local, no worktree dele).
-- **A1/A2/A3**: começam só depois que o contrato está comitado em `windows_version` (meio-dia).
-
-**Onda 1 — Fase 1 em 3 trilhas + Fase 3 (dias 2–5)**
-- A1: #2 → A → G(hint) → preset shell → `expandHome` → `isolation` no `buildIsolatedPlan`.
-- A2: `killTree()` **primeiro** (desbloqueia A3) → #6 → #3 → D → #4 → #5 (`procs.ts` degradado, `pidOnPort`, `portal.ts:256`, `device.ts:196,242`) → E → SIGUSR2 → ocultar systemd.
-- A3: #1 (`mess.cmd` + launcher sh robusto a `\`) → B → C → F → #5 call-site → `isolation` na API → Baixo → CLI `defaultSocket`/`HOME` → aspas nas skills (G).
-- A4: Fase 3 até ter `.exe` que abre, com pós-build `ELECTRON_RUN_AS_NODE=1 MessAI.exe resources\cli\cli.mjs --help`.
-- R: revisa cada PR assim que abre (ver §5).
-- **Integração 1** (O): ordem de merge **A2 → A1 → A3 → A4**. A3 faz `git rebase windows_version` depois de A2 e A1 entrarem (é quem tem mais call-sites). Gate da onda em §5.
-
-**Onda 2 — Integração, CI real, Fase 4, skipIf (dias 5–9)**
-- A4: job `windows-latest` em `ci.yml` (`npm ci`, `npm run build`, `vitest run packages apps`), `scripts/smoke-windows.mjs` (runtime → `/v1/health` → terminal `pwsh -NoProfile` rodando `mess context` e `mess note write` → o mesmo via `C:\Program Files\Git\bin\bash.exe` com `"$MESS_CLI" context` → `deliver` com `\r` → acento no buffer); e2e Playwright `pilot`, `prefs`, `portal` no runner.
-- QA: executa o smoke na máquina real em **dev mode** (worktree `qa`) e no **`.exe` instalado** (Fase 3). Abre bugs por dono.
-- A1: H (paste/UTF-8) conforme `REPORT-onda0.md`; ajuste do `deliver` (`sessions.ts:226-230`) se preciso.
-- A2: I (ACL via `icacls` fora de `%USERPROFILE%` + aviso na UI → aviso vai por `settings`/`health`, UI é texto só), J (ver risco §6.7), Fase 4 portais (CDP por pipe com Edge) e adb/emulator `.exe`.
-- A3: `skipIf(process.platform === "win32")` nos ~43 testes de integração que usam `sh -c`/`cat`/tmux/bwrap (`tests/integration/*.test.ts`, 43 arquivos batem no grep) — muitos arquivos, zero código de produção, baixo conflito.
-- **Integração 2**: CI verde em `ubuntu-latest` **e** `windows-latest`; `.exe` do CI instala e passa no smoke do QA.
-
-**Onda 3 — Release (dias 9–14)**
-- A4: `abrir.ps1` (#7), pipeline de assinatura (Azure Trusted Signing: `signtool`/`AzureSignTool` no `package.yml`), tag de pré-release com Linux + Windows no mesmo release, página WSL2 no README.
-- QA + humano: rodada manual do plan.md Fase 6 (instalar, espaço, terminal, nota, portal, recrutar Claude e Codex, nota secreta, auto-update entre duas versões assinadas). Visual = humano.
-- A1/A2/A3: só correções nos arquivos próprios, uma PR por bug.
-
-#### 3.3 Caminho crítico
-
-1. **Fase 3 → `.exe` real** (A4; 2–4 dias, incerteza alta: Spectre libs, `electron-rebuild` do node-pty, Defender flagando `winpty-agent.exe`).
-2. **Integração 1** (dia 4–5) — gargalo humano/O: 4 merges com revisão.
-3. **Smoke no `.exe`** → descobre o que só aparece empacotado (ex.: `MESS_RESOURCES`, `MESS_ELECTRON` no launcher `.cmd`, `winpty-agent.exe` dentro do asar/unpacked).
-4. **A + H** (spawn + paste/encoding) — o que de fato faz o produto "funcionar" no Windows; só termina depois do smoke.
-5. **Assinatura** — lead time externo; se não começar no dia 1, vira o caminho crítico sozinha.
-
----
-
-### 4. Mecânica de coordenação no Windows
-
-#### 4.1 Worktrees e branches
+### 9.3 Worktrees, branches, ciclo
 
 ```powershell
-# Orquestrador, na raiz koba (branch windows_version)
+# na raiz do repo (branch windows_version), depois de K (§10.2)
 git config core.autocrlf false
 git config core.longpaths true
-git worktree add ..\koba-wt\a1-spawn     -b wt/a1-spawn     windows_version
-git worktree add ..\koba-wt\a2-lifecycle -b wt/a2-lifecycle windows_version
-git worktree add ..\koba-wt\a3-service   -b wt/a3-service   windows_version
-git worktree add ..\koba-wt\a4-package   -b wt/a4-package   windows_version
-git worktree add ..\koba-wt\qa           windows_version --detach     # QA: só checkout
-git worktree add ..\koba-wt\review       windows_version --detach     # R: só checkout
-# npm ci em SÉRIE (node-pty compila com MSVC em cada um):
-foreach ($w in "a1-spawn","a2-lifecycle","a3-service","a4-package","qa") { Push-Location ..\koba-wt\$w; $env:JOBS="4"; npm ci; Pop-Location }
+git worktree add ..\MessAI-wt\core    -b win/core    windows_version
+git worktree add ..\MessAI-wt\package -b win/package windows_version
+# npm ci em SÉRIE (node-pty compila com MSVC em cada um; dois ao mesmo tempo travam a máquina):
+foreach ($w in "core","package") { Push-Location ..\MessAI-wt\$w; $env:JOBS="4"; npm ci; Pop-Location }
 ```
 
-- Um worktree por agente; `node_modules` separado em cada um (no Windows, junction compartilhada de `node_modules` quebra o `tsc -b` incremental e o `electron-vite`).
-- **`main` é intocável.** Nenhum agente faz checkout, merge ou push em `main`. PRs sempre `wt/* → windows_version`.
-- Excluir `..\koba*` do Windows Defender (varredura em tempo real deixa `npm ci`/`tsc` 2–3× mais lento e flaga `winpty-agent.exe`).
-- Cada agente roda o runtime de teste com **porta e pasta de dados próprias** (`MESS_PORT=4790N`, `MESS_DATA_DIR=C:\mess-data\aN`) — o nome do pipe deriva do `dataDir` (#6), então não colidem; a porta HTTP `47821` fixa colidiria (`config.ts:60`, `desktop/main/index.ts:19`).
+- Um worktree por trilha; `node_modules` separado em cada um (junction compartilhada quebra o `tsc -b` incremental e o `electron-vite`). Exclusão do Defender é opcional e depende do aval do dono (§10.1).
+- Cada trilha roda o runtime de teste com **porta e pasta de dados próprias**: T1 `MESS_PORT=47901 MESS_DATA_DIR=C:\mess-data\core`; T2 `MESS_PORT=47902 MESS_DATA_DIR=C:\mess-data\package`. A porta `47821` fixa colidiria (`config.ts:60`, `desktop/main:19`); o nome do pipe deriva do `dataDir` (#6).
+- Início de toda sessão: `git fetch && git rebase origin/windows_version`, ler `plan.md` (caixinhas) e `PROGRESS-windows.md`. Rebase, não merge, em `win/*`.
+- PR `win/* → windows_version` com `gh pr create --base windows_version --head win/core` por **lote coerente** (2–4 commits), corpo: itens cobertos, arquivos tocados, como testou (saídas reais). Merge com `gh pr merge --rebase` após os gates de §9.5.
+- `windows_version` recebe push **só via merge de PR**. `main` é intocável.
+- Comunicação entre trilhas: PR + `PROGRESS-windows.md` (tabela item × trilha × estado × hipótese confirmada/refutada). Nada de "mande mensagem para a outra sessão": o canal é o repositório.
 
-#### 4.2 Regras de commit e integração
+### 9.4 Contrato mínimo entre as trilhas (combinar no dia 1, antes de codar)
 
-- **Commits pequenos, um item do plan.md por commit** (ou menos), mensagem no padrão já usado no repo: `feat(windows): resolveSpawnCommand com PATHEXT (A)`, `fix(windows): named pipe sem existsSync/chmod (#6)`, `test(windows): …`. Em português. **Sem `Co-Authored-By`** (regra do dono do projeto).
-- Cada agente faz `git fetch && git rebase origin/windows_version` **no início de cada sessão de trabalho** e antes de abrir PR. Rebase, não merge, nas branches `wt/*` (histórico linear facilita a revisão do Codex).
-- PR aberta com `gh pr create --base windows_version --head wt/aN-…` com corpo: itens do plan.md cobertos, arquivos tocados, como testou. Uma PR por "lote coerente" (2–4 commits), não uma PR gigante no fim.
-- Integração pelo Orquestrador: **`gh pr merge --rebase`** após (a) CI verde, (b) revisão do R aprovada, (c) checagem de propriedade (`git diff --name-only origin/windows_version...wt/x` contra a tabela §2.2). Ordem padrão de merge na Onda 1: **A2 → A1 → A3 → A4** (quem tem mais call-sites rebaseia por último).
-- Conflito em `service.ts`: só A3 resolve (é o dono). Conflito em `domain`/`contracts`: O resolve com A1/A3 em chamada curta (mandar o diff aos dois, decidir, aplicar).
-- Push só na própria branch `wt/*`. `windows_version` recebe push **só do Orquestrador** (via merge de PR).
-
-#### 4.3 Contrato combinado na Onda 0 (`windows-contract.md` + stubs compiláveis)
-
-O Orquestrador comita isto **antes** de A1/A2/A3 começarem. Os stubs compilam (`throw new Error("TODO")` ou implementação Linux-only) e os testes nascem como `it.todo` com o nome da regra — o teste é o contrato.
+T1 cria estes módulos cedo (podem nascer como stub que compila; o teste `it.todo` é o contrato). T2 só **consome** assinaturas; se faltar algo, pede por `TODO(trilha:T1)`.
 
 ```ts
-// apps/runtime/src/platform.ts  (dono final: A1)
+// apps/runtime/src/platform.ts  (dono: T1)
 export const IS_WIN = process.platform === "win32";
 /** Nome real da chave PATH no env (Windows: "Path"), ou "PATH" se não existir. */
 export function pathKey(env: NodeJS.ProcessEnv): string;
@@ -387,236 +241,318 @@ export function pathExts(env: NodeJS.ProcessEnv): string[];
 export function resolveSpawnCommand(command: string, args: string[], env: NodeJS.ProcessEnv): { command: string; args: string[]; via: "direct" | "node-shim" | "cmd" };
 /** Teto seguro de linha de comando no Windows (bytes). Teste falha se argv > isso. */
 export const WIN_CMDLINE_BUDGET = 30_000;
-/** Shell padrão (#3): MESS_SHELL > pwsh > powershell.exe > %COMSPEC%; fora do Windows mantém a cadeia atual. */
+/** Shell padrão (#3): MESS_SHELL > pwsh > powershell.exe > %COMSPEC%; fora do Windows mantém a cadeia atual (config.ts:31-35). */
 export function resolveDefaultShell(env: NodeJS.ProcessEnv): string;
-/** Como passar "rode este comando" para o shell (F): sh/bash → ["-c", cmd]; pwsh/powershell → ["-NoProfile","-NonInteractive","-Command", cmd]; cmd.exe → ["/d","/s","/c", cmd]. */
+/** Como passar "rode este comando" (F): sh/bash → ["-c", cmd]; pwsh/powershell → ["-NoProfile","-NonInteractive","-Command", cmd]; cmd.exe → ["/d","/s","/c", cmd]. */
 export function shellCommandArgs(shell: string, cmd: string): string[];
-/** Caminho do socket/pipe (#6): Linux <dataDir>/agent.sock; Windows \\.\pipe\messai-<sha1(dataDir normalizado).slice(0,16)>. */
+/** Caminho do socket/pipe (#6): Linux <dataDir>/agent.sock; Windows \\.\pipe\messai-<sha1(dataDir normalizado).slice(0,16)>. O CLI replica a regra (não importa o runtime). */
 export function socketPathFor(dataDir: string): string;
 /** Env do CLI para o agente (B): MESS_CLI em POSIX (/c/Users/...) para Git Bash; MESS_CLI_CMD = <cliDir>\mess.cmd para pwsh/cmd. */
 export function cliEnv(cliDir: string): { MESS_CLI: string; MESS_CLI_CMD?: string };
 /** Converte C:\a\b → /c/a/b (Git Bash/MSYS). */
 export function toPosixPath(p: string): string;
 
-// apps/runtime/src/killtree.ts  (dono: A2)
-/** Mata a árvore a partir de pid. Linux: process.kill(-pid) → fallback pid. Windows: taskkill /PID pid /T /F (sincrono, timeout 5 s). Nunca lança. */
+// packages/domain/src/index.ts  (dono: T1)
+/** Nome lógico do binário: tira diretório (/ e \) e sufixo .exe/.cmd/.bat/.ps1 (M). */
+export function binaryName(command: string): string;
+
+// apps/runtime/src/killtree.ts  (dono: T1; T2 pode manter cópia inline em desktop/main até o merge)
+/** Mata a árvore a partir de pid. Linux: process.kill(-pid) → fallback pid. Windows: taskkill /PID pid /T /F (síncrono, timeout 5 s). Nunca lança. */
 export function killTree(pid: number, signal?: "SIGTERM" | "SIGKILL"): void;
-/** PID dono de uma porta TCP local (desktop/#5): Linux /proc/net/tcp; Windows `netstat -ano` ou Get-NetTCPConnection. */
+/** PID dono de uma porta TCP local: Linux /proc/net/tcp; Windows `netstat -ano` ou Get-NetTCPConnection. */
 export function pidOnPort(port: number): number | undefined;
 ```
 
-Mais três cláusulas de contrato (texto, não código):
+Cláusulas de texto:
+1. **`AGENT_ENV.cliCmd = "MESS_CLI_CMD"`** em `contracts:955-976` (T1, aditivo, primeiro commit da trilha).
+2. **Launchers** (T1 define em `apps/cli/bin/`; T2 replica em `package.mjs:31` para `resources/cli/`): `mess` (sh) com `dir=$(dirname "$0")` robusto a `\` (`cygpath -u "$0"` quando existir) e `exec "${MESS_ELECTRON:-node}" "$dir/cli.mjs" "$@"` com `ELECTRON_RUN_AS_NODE=1` quando `MESS_ELECTRON` estiver setado; `mess.cmd` com `@echo off`, `set ELECTRON_RUN_AS_NODE=1` condicional e `"%MESS_ELECTRON%" "%~dp0cli.mjs" %*` com fallback `node`. Teste: `mess.cmd --help` e `bash -c '"$MESS_CLI" --help'` imprimem o mesmo.
+3. **Texto longo fora do argv** (T1): `applyRole`/`applySkills` ganham opção `{ inline: boolean }`; `service.ts:2074` passa `inline: !IS_WIN || cabe`, onde `cabe` é o teste contra `WIN_CMDLINE_BUDGET`. Papel/skills já vão por `MESS_ROLE_INSTRUCTIONS`/`MESS_SKILLS_TEXT` (`service.ts:2060-2061`). **Hipótese a validar na Fase 0**: se o Claude Code aceitar `--append-system-prompt-file`, a forma "arquivo" entra no contrato.
 
-1. **`AGENT_ENV.cliCmd = "MESS_CLI_CMD"`** adicionado em `packages/contracts/src/index.ts` (A3, aditivo, Onda 1 dia 1, PR separada e mergeada primeiro — A4 e A1 dependem do nome).
-2. **Launchers** (A3 define em `apps/cli/bin/`, A4 replica em `package.mjs` para `resources/cli/`):
-   - `mess` (sh): `#!/bin/sh` + `dir=$(dirname "$0")` robusto: se `$0` contiver `\`, converter via `cygpath -u "$0"` quando existir; `exec "${MESS_ELECTRON:-node}" "$dir/cli.mjs" "$@"` (pacote) / `.../dist/index.js` (dev), com `ELECTRON_RUN_AS_NODE=1` quando `MESS_ELECTRON` estiver setado.
-   - `mess.cmd`: `@echo off` + `set ELECTRON_RUN_AS_NODE=1` condicional + `"%MESS_ELECTRON%" "%~dp0cli.mjs" %*` com fallback `node`. Teste: `mess.cmd --help` e `bash -c '"$MESS_CLI" --help'` devem imprimir o mesmo.
-3. **Flag `inline` em `applyRole`/`applySkills`** (A1): `applyRole(command, args, role, { inline: boolean })` — `inline=false` não toca no argv (papel/skills já vão por `MESS_ROLE_INSTRUCTIONS`/`MESS_SKILLS_TEXT`, `service.ts:2058-2059`). `service.ts` passa `inline: !IS_WIN || ok`, onde `ok` = resultado de um teste de tamanho. **Hipótese a validar na Onda 0**: se o Claude Code aceitar `--append-system-prompt-file` (ou ler um arquivo via env), a forma "arquivo" entra no contrato; senão, no Windows só o hint curto vai no argv e o resto por env.
+### 9.5 Gates
 
-#### 4.4 Como lançar as sessões
-
-- Uma **janela do Windows Terminal por agente**, cada aba já em `cd ..\koba-wt\<nome>`; `claude` (ou `codex`) é iniciado **dentro do worktree** para que o `cwd` e o contexto do projeto sejam os daquele worktree. Sessões de longa duração (dias) com `claude --resume` são mais estáveis do que sub-agents do tipo `Agent` dentro de uma única sessão (sub-agents dividem o orçamento de contexto da sessão-mãe e não sobrevivem a ela).
-- O Orquestrador usa sub-agents (ferramenta `Agent`, curta duração) só para tarefas atômicas: checagem de propriedade, resumo de uma PR, disparar `gh pr review` pedindo revisão ao Codex, resolver um conflito.
-- Comunicação entre agentes: pela **PR** (comentários) e pelo `PROGRESS-windows.md` (O atualiza; os outros leem no início da sessão). Nada de "mande mensagem para o A2" — o canal é o repositório. (Quando o porte estiver funcional, o próprio MessAI, com andares/worktrees e Maestro, pode orquestrar isto — é literalmente o produto — mas não antes.)
-
----
-
-### 5. Gates de qualidade
-
-#### 5.1 Por PR (todas as ondas)
-
-| Gate | Comando / critério | Quem |
+| Gate | Critério | Quem |
 |---|---|---|
-| Build limpo | `npm run build` (`tsc -b` estrito) no worktree do autor, **Windows** | autor |
-| Unit | `npx vitest run packages apps` no Windows; novo teste por item (lista do plan.md Fase 1: `whichOnPath`+`PATHEXT`, `resolveSpawnCommand`, normalização `PATH`, nome do pipe, teto de argv ≤ 30 k, `resolveDataDir` com `C:\`) | autor |
-| Linux não regride | CI `ubuntu-latest` (`ci.yml`) verde — a PR dispara via `pull_request` | CI |
-| Propriedade | `git diff --name-only origin/windows_version...HEAD` só com arquivos da coluna do agente (ou `TODO(owner:…)` justificado) | O |
-| Revisão cruzada | **Codex** (R) faz `codex` review da PR: contrato respeitado? `process.platform` guardado? nada de `/bin/sh` novo? `try/catch` engolindo erro em caminho Windows? Teste cobre o que o item diz? | R |
-| Commit | mensagens pt-BR, sem `Co-Authored-By`, um item por commit | O |
+| Por PR | `npm run build` limpo **no Windows**; `npx vitest run packages apps` verde no Windows; CI `ubuntu-latest` verde (dispara por `pull_request`); diff só com arquivos da coluna da trilha; commits pt-BR, 1 item por commit, citando o ID, **sem `Co-Authored-By`**; caixinhas do `plan.md` atualizadas no mesmo PR (ou no `PROGRESS-windows.md`) | autor + CI; revisão cruzada por Codex opcional (`gh pr review`) |
+| Fim da Fase 1 (T1) | tudo da Fase 1 marcado; smoke dev-mode de §10.3 passos 1–9 verdes na máquina; contagem de testes no `ubuntu-latest` igual à de antes | T1 + humano |
+| Fim da Fase 3 (T2) | `.exe` NSIS gerado no CI (ou local em `..\MessAI-wt\package`), instala, abre a janela; `cli.mjs --help` imprime | T2 + humano |
+| Integração (merge T1 → depois T2) | `windows_version` com `npm run build` + `vitest run packages apps` verdes no Windows e no Linux; `.exe` do CI passa no smoke de §10.3 com o runtime empacotado (`MESS_RESOURCES`) | humano |
+| Fim da Fase 2/4 | job `windows-latest` verde incluindo `scripts/smoke-windows.mjs`; e2e `pilot`/`prefs`/`portal` no runner; portal com Edge; `deliver` multilinha inteiro (H); `echo "diretório"` sem mojibake | T2 + T1 |
+| Release (Fase 6) | instalador **assinado** sem SmartScreen; auto-update entre duas pré-releases; checklist manual de §10.4 Fase 6 | humano |
 
-#### 5.2 Por onda
+### 9.6 Riscos específicos de 2 trilhas
 
-**Gate da Onda 0** → `REPORT-onda0.md` com as 4 hipóteses marcadas; `windows-contract.md` + stubs mergeados; 5 worktrees com `npm ci` ok; `.gitattributes` com `eol=lf`.
-
-**Gate da Onda 1 (Fase 1 + 3)** →
-1. `windows_version` integrado: `npm run build` + `vitest run packages apps` verdes **no Windows e no Linux**.
-2. Smoke dev-mode (QA, na máquina): `node apps/runtime/dist/index.js` sobe com pipe `\\.\pipe\messai-…`; app `npm run desktop` conecta; criar terminal preset **shell** abre `pwsh`; dentro dele `mess context` responde; terminal **claude** não cai em `ENOENT` (A); terminal **codex** idem; `"$MESS_CLI" context` dentro de `bash.exe` responde (B); nota secreta chega como env; "Encerrar tudo" não deixa `pwsh.exe`/`claude.exe` órfãos (`tasklist`).
-3. `.exe` da Fase 3 gerado (CI ou local no worktree A4), instala, abre, e `ELECTRON_RUN_AS_NODE=1 MessAI.exe resources\cli\cli.mjs --help` imprime (hipótese do plan.md Fase 3).
-4. R assinou a Integração 1 (revisão do diff integrado `windows_version@antes...depois`, não só PR a PR).
-
-**Gate da Onda 2 (Fase 2 + 4)** → job `windows-latest` em `ci.yml` verde incluindo `scripts/smoke-windows.mjs`; e2e `pilot`/`prefs`/`portal` no runner; portal abre com Edge via CDP por pipe no `.exe` instalado; `deliver` de briefing multilinha chega inteiro e submete (H); `echo "diretório"` sem mojibake; `.exe` do CI passa no smoke do QA; ~43 integrações com `skipIf` e cobertura Linux inalterada (contagem de testes rodados no `ubuntu-latest` igual à de antes).
-
-**Gate da Onda 3 (Fase 5 + 6)** → instalador **assinado** sem aviso de SmartScreen; auto-update de uma pré-release para a seguinte funciona; checklist manual da Fase 6 com todos os itens ✓ ou com desvio documentado; página WSL2 publicada.
-
-#### 5.3 Quem decide "pronto"
-
-- **Pronto da PR**: Orquestrador, com (a) CI, (b) aprovação do R, (c) propriedade ok. Nenhum agente mergeia a própria PR.
-- **Pronto da onda**: Orquestrador propõe com o `REPORT-onda<N>.md` do QA; **o humano confirma** (é ele quem olha a tela — o plan.md marca o visual como "pendente de conferência humana", e `PROGRESS.md` já registra essa regra).
-- **Pronto do release**: humano, após a rodada manual da Fase 6 e a assinatura.
-
----
-
-### 6. Riscos específicos de multi-agente e mitigação
-
-| # | Risco | Mitigação concreta |
+| # | Risco | Mitigação |
 |---|---|---|
-| 6.1 | **Conflito em `service.ts`** (3336 linhas, 9 pontos tocados) | Dono único (A3); helpers em `platform.ts`/`killtree.ts`; A3 mergeia por último na Onda 1 e rebaseia antes; commits de 1 item para o Codex revisar |
-| 6.2 | **Conflito em `packages/domain`/`contracts`** (importados por tudo) | Congelados exceto `applyRole`/`applySkills`/`expandHome` (A1) e `AGENT_ENV` (A3, PR aditiva mergeada no dia 1 da Onda 1) |
-| 6.3 | **Agente diverge do contrato** (ex.: A2 implementa `killTree` assíncrona, A3 chama síncrona) | Stubs com assinatura fixa + testes `it.todo` nascem na Onda 0 e são o contrato; mudar assinatura exige PR no `windows-contract.md` aprovada por O; R checa conformidade a cada PR |
-| 6.4 | **Builds nativos concorrentes travam a máquina** (`npm ci` com node-gyp do node-pty ×4, `electron-rebuild`, `electron-builder`) | `npm ci` em série na Onda 0; `electron-rebuild`/`npm run package` **só** no worktree `a4-package` e **só** com aviso prévio no `PROGRESS-windows.md` (os outros não rodam `vitest` naquela janela); `JOBS=4` no node-gyp; preferir o runner `windows-latest` para pacote completo e deixar a máquina local para dev |
-| 6.5 | **ABI dos addons quebrada no dev** (`electron-rebuild` recompila `node_modules/node-pty` para a ABI do Electron; o runtime dev com Node 22 passa a falhar com `NODE_MODULE_VERSION`) | `package.mjs:34-40` copia os addons para `apps/desktop/resources/node_modules` antes de recompilar, então em tese não toca em `node_modules` raiz — mas a lição registrada no plan.md diz que quebra. Regra: **`npm run package` é proibido fora de `a4-package`**; se acontecer, `npm rebuild node-pty better-sqlite3` no worktree afetado. O checa `git diff` e `npm ls node-pty` no smoke |
-| 6.6 | **Dois agentes no mesmo `node_modules`** (EBUSY/EPERM no Windows: arquivo em uso por um Electron/runtime aberto) | Um worktree = um `node_modules`; antes de `npm ci`/`rebuild`, matar runtime/app daquele worktree (`taskkill /IM electron.exe` só do próprio); nunca `npm i` na raiz `koba` durante a Onda 1 |
-| 6.7 | **J (Job Object) não existe em Node puro** — precisa de addon nativo ou de `koffi`/FFI (mais um addon para a ABI do Electron) | Onda 2: implementar o "mínimo" do plan.md (`taskkill /T` no fallback e no `shutdown`, mais varredura de órfãos por pid-file ao subir); Job Object vira ADR separada se o smoke mostrar órfãos frequentes; **não** colocar no caminho crítico |
-| 6.8 | **CRLF** quebra `#!/bin/sh` do `apps/cli/bin/mess` e o launcher gerado | `.gitattributes` com `eol=lf` para `*.sh`, `apps/cli/bin/mess`, `*.mjs`; `core.autocrlf=false` em todos os worktrees; teste do launcher no CI Windows via `bash.exe` |
-| 6.9 | **Portas/pipes colidindo** entre runtimes de teste de agentes diferentes | `MESS_PORT` e `MESS_DATA_DIR` distintos por agente (§4.1); pipe hash do dataDir (#6) garante nomes diferentes |
-| 6.10 | **Hipótese refutada no meio da Onda 1** (ex.: ConPTY não aceita bracketed paste) | Onda 0 existe para isso; se cair algo, O reescreve só o item no contrato e o dono ajusta — os outros não param |
-| 6.11 | **Revisor da mesma família aprova viés** | R é **Codex**, não Claude; na Integração 1 e 2 a revisão é do diff integrado, não só das PRs |
-| 6.12 | **Assinatura/SmartScreen** chega tarde | Cadastro Azure Trusted Signing no dia 1 (humano); A4 já deixa o passo de `signtool` no `package.yml` atrás de um `if: secrets.AZURE_…` |
-| 6.13 | **Agentes "melhorando" fora do escopo** (refatoração do `service.ts` inteiro, mudar estilo de linhas longas) | Briefing explícito: "sem refatoração não pedida"; R rejeita PR com diff > o necessário; O mede `git diff --stat` |
-| 6.14 | **Sessão longa perde contexto** e reimplementa algo já mergeado | Início de toda sessão: `git fetch && git rebase origin/windows_version`, ler `PROGRESS-windows.md` e `windows-contract.md`; commits pequenos permitem retomar de onde parou |
+| 9.6.1 | `npm ci`/`electron-rebuild`/`electron-builder` concorrentes travam a máquina | `npm ci` em série; builds nativos só em `..\MessAI-wt\package` e avisados no `PROGRESS-windows.md`; `JOBS=4`; preferir o runner `windows-latest` para o pacote completo |
+| 9.6.2 | ABI dos addons quebrada no dev (`electron-rebuild` recompila `node_modules/node-pty` para a ABI do Electron; o runtime dev com Node 22 passa a falhar com `NODE_MODULE_VERSION`) | `package.mjs:34-41` copia os addons para `apps/desktop/resources/node_modules` antes de recompilar — em tese não toca em `node_modules` raiz, mas a lição registrada diz que quebra. **`npm run package` é proibido fora de `..\MessAI-wt\package`**; se acontecer, `npm rebuild node-pty better-sqlite3` no worktree afetado |
+| 9.6.3 | Dois processos no mesmo `node_modules` (EBUSY/EPERM: arquivo em uso por um Electron/runtime aberto) | Antes de `npm ci`/`rebuild`, matar runtime/app daquele worktree (`taskkill /IM electron.exe` só do próprio) |
+| 9.6.4 | T2 bloqueada esperando `killTree` de T1 | Cópia inline em `desktop/main` (contrato §9.4); troca pelo helper após o merge |
+| 9.6.5 | Hipótese refutada no meio | Fase 0 valida antes; se cair, o item vira PR isolada; a outra trilha não para |
+| 9.6.6 | Sessão longa perde contexto e reimplementa algo já mergeado | Início de sessão: rebase + ler `plan.md`/`PROGRESS-windows.md`; commits pequenos permitem retomar |
 
----
+### 9.7 Briefings (copiar e colar)
 
-### 7. Briefings prontos (copiar e colar)
-
-> Todos em pt-BR. Cada agente recebe o seu e mais o link do `plan.md` e do `windows-contract.md`. Substitua `<…>` conforme a máquina.
-
-#### 7.1 Orquestrador (O)
-
+**T1 — Núcleo**
 ```
-Você é o ORQUESTRADOR/INTEGRADOR do porte do MessAI para Windows. Repo: C:\…\koba, branch windows_version. Plano: plan.md (rev. 4). Mapa de execução multi-agente: seção "Execução multi-agente" do plan.md. Você NÃO implementa itens do plano; você integra.
-
-Responsabilidades:
-1. Onda 0: .gitattributes (eol=lf em *.sh, apps/cli/bin/mess, *.mjs), core.autocrlf=false, core.longpaths=true; criar worktrees ..\koba-wt\{a1-spawn,a2-lifecycle,a3-service,a4-package,qa,review}; npm ci EM SÉRIE com JOBS=4; escrever windows-contract.md + stubs compiláveis apps/runtime/src/platform.ts e killtree.ts + testes it.todo (assinaturas em plan.md, seção "Execução multi-agente" §4.3); abrir PROGRESS-windows.md. Commitar tudo isso em windows_version antes de liberar A1/A2/A3.
-2. A cada PR wt/* → windows_version: checar CI verde, revisão do Codex (R) aprovada, e que `git diff --name-only origin/windows_version...<branch>` só contém arquivos da coluna do autor (tabela §2.2). Mergear com `gh pr merge --rebase`. Ordem de merge na Onda 1: A2 → A1 → A3 → A4.
-3. Resolver conflitos só em packages/domain e packages/contracts (chamando A1/A3). Conflito em service.ts é do A3.
-4. Manter PROGRESS-windows.md: por agente, itens feitos/em curso/bloqueios; avisar janelas de build nativo (A4).
-5. Fechar onda: pedir REPORT ao QA, consolidar, propor "pronto" ao humano. O humano decide.
-
-Regras: nunca tocar em main; push em windows_version só via merge de PR; commits em pt-BR sem Co-Authored-By; nunca rodar npm run package ou electron-rebuild fora de ..\koba-wt\a4-package; nunca rodar npm ci em dois worktrees ao mesmo tempo.
+Você é a Trilha 1 (Núcleo: runtime, CLI, domain, contracts) do porte do MessAI para Windows. Trabalhe SOMENTE em C:\Users\ctscs\Documents\MessAI-wt\core (branch win/core, criada de windows_version). Leia plan.md (seções "Diagnóstico", "Fases", §9 e §10) antes de começar e, no início de cada sessão, rode `git fetch && git rebase origin/windows_version`.
+Objetivo: o runtime sobe com named pipe, abre pwsh/claude/codex no ConPTY, o `mess` funciona dentro de pwsh e de Git Bash, e nada disso muda o comportamento no Linux.
+Ordem: AGENT_ENV.cliCmd (contracts) → #2 → A + M → #3 + Q → #6 → #1 + B + G → C → D (runtime) → E → F → #5 (runtime) + N (runtime) → isolation/tmux off em win32 → P → O (testes unitários) → Baixo → H (depois da Fase 0 confirmar/refutar).
+Arquivos permitidos: apps/runtime/src/**, apps/cli/**, packages/domain/src/**, packages/contracts/src/index.ts (só AGENT_ENV), skills/*/SKILL.md, tests/integration/*.win.test.ts. NÃO tocar em apps/desktop, scripts, .github, tests/e2e (Trilha 2).
+Pronto = `npm run build` limpo; `npx vitest run packages apps` verde no Windows; teste novo por item; PR para windows_version com itens cobertos e como testou (saídas reais); caixinhas do plan.md marcadas. Runtime de teste: MESS_PORT=47901 MESS_DATA_DIR=C:\mess-data\core.
+Regras: código Windows atrás de process.platform === "win32" (IS_WIN) ou em platform.ts; commits pequenos (1 item, citando o ID) em pt-BR, SEM Co-Authored-By; push só em win/core; nunca main; não refatorar o que o plano não pede; nunca npm run package/electron-rebuild; nunca npm ci enquanto o outro worktree estiver instalando; registrar no plan.md §11 toda hipótese confirmada/refutada.
 ```
 
-#### 7.2 A1 — Spawn/PTY/Domínio
-
+**T2 — Empacotamento / CI / Desktop**
 ```
-Você é o agente A1 (Spawn/PTY/Domínio) do porte do MessAI para Windows. Trabalhe SOMENTE em C:\…\koba-wt\a1-spawn (branch wt/a1-spawn, criada de windows_version). Leia plan.md e windows-contract.md antes de começar e no início de cada sessão rode `git fetch && git rebase origin/windows_version`.
-
-Objetivo: o terminal do MessAI consegue abrir claude/codex no ConPTY e o texto longo não vai no argv.
-Itens do plan.md (nesta ordem): #2 (whichOnPath com PATHEXT, sem X_OK, reconhecer `\`, providers.ts:18-27) → A (resolveSpawnCommand em platform.ts, chamado em sessions.ts:84 no pty.spawn — vale também no reattach/respawn; applyRole/applySkills com opção {inline} em packages/domain/src/index.ts:290-310; teste que falha se argv > WIN_CMDLINE_BUDGET) → G (presets.ts:9: `"$MESS_CLI"` com aspas no hint; variante curta do hint no Windows) → Baixo: preset `shell` normalizado no boot (presets.ts:16), expandHome com `~\` (domain:665) → rejeição de isolation no Windows em isolation.ts (probeIsolation devolve available=false com razão clara; buildIsolatedPlan nunca cai em /bin/sh no Windows). Onda 2: H (sessions.ts:226-230 bracketed paste; UTF-8 no shell spawnado) conforme REPORT-onda0.md.
-
-Arquivos permitidos: apps/runtime/src/platform.ts (+ platform.test.ts), sessions.ts, providers.ts, isolation.ts, presets.ts (+ presets.test.ts), packages/domain/src/index.ts SÓ em applyRole/applySkills/roleText/skillsText/expandHome (+ testes do domain). Qualquer outro arquivo: comite um `TODO(owner:AX): …` e avise na PR.
-
-Pronto = `npm run build` limpo; `npx vitest run packages apps` verde no Windows; teste novo por item; PR para windows_version com itens cobertos e como testou; revisão do Codex aprovada. Testes manuais: MESS_PORT=47901 MESS_DATA_DIR=C:\mess-data\a1.
-
-Regras: commits pequenos (1 item), mensagem pt-BR `feat(windows): …`, SEM Co-Authored-By; push só em wt/a1-spawn; nunca mexer em main; não refatorar o que o plano não pede; não rodar npm run package/electron-rebuild; não rodar npm ci enquanto outro worktree estiver instalando.
-```
-
-#### 7.3 A2 — Ciclo de vida / I-O / Desktop main
-
-```
-Você é o agente A2 (Ciclo de vida, I/O, desktop main) do porte do MessAI para Windows. Trabalhe SOMENTE em C:\…\koba-wt\a2-lifecycle (branch wt/a2-lifecycle). Leia plan.md e windows-contract.md; no início de cada sessão `git fetch && git rebase origin/windows_version`.
-
-Objetivo: runtime sobe com named pipe, shell padrão certo, pasta de dados unificada, e nada fica órfão.
-Itens (nesta ordem — killTree primeiro porque A3 depende): killtree.ts (killTree + pidOnPort conforme contrato) → #6 (config.ts:58 socketPathFor; runtime/index.ts:32,46,62,65-66 pular existsSync/unlink/chmod no Windows) → #3 (config.ts:30-35: MESS_SHELL > pwsh > powershell.exe > %COMSPEC% via platform.resolveDefaultShell) → D (desktop/main/index.ts:15 usar isAbsolute; data.ts:20 já ok) → #4 (desktop/main/index.ts:101 detached só fora do Windows + windowsHide; :75-76 fallback via killTree/taskkill) → #5 (procs.ts:12-23 degradar: no Windows devolver só a raiz, via `tasklist`/wmic opcional; desktop pidOnPort via killtree.pidOnPort; portal.ts:256 e device.ts:196,242 usar killTree) → E (portal.ts:18-23: msedge.exe/chrome.exe em Program Files/LocalAppData; validar --remote-debugging-pipe conforme REPORT-onda0.md) → Baixo: SIGUSR2 guardado (desktop:394), ocultar systemd no Windows (desktop:87, systemd.ts). Onda 2: I (icacls no runtime.token fora de %USERPROFILE%), J (taskkill /T no shutdown + varredura de órfãos por pid-file; Job Object só se virar ADR), Fase 4 portais/adb .exe.
-
-Arquivos permitidos: apps/runtime/src/{killtree.ts,config.ts,index.ts,data.ts,procs.ts,portal.ts,device.ts,systemd.ts} (+ seus .test.ts), apps/desktop/src/main/index.ts. NÃO tocar em service.ts (dono A3) nem em sessions.ts/providers.ts (A1).
-
-Pronto = build limpo; vitest verde no Windows; teste novo por item (nome do pipe, resolveDataDir com C:\, killTree não lança); PR com itens e evidência; revisão Codex aprovada. Testes manuais: MESS_PORT=47902 MESS_DATA_DIR=C:\mess-data\a2.
-
-Regras: commits pequenos pt-BR sem Co-Authored-By; push só em wt/a2-lifecycle; nunca main; sem refatoração extra; nunca npm run package/electron-rebuild; npm ci só com aval do Orquestrador.
-```
-
-#### 7.4 A3 — Service + CLI + textos
-
-```
-Você é o agente A3 (service.ts, CLI, textos) do porte do MessAI para Windows e o ÚNICO que edita apps/runtime/src/service.ts. Trabalhe SOMENTE em C:\…\koba-wt\a3-service (branch wt/a3-service). Leia plan.md e windows-contract.md; a cada sessão `git fetch && git rebase origin/windows_version` (você mergeia por último na Onda 1; rebaseie após A2 e A1 entrarem).
-
-Objetivo: o `mess` funciona dentro de pwsh e de Git Bash no Windows, e service.ts usa os helpers do contrato em vez de /bin/sh e PATH fixo.
-Itens (nesta ordem): PR 0 aditiva: AGENT_ENV.cliCmd="MESS_CLI_CMD" em packages/contracts/src/index.ts:946-960 (mergear primeiro) → #1 (apps/cli/bin/mess robusto a `\`, novo apps/cli/bin/mess.cmd, conforme §4.3 da seção "Execução multi-agente") → B (service.ts:2063 usar platform.cliEnv(CLI_DIR); skills/*/SKILL.md já usam "$MESS_CLI" — adicionar nota pwsh `$env:MESS_CLI_CMD`) → C (service.ts:1536-1537 e :2047-2048 via platform.prependPath) → F (service.ts:408, :1584, :1874 via cfg.defaultShell + platform.shellCommandArgs; `detached` só fora do Windows) → #5 call-site (service.ts:1626 → killTree(pid)) → rejeição de isolation na API no Windows (service.ts:1939, :3003 → fail("INVALID", "modo isolado indisponível no Windows"); :2074 nunca chega a buildIsolatedPlan) → Baixo: filtro de secreto case-insensitive (service.ts:2034: /^(PATH|SHELL)$/i), split("/") → basename (service.ts:1955) → CLI: apps/cli/src/index.ts:12 defaultSocket replicando a regra do pipe e USERPROFILE/HOME. Onda 2: skipIf(process.platform==="win32") nos testes de tests/integration que usam sh -c/cat/tmux/bwrap (~43), sem alterar cobertura Linux.
-
-Arquivos permitidos: apps/runtime/src/service.ts, apps/cli/src/index.ts, apps/cli/bin/mess, apps/cli/bin/mess.cmd, packages/contracts/src/index.ts SÓ AGENT_ENV, skills/*/SKILL.md, tests/integration/*.test.ts (só skipIf, Onda 2). NÃO tocar em platform.ts/killtree.ts (consuma as assinaturas do contrato; se faltar algo, peça ao Orquestrador).
-
-Pronto = build limpo; vitest verde no Windows; PR com itens e evidência (incluindo `mess.cmd --help` e `bash -c '"$MESS_CLI" --help'` com a mesma saída); revisão Codex aprovada. Testes manuais: MESS_PORT=47903 MESS_DATA_DIR=C:\mess-data\a3.
-
-Regras: diffs mínimos em service.ts (uma linha por call-site quando possível), commits de 1 item pt-BR sem Co-Authored-By; push só em wt/a3-service; nunca main; nunca npm run package/electron-rebuild.
-```
-
-#### 7.5 A4 — Empacotamento / CI
-
-```
-Você é o agente A4 (Empacotamento e CI) do porte do MessAI para Windows. Trabalhe SOMENTE em C:\…\koba-wt\a4-package (branch wt/a4-package). Este é o ÚNICO worktree onde `npm run package`, `electron-rebuild` e `electron-builder` podem rodar — avise no PROGRESS-windows.md antes de cada build nativo (ele satura a CPU por minutos). Prefira validar no runner windows-latest do GitHub.
-
-Objetivo: um MessAI-<versão>-x64.exe (NSIS, auto-update) sai do CI e instala.
-Itens: Fase 3 — apps/desktop/package.json: target win nsis (portable opcional, sem auto-update), icon build/icon.ico, extraResources mantidos; scripts/package.mjs: remover --linux fixo (:50) e escolher por process.platform/flag; gerar resources/cli/mess E resources/cli/mess.cmd conforme §4.3 da seção "Execução multi-agente" (:31); skills copiadas; .github/workflows/package.yml: job windows-latest com VS Build Tools + Spectre libs, `@electron/rebuild --force` para node-pty e better-sqlite3, cache, publish no mesmo release da tag (latest.yml); passo pós-build `ELECTRON_RUN_AS_NODE=1 MessAI.exe resources\cli\cli.mjs --help` validando stdout. Onda 2 (Fase 2): job windows-latest em ci.yml (npm ci, build, vitest run packages apps) + scripts/smoke-windows.mjs (runtime → /v1/health → terminal pwsh -NoProfile rodando `mess context` e `mess note write` → mesmo via "C:\Program Files\Git\bin\bash.exe" com "$MESS_CLI" context → deliver com \r → acento no buffer) + e2e Playwright pilot/prefs/portal. Onda 3: abrir.ps1 (#7), assinatura (signtool/AzureSignTool atrás de `if: secrets`), tag de pré-release Linux+Windows, seção WSL2 no README.
-
-Arquivos permitidos: scripts/package.mjs, scripts/smoke-windows.mjs, apps/desktop/package.json (bloco build e devDeps de build), apps/desktop/build/icon.ico, .github/workflows/*.yml, abrir.ps1, README.md. NÃO tocar em apps/runtime, apps/cli, apps/desktop/src.
-
-Pronto = workflow verde no runner; artefato .exe baixável; instala e abre na máquina; cli.mjs --help imprime; o launcher mess.cmd empacotado tem a mesma semântica do apps/cli/bin/mess.cmd (A3). PR para windows_version com link do run do CI; revisão Codex aprovada.
-
-Regras: commits pt-BR sem Co-Authored-By; push só em wt/a4-package; nunca main; nunca tocar no node_modules de outro worktree; JOBS=4 no node-gyp local; o CI linux (package.yml job linux) continua intocado em comportamento.
-```
-
-#### 7.6 R — Revisor (Codex)
-
-```
-Você é o REVISOR do porte do MessAI para Windows e usa um modelo de família diferente de quem escreveu o código. Worktree C:\…\koba-wt\review (somente leitura: faça `git fetch` e `git checkout <branch da PR>`; NUNCA edite nem comite arquivos do repo). Leia plan.md, windows-contract.md e a tabela de propriedade (plan.md, seção "Execução multi-agente" §2.2).
-
-Para cada PR wt/* → windows_version (o Orquestrador avisa o número): rode `gh pr diff <n>`, e revise contra esta lista:
-1. Contrato: assinaturas de platform.ts/killtree.ts respeitadas? Alguém reimplementou um helper em vez de importar?
-2. Propriedade: arquivos fora da coluna do autor? (reprovar, salvo TODO(owner:…) justificado)
-3. Windows: todo caminho novo guardado por process.platform==="win32" (ou IS_WIN)? Linux continua igual? Nenhum `/bin/sh`, `chmod`, `kill(-pid)`, `existsSync` em pipe, `split("/")` novo?
-4. Erros engolidos em try/catch que escondem falha no Windows?
-5. Teste: existe e falharia sem a mudança? Roda em win32 e em linux? Integração com sh/tmux/bwrap tem skipIf?
-6. Diff mínimo: refatoração não pedida, formatação, renomeações? (reprovar)
-7. Mensagem de commit pt-BR, um item por commit, sem Co-Authored-By.
-Saída: `gh pr review <n> --comment` com achados por arquivo:linha e severidade (bloqueia / deveria / nit); `--approve` só quando não houver "bloqueia". Nas Integrações 1 e 2, revise também o diff acumulado `git diff <sha-antes>..origin/windows_version` e escreva REVIEW-integracao<N>.md fora do repo (..\koba-wt\review\).
-Nunca aprovar a própria família de modelo sem rodar `npm run build` e `npx vitest run packages apps` na branch no seu worktree.
-```
-
-#### 7.7 QA — Validador de hipóteses / Smoke
-
-```
-Você é o agente de QA/Smoke do porte do MessAI para Windows. Worktree C:\…\koba-wt\qa (checkout de origin/windows_version integrado; NUNCA edite arquivos do repo; scripts e relatórios vão em C:\…\koba-qa\). Runtime de teste sempre com MESS_PORT=47909 MESS_DATA_DIR=C:\mess-data\qa.
-
-Onda 0 — validar hipóteses do plan.md e escrever C:\…\koba-qa\REPORT-onda0.md (confirmada/refutada/parcial + evidência):
- A: node-pty spawn de "claude" vs "claude.cmd" vs "node <caminho do cli.js do @anthropic-ai/claude-code>" com um argumento multilinha de ~20k chars contendo % ^ & | " — qual chega íntegro? ENOENT onde? Existe `--append-system-prompt-file`?
- B: em "C:\Program Files\Git\bin\bash.exe": `dirname 'C:\a\mess'`, `cygpath -u`, MSYS_NO_PATHCONV; $MESS_CLI com espaço no caminho.
- E: `msedge.exe --headless=new --remote-debugging-pipe --user-data-dir=<tmp> about:blank` com fds 3/4 respondendo Target.getTargets (JSON terminado em \0).
- H: no ConPTY (node-pty + pwsh -NoProfile, e + claude), escrever "\x1b[200~linha1\nlinha2\x1b[201~" seguido de "\r": o texto entra inteiro e submete? `echo "diretório"` volta certo? chcp 65001 / [Console]::OutputEncoding resolvem?
-Onda 2/3 — rodar o smoke do mapa §5.2 em dev-mode e no .exe instalado (Fase 3): pipe \\.\pipe\messai-…, preset shell abre pwsh, `mess context`, preset claude e codex sem ENOENT, "$MESS_CLI" context no bash.exe, nota secreta como env, "Encerrar tudo" sem órfãos (tasklist), portal com Edge, deliver multilinha, acento, auto-update entre duas pré-releases. Para cada falha: item do plan.md, dono (tabela §2.2), passos de reprodução, saída. Relatório em REPORT-onda<N>.md; o Orquestrador abre os bugs com os donos.
-Visual (janela, bandeja, cores) marque "pendente de conferência humana"; não afirme que validou o que não conseguiu observar.
+Você é a Trilha 2 (Empacotamento, CI, desktop main) do porte do MessAI para Windows. Trabalhe SOMENTE em C:\Users\ctscs\Documents\MessAI-wt\package (branch win/package). Este é o ÚNICO worktree onde `npm run package`, `electron-rebuild` e `electron-builder` podem rodar — avise no PROGRESS-windows.md antes de cada build nativo. Prefira validar no runner windows-latest do GitHub.
+Objetivo: um MessAI-<versão>-x64.exe (NSIS, auto-update) sai do CI e instala; o CI Windows roda build + testes unitários; o desktop sobe e derruba o runtime sem órfãos.
+Ordem: Fase 3 (build.win nsis; package.mjs sem --linux fixo + mess.cmd; package.yml windows-latest com @electron/rebuild) → #4 + N + D (lado desktop) + #5 pidOnPort (desktop/main) → Fase 2 (ci.yml windows-latest com vitest run packages apps; branches windows_version e win/**; scripts/smoke-windows.mjs; R: helper e2e com MESS_SHELL por plataforma) → Fase 5 abrir.ps1 → Fase 6 (assinatura atrás de `if: secrets`, pré-release, README WSL2).
+Arquivos permitidos: scripts/**, apps/desktop/package.json (bloco build e devDeps de build), apps/desktop/src/main/index.ts, apps/desktop/build/**, .github/workflows/*.yml, tests/e2e/**, abrir.ps1, README.md. NÃO tocar em apps/runtime, apps/cli, packages, skills (Trilha 1).
+Pronto = workflow verde no runner; artefato .exe baixável; instala e abre; `ELECTRON_RUN_AS_NODE=1 MessAI.exe resources\cli\cli.mjs --help` imprime; o launcher mess.cmd empacotado tem a mesma semântica do apps/cli/bin/mess.cmd (contrato §9.4). PR para windows_version com link do run do CI.
+Regras: commits pt-BR citando o ID, SEM Co-Authored-By; push só em win/package; nunca main; o job linux de package.yml/ci.yml continua intocado em comportamento; JOBS=4 no node-gyp local; nunca tocar no node_modules do outro worktree; registrar hipóteses no plan.md §11.
 ```
 
 ---
 
-### 8. Estimativa de tempo (relógio de parede)
+## 10. Guia prático para os agentes executores (máquina Windows)
 
-Premissas: 6 sessões no pico; hipóteses da Onda 0 majoritariamente confirmadas; humano disponível ~1 h/dia para decisões, merges finais e teste visual; cadastro de assinatura iniciado no dia 1.
+> Esta seção é para quem vai **executar** o plano na máquina Windows (`C:\Users\ctscs\Documents\MessAI`). Tudo que está marcado **hipótese** não foi verificado nessa máquina — confirme e registre em §11.
 
-| Onda | Conteúdo | Dias-pessoa (plan.md) | Relógio (paralelo) |
+### 10.1 Requisitos: o que instalar (PowerShell como administrador onde indicado)
+
+| Item | Versão | Por quê | Comando |
 |---|---|---|---|
-| 0 | setup, contrato, hipóteses, início Fase 3 | 1 | **1** |
-| 1 | Fase 1 (3 trilhas) ∥ Fase 3 | 6–9 + 2–4 | **3–5** (A3 é a trilha mais longa; Fase 3 corre junto) |
-| Integração 1 | merges + revisão integrada + smoke dev | — | **1** |
-| 2 | Fase 2 ∥ Fase 4 ∥ skipIf ∥ H/I/J | 2–3 + 3–5 | **2–3** |
-| Integração 2 | CI win verde + `.exe` no smoke | — | **0,5–1** |
-| 3 | Fase 5 + Fase 6 (assinatura, pré-release, manual) | 0,5–1 + 3–5 | **2–3** (+ espera externa da assinatura, que começou no dia 1) |
-| **Total** | | **17–28** | **9–14 dias úteis** |
+| Git for Windows | 2.56 (**já instalado**) | Git Bash é o que o Claude Code usa no Windows e o que executa `apps/cli/bin/mess` | `winget install -e --id Git.Git` (só se faltar). Depois: `git config --global core.autocrlf false`, `git config --global core.longpaths true` |
+| Node.js | **22.x** (obrigatório: `engines` `>=22 <23`, `package.json:12`; Node 24 **não** serve) | runtime/CLI/dev; o Electron 45 embute o próprio Node para o pacote | Via gerenciador de versão (permite 22 mesmo com outro LTS instalado): `winget install -e --id Schniz.fnm` → `fnm install 22` → `fnm use 22` (ou `CoreyButler.NVMforWindows` → `nvm install 22` / `nvm use 22`). Conferir: `node -v` começa com `v22.` |
+| npm | o que vem com o Node 22 (10.x) | `npm ci` do monorepo (workspaces) | `npm -v` |
+| Python 3 | 3.10+ (3.12 recomendado) | `node-gyp` precisa (node-pty compila do fonte em todo `npm ci`) | `winget install -e --id Python.Python.3.12` |
+| Visual Studio 2022 Build Tools | 17.x | compilar node-pty (ConPTY/winpty) e, no pacote, better-sqlite3 para a ABI do Electron | `winget install -e --id Microsoft.VisualStudio.2022.BuildTools --override "--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --add Microsoft.VisualStudio.Component.VC.Runtimes.x86.x64.Spectre"` — IDs do workload `VCTools` e da componente Spectre são os publicados pela Microsoft; que o node-pty 1.0.0 **exija** as libs Spectre é **hipótese** (é o erro clássico `MSB8040: Spectre-mitigated libraries are required`). Se o build falhar com isso, abra o Visual Studio Installer → Modificar → Componentes individuais → "MSVC v143 – VS 2022 C++ x64/x86 Spectre-mitigated libs (Latest)". |
+| Windows SDK | vem com `--includeRecommended` | headers do ConPTY | — |
+| PowerShell 7 | 7.4+ (**opcional**; a máquina só tem o 5.1) | shell padrão preferido; UTF-8 por padrão | `winget install -e --id Microsoft.PowerShell` |
+| Windows Terminal | qualquer | uma aba por trilha | `winget install -e --id Microsoft.WindowsTerminal` |
+| Claude Code | atual | preset `claude`; validar A/M/V | Instalador nativo: `irm https://claude.ai/install.ps1 \| iex` (gera `claude.exe` — **hipótese** sobre o caminho `%USERPROFILE%\.local\bin`). Alternativa que produz o shim `.cmd` do item A: `npm i -g @anthropic-ai/claude-code`. Instale **os dois** modos em momentos diferentes para testar A com `.exe` e com `.cmd`. |
+| Codex CLI | atual | preset `codex`; validar G (PowerShell) | `npm i -g @openai/codex` (gera `codex.cmd`) |
+| Chrome ou Edge | Edge já vem no Windows 11 | portais (E) | `winget install -e --id Google.Chrome` (opcional; Edge basta) |
+| adb / scrcpy | **opcional** (Fase 4) | nós de dispositivo | `winget install -e --id Google.PlatformTools`; `winget install -e --id Genymobile.scrcpy` |
+| GitHub CLI | 2.x | PRs e `gh pr merge --rebase` | `winget install -e --id GitHub.cli` → `gh auth login` |
 
-- **Cenário agressivo (7–8 dias):** Onda 0 em meio dia, Fase 3 passa no CI de primeira (Spectre libs ok), hipóteses A/E/H confirmadas, J fica no mínimo (`taskkill /T`), teste manual em 1 dia.
-- **Cenário pessimista (16–18 dias):** `electron-rebuild` do node-pty luta 2–3 dias no runner; H refutada (ConPTY sem bracketed paste → redesenhar `deliver` com envio linha a linha + `\r` por linha); assinatura demora; segunda rodada manual.
-- Onde o ganho vem: Fase 1 e Fase 3 se sobrepõem totalmente; Fase 2/4/5 se sobrepõem entre si; **o que não paraleliza** são as integrações (gargalo do Orquestrador + Codex) e o humano olhando tela/assinando release — por isso o teto fica em ~2× de ganho e não em 5×.
-- Métrica para acompanhar: itens do plan.md com PR mergeada por dia (meta ≥ 4/dia na Onda 1) e tempo entre "PR aberta" e "merge" (meta < 4 h; se passar de 1 dia o gargalo é revisão/integração, não código — nesse caso adicionar uma 2ª sessão de Codex revisando, não mais devs).
+Depois de instalar o VS Build Tools, **abra um terminal novo** (PATH).
+
+**Exclusão do Defender — OPCIONAL, só com aval do dono da máquina.** Acelera `npm ci`/`tsc` e evita falso positivo no `winpty-agent.exe`, mas tira essas pastas da varredura em tempo real (qualquer coisa baixada pelo `npm ci` ou por um agente ali dentro deixa de ser examinada). Não aplicar por padrão; se aplicar, restringir às pastas do repo e remover ao fim do porte (`Remove-MpPreference -ExclusionPath ...`):
+```powershell
+Add-MpPreference -ExclusionPath "C:\Users\ctscs\Documents\MessAI", "C:\Users\ctscs\Documents\MessAI-wt", "C:\mess-data"
+```
+
+### 10.2 Preparação do repositório
+
+**1. `.gitattributes` (item K)** — criar na raiz, commitar em `windows_version` **antes** de qualquer `npm ci`. Conteúdo exato:
+```gitattributes
+# Fim de linha: o repositório guarda LF; só .cmd/.bat nascem com CRLF (cmd.exe exige).
+* text=auto eol=lf
+*.sh        text eol=lf
+*.mjs       text eol=lf
+*.ts        text eol=lf
+*.tsx       text eol=lf
+*.json      text eol=lf
+*.md        text eol=lf
+*.yml       text eol=lf
+apps/cli/bin/mess text eol=lf
+*.cmd       text eol=crlf
+*.bat       text eol=crlf
+*.ps1       text eol=crlf
+*.png       binary
+*.ico       binary
+*.sqlite    binary
+```
+
+**2. Renormalizar o checkout** (o working tree na máquina já está em CRLF):
+```powershell
+cd C:\Users\ctscs\Documents\MessAI
+git switch windows_version
+git config core.autocrlf false
+git config core.longpaths true
+git add --renormalize .
+git status                      # esperado: NENHUM arquivo modificado (o índice já é LF; só o working tree estava CRLF)
+# ATENÇÃO: o próximo comando DESCARTA alterações não commitadas. Só rode com `git status` limpo e com o .gitattributes JÁ commitado.
+git rm --cached -r . -q ; git reset --hard   # reescreve o working tree com LF conforme .gitattributes
+git ls-files --eol apps/cli/bin/mess scripts/package.mjs abrir.sh   # esperado: i/lf w/lf em todos
+& "C:\Program Files\Git\bin\bash.exe" -c 'head -c 12 apps/cli/bin/mess | od -c'   # esperado: "#!/bin/sh\n" sem \r
+```
+Se `git status` mostrar arquivos modificados após o `--renormalize`, é porque o índice tinha CRLF em algum — commite isso junto com o `.gitattributes` (`chore(windows): .gitattributes e renormalização (K)`).
+
+**3. Instalar dependências (uma vez por worktree, em série):**
+```powershell
+$env:JOBS = "4"
+npm ci
+```
+Resultado esperado: `node-pty` compila com MSVC (dura 1–3 min; linhas `conpty.vcxproj`, `pty.vcxproj`, `winpty-agent`); `better-sqlite3` baixa prebuild para Node 22; `esbuild` baixa binário. Se falhar com `MSB8040` → Spectre libs (§10.1). Se falhar com `gyp ERR! find Python` → `npm config set python <caminho do python.exe>`. Se falhar com `Could not find any Visual Studio installation` → abra terminal novo ou `npm config set msvs_version 2022`.
+
+**4. Garantir addons para o Node (não para o Electron):**
+```powershell
+npm rebuild node-pty better-sqlite3
+node -e "require('node-pty'); require('better-sqlite3'); console.log('addons ok')"   # esperado: addons ok
+```
+
+**AVISO — ABI dos addons.** **Nunca rode `npm run package` nem `electron-rebuild` no worktree de desenvolvimento** (só em `..\MessAI-wt\package`, Trilha 2). O empacotamento recompila `node-pty`/`better-sqlite3` para a ABI do Electron 45 e o runtime em dev (Node 22) passa a falhar com `NODE_MODULE_VERSION … was compiled against a different Node.js version`. Conserto: `npm rebuild node-pty better-sqlite3` no worktree afetado.
+
+### 10.3 Como testar no Windows (passo a passo)
+
+Use PowerShell (5.1 ou 7). Substitua a porta/pasta pela da sua trilha (§9.3). Cada passo diz **esperado** e **se falhar**.
+
+**1. Build**
+```powershell
+npm run build            # tsc -b
+```
+Esperado: sem saída de erro, `apps/runtime/dist/index.js` e `apps/cli/dist/index.js` existem. Se falhar: erro de tipo é regressão sua; erro `EPERM`/`EBUSY` em `dist` = runtime/app aberto usando o arquivo → feche (`taskkill /IM node.exe` só do seu worktree, ou feche o app).
+
+**2. Testes unitários (sem integração)**
+```powershell
+npx vitest run packages apps
+```
+Esperado **antes** do item O: tudo verde exceto `apps/runtime/src/procs.test.ts` (`/proc`). Depois de O: tudo verde. `tests/integration` **não entra** (Linux-only). Se `better-sqlite3`/`node-pty` falharem ao carregar: §10.2 passo 4.
+
+**3. Subir o runtime isolado**
+```powershell
+$env:MESS_DATA_DIR = "C:\mess-data\core"; $env:MESS_PORT = "47901"
+# opcionais: MESS_SHELL (shell padrão), MESS_BROWSER (exe do navegador), MESS_ADB/MESS_EMULATOR/MESS_SCRCPY, MESS_COMPANION=0 (desliga Ollama), MESS_NODE (node usado pelo desktop em dev)
+node apps\runtime\dist\index.js
+```
+Esperado: uma linha `messai-runtime machine=… http=http://127.0.0.1:47901 socket=\\.\pipe\messai-… data=C:\mess-data\core pid=…` (`apps/runtime/src/index.ts:68`). **Antes de #6** o `socket=` ainda será `C:\mess-data\core\agent.sock` e o `listen` falha/`chmodSync` lança → esse é o sintoma do item #6. Se o processo sair sem mensagem: veja `C:\mess-data\core\runtime.log` quando subido pelo app; no console direto o erro aparece no stderr.
+
+**4. Health**
+```powershell
+$tok = (Get-Content "$env:MESS_DATA_DIR\runtime.token" -Raw).Trim()
+Invoke-RestMethod -Uri "http://127.0.0.1:$env:MESS_PORT/v1/health" -Headers @{ authorization = "Bearer $tok" }
+```
+Esperado: `ok=True`, `protocolVersion`, `buildVersion`, `machineId` (`server.ts:105`). `401` → token errado/pasta errada (sintoma de D quando o desktop lê outra pasta). Sem resposta → runtime não subiu (passo 3).
+
+**5. Presets e shell padrão**
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:$env:MESS_PORT/v1/presets" -Headers @{ authorization = "Bearer $tok" } | Select-Object id, command
+```
+Esperado após #3: preset `shell` com `command` = caminho do `pwsh.exe` ou `powershell.exe` (antes: `/bin/bash`, sintoma de #3). `claude`/`codex`/`opencode`/`agy` com o nome lógico, **sem** `.cmd` (M).
+
+**6. Abrir um terminal pela API e mandar um comando**
+```powershell
+$h = @{ authorization = "Bearer $tok"; "content-type" = "application/json" }
+$ws = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$env:MESS_PORT/v1/workspaces" -Headers $h -Body (@{ name = "Smoke"; cwd = "C:\mess-data\core" } | ConvertTo-Json)
+$n  = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$env:MESS_PORT/v1/workspaces/$($ws.workspaceId)/nodes" -Headers $h -Body (@{ expectedRevision = $ws.revision; kind = "terminal"; title = "T"; geometry = @{ x = 0; y = 0; w = 600; h = 300 } } | ConvertTo-Json -Depth 5)
+$n.session.sessionId; $n.session.state
+```
+Esperado: `state` = `running` (com `pid`). `exited` imediato = spawn falhou (A/#3). A entrada vai pelo WebSocket `ws://127.0.0.1:<porta>/v1/ws?token=<tok>` com `{ "type": "attach", "sessionId": … }` e depois `{ "type": "input", "sessionId": …, "data": "…\r" }` (`server.ts:518,543`; exemplo em `tests/integration/shell.test.ts:33-34`). Em vez de escrever um cliente WS à mão, use o `scripts/smoke-windows.mjs` (Trilha 2) ou abra o app (passo 10) e digite no nó.
+
+**7. `mess context` e `mess note write` de dentro do terminal (PowerShell)**
+No terminal criado (via app ou WS), digite:
+```powershell
+mess context
+mess note write "Smoke" "olá, diretório"
+mess --help
+```
+Esperado: `mess context` imprime o espaço e o nó; a nota aparece ligada ao terminal; `--help` lista os comandos. `command not found`/`'mess' não é reconhecido` = `CLI_DIR` não entrou no `Path` (C) ou não existe `mess.cmd` (#1). `Fora de um terminal MessAI: a credencial (MESS_TOKEN) não chegou` (`apps/cli/src/index.ts:18`) = env não injetado. `ECONNREFUSED`/`ENOENT` no socket = #6 (`MESS_SOCKET` apontando para `agent.sock`).
+
+**8. O mesmo via Git Bash** (é o que o Claude Code usa)
+No terminal do MessAI (pwsh), entre no bash **herdando o env**:
+```powershell
+& "C:\Program Files\Git\bin\bash.exe" --noprofile --norc
+```
+e dentro dele:
+```bash
+echo "$MESS_CLI"            # esperado após B: /c/Users/.../apps/cli/bin/mess (POSIX), não C:\...
+"$MESS_CLI" context         # esperado: mesma saída do passo 7
+mess context                # esperado: também funciona (PATH com CLI_DIR)
+echo "diretório ação"       # esperado: acentos corretos (H)
+```
+Se `"$MESS_CLI" context` der `No such file or directory` com `./dist/index.js` → B (dirname de caminho com `\`). Se a saída vier com `Ã£`/`??` → H (codepage); teste `chcp 65001` antes e registre.
+
+**9. Deliver / bracketed paste (H) e acentos**
+Com um terminal `claude` ou `codex` aberto e um segundo terminal `mess` ligado a ele: `mess ask <nome> 'linha 1
+linha 2 com acentuação'` (multilinha). Esperado: o texto chega **inteiro** no campo do agente e é submetido pelo Enter atrasado (`sessions.ts:226-230`); o agente responde. Se chegar linha a linha ou sem submeter → H refutada: registrar em §11 e ajustar `deliver` (enviar por linha + `\r`).
+
+**10. Desktop em dev**
+```powershell
+# com o runtime do passo 3 PARADO (o app sobe o seu próprio, com MESS_DATA_DIR/MESS_PORT do env)
+$env:MESS_DATA_DIR = "C:\mess-data\core"; $env:MESS_PORT = "47901"
+npm run desktop            # = npm run dev -w @messai/desktop = electron-vite dev
+```
+Esperado: janela do MessAI abre; no canto, versão do app; a pasta de dados mostrada em "Sobre"/Preferências é `C:\mess-data\core` (D); criar um nó terminal abre `pwsh` (#3); criar nó `claude` abre o Claude Code **sem** `ENOENT` e **sem** diálogo "trust this folder" (A, M, V); nota secreta ligada ao terminal aparece como `$env:NOME` dentro dele; portal abre uma página com Edge (E); "Encerrar tudo" não deixa `pwsh.exe`/`claude.exe`/`msedge.exe --headless` em `tasklist` (J, #5). Se a janela abrir mas o runtime não responder em 40 s: `C:\mess-data\core\runtime.log`. O desktop usa `node` do PATH em dev (`desktop/main:96`; mude com `MESS_NODE`).
+
+**11. Pacote (só Trilha 2, só em `..\MessAI-wt\package`)**
+`node scripts\package.mjs nsis` → `apps\desktop\release\MessAI-<versão>-x64.exe`. Instalar, abrir, repetir os passos 7–10 **com o runtime empacotado** (`MESS_RESOURCES` setado pelo app). Depois: `npm rebuild node-pty better-sqlite3` nesse worktree antes de voltar a rodar testes nele.
+
+### 10.4 Checklist de aceite por fase (critérios objetivos)
+
+**Fase 0**
+- [ ] `node -v` = `v22.*`; `python --version` = 3.x; `cl.exe` acessível em terminal novo (ou `npm ci` compila o node-pty sem `MSB8040`).
+- [ ] `.gitattributes` commitado; `git ls-files --eol` sem `w/crlf` em `*.sh`, `apps/cli/bin/mess`, `*.mjs`, `*.ts`.
+- [ ] `npm ci` + `npm run build` + `npx vitest run packages apps` com apenas `procs.test.ts` vermelho (ou tudo verde se O já entrou).
+- [ ] §11 com as hipóteses A, B, E, H, N, Q, V marcadas confirmada/refutada/parcial e evidência.
+
+**Fase 1 (Trilha 1)**
+- [ ] Runtime sobe com `socket=\\.\pipe\messai-…`; `/v1/health` responde; `mess context` responde em pwsh **e** em Git Bash.
+- [ ] Preset `shell` abre pwsh/powershell; `claude` e `codex` abrem sem `ENOENT` (instalados por `npm i -g` **e** pelo instalador nativo).
+- [ ] `agentKind("C:\\x\\claude.cmd")` = `claudeCode` (teste unitário); `--dangerously-skip-permissions` presente no argv do Claude recrutado.
+- [ ] Linha de comando gerada para `claude` com papel + 3 skills ≤ 30 k bytes no Windows (teste).
+- [ ] `isolation` na API devolve erro claro no Windows; `terminal.tmux` ausente de `features` mesmo com tmux do MSYS2 no PATH.
+- [ ] `npx vitest run packages apps` verde no Windows; CI Linux verde; contagem de testes Linux inalterada.
+
+**Fase 3 (Trilha 2)**
+- [ ] `package.yml` com job `windows-latest` verde; artefato `MessAI-*-x64.exe` e `latest.yml` no release de teste.
+- [ ] O `.exe` instala, abre, e `ELECTRON_RUN_AS_NODE=1 MessAI.exe resources\cli\cli.mjs --help` imprime a ajuda.
+- [ ] `resources\cli\mess.cmd --help` e `bash -c '"$MESS_CLI" --help'` imprimem o mesmo.
+
+**Fase 2**
+- [ ] `ci.yml` com job `windows-latest` (`npm ci`, build, `npm rebuild`, `vitest run packages apps`) verde; dispara em push para `windows_version` e `win/**`.
+- [ ] `scripts/smoke-windows.mjs` passa no runner: health → terminal pwsh → `mess context` → `mess note write` → bash.exe `"$MESS_CLI" context` → `deliver` multilinha → `echo "diretório"` íntegro no buffer.
+- [ ] e2e `pilot`, `prefs`, `portal` verdes em `windows-latest` (helper de boot com `MESS_SHELL` por plataforma).
+
+**Fase 4**
+- [ ] Portal abre `https://example.com` com Edge via `--remote-debugging-pipe`; snapshot/screenshot funcionam.
+- [ ] `mess ask` multilinha chega inteiro e submete no Claude e no Codex; sem mojibake em pt-BR.
+- [ ] Pasta de dados em `D:\…` → aviso/ACL aplicada (`icacls` mostra só o usuário) — ou aviso na UI.
+- [ ] Fechar o app com "Encerrar tudo" → `tasklist` sem `pwsh.exe`/`claude.exe`/`msedge.exe` do MessAI.
+
+**Fase 5/6**
+- [ ] `abrir.ps1` (ou `npm run desktop` documentado) sobe o app em dev.
+- [ ] Instalador assinado: sem aviso SmartScreen numa máquina limpa; auto-update da pré-release N para N+1 completa.
+- [ ] Rodada manual: instalar, espaço, terminal, nota, portal, recrutar Claude e Codex, nota secreta, auto-update — com desvios documentados.
+- [ ] README com seção Windows (nativo) e WSL2.
+
+### 10.5 Regras para os agentes executores
+
+1. **Branch/worktree certos**: Trilha 1 em `..\MessAI-wt\core` (`win/core`), Trilha 2 em `..\MessAI-wt\package` (`win/package`). Nunca commitar em `main`; `windows_version` só recebe merge de PR.
+2. **Não quebrar o Linux**: todo caminho novo atrás de `process.platform === "win32"` (`IS_WIN`) ou dentro de `apps/runtime/src/platform.ts`/`killtree.ts`. Nenhum `/bin/sh`, `chmod`, `kill(-pid)`, `existsSync` em pipe ou `split("/")` novo fora da camada platform. O CI `ubuntu-latest` tem que continuar verde com a mesma contagem de testes.
+3. **Antes de commitar**: `npm run build` + `npx vitest run packages apps` no Windows. Teste novo por item (o teste é o contrato).
+4. **Commits pequenos**, um item do plano por commit, mensagem em pt-BR citando o ID: `feat(windows): resolveSpawnCommand com PATHEXT (A)`, `fix(windows): named pipe sem existsSync/chmod (#6)`, `test(windows): binaryName com C:\x\claude.cmd (M)`. **Sem `Co-Authored-By`** (regra do dono do projeto).
+5. **Diff mínimo**: sem refatoração, formatação ou renomeação não pedidas; `service.ts` recebe chamadas de uma linha aos helpers.
+6. **Atualizar o plano**: ao concluir um item, marcar a caixinha `[x]` na seção "Fases" e registrar em §11 toda hipótese confirmada/refutada com a evidência (comando + saída). Fazer isso **no mesmo PR** do item.
+7. **Nunca** `npm run package`/`electron-rebuild` fora de `..\MessAI-wt\package`; nunca `npm ci` em dois worktrees ao mesmo tempo; antes de `npm ci`/`rebuild`, fechar app/runtime daquele worktree.
+8. **Não afirmar o que não observou**: visual (janela, bandeja, cores) fica "pendente de conferência humana"; saída de comando vai literal no PR.
+9. **Porta e pasta próprias** (§9.3) para o runtime de teste; nunca a `47821`/`~/.messai` do usuário.
 
 ---
 
-### Apêndice — checklist de início (Orquestrador, dia 1, manhã)
+## 11. Hipóteses a validar na máquina Windows (registrar aqui: confirmada / refutada / parcial + evidência)
 
-- [ ] `git -C koba switch windows_version && git pull`
-- [ ] `.gitattributes` (`*.sh text eol=lf`, `apps/cli/bin/mess text eol=lf`, `*.mjs text eol=lf`, `*.cmd text eol=crlf`), `core.autocrlf=false`, `core.longpaths=true`
-- [ ] Exclusão do Defender para `C:\…\koba*` e `C:\mess-data`
-- [ ] 6 worktrees (§4.1); `npm ci` em série com `JOBS=4`
-- [ ] `windows-contract.md` + `platform.ts`/`killtree.ts` stubs + `*.test.ts` com `it.todo` + `AGENT_ENV.cliCmd` (ou delegar essa PR ao A3 como PR 0)
-- [ ] `PROGRESS-windows.md` com tabela agente × item × estado
-- [ ] Humano: iniciar cadastro Azure Trusted Signing; criar `MESS_PORT`/`MESS_DATA_DIR` por agente
-- [ ] Lançar QA (hipóteses) e A4 (Fase 3) imediatamente; A1/A2/A3 após o commit do contrato
+| ID | Hipótese | Como validar (fora do repo, em `C:\mess-qa\`) | Estado |
+|---|---|---|---|
+| A | `pty.spawn("claude")` falha com `ENOENT` quando só existe `claude.cmd`; `claude.exe` (instalador nativo) funciona direto; argumento multilinha de ~20 k com `% ^ & \| "` chega íntegro via `node <cli.js>` mas não via `.cmd`; `--append-system-prompt-file` existe? | script `node-pty` fora do repo (`npm i node-pty` em `C:\mess-qa`) spawnando `claude`, `claude.cmd`, `claude.exe`, `node <…\claude-code\cli.js>` com `--append-system-prompt <texto>`; `claude --help \| findstr system-prompt` | [ ] |
+| B | `dirname 'C:\a\mess'` = `.` no Git Bash; `cygpath -u` resolve; `MESS_ELECTRON="C:\…\MessAI.exe"` funciona entre aspas | `bash.exe -c 'dirname "C:\a\mess"; cygpath -u "C:\a\mess"'` | [ ] |
+| E | `msedge.exe --headless=new --remote-debugging-pipe --user-data-dir=<tmp> about:blank` responde `Target.getTargets` pelos fds 3/4 (JSON terminado em `\0`) | script Node com `spawn(..., { stdio: ["ignore","ignore","pipe","pipe","pipe"] })` | [ ] |
+| H | ConPTY entrega `\x1b[200~…\x1b[201~` + `\r` como um bloco no `pwsh` e no `claude`; `echo "diretório"` volta certo; `chcp 65001`/`[Console]::OutputEncoding` resolvem | script `node-pty` + `pwsh -NoProfile`; repetir com `claude` | [ ] |
+| N | `spawn(..., { detached: true })` de um app de console abre janela no Windows; `windowsHide: true` evita | `spawn("powershell.exe", ["-c","sleep 5"], { detached: true, stdio: "ignore" })` e observar | [ ] |
+| Q | Claude Code no Windows ignora `SHELL=…\pwsh.exe` (ou quebra a detecção do Git Bash) | abrir `claude` com `SHELL` setado e rodar uma ferramenta Bash | [ ] |
+| V | `~/.claude.json` → `projects["C:\\Users\\…"]` com `hasTrustDialogAccepted` evita o diálogo | recrutar Claude numa pasta nova; ver se o diálogo aparece; inspecionar a chave gravada pelo próprio Claude Code | [ ] |
+| L1 | runner `windows-latest` tem as Spectre libs; `electron-rebuild` do node-pty compila | primeiro run do job | [ ] |
+| L2 | `cmd.exe` resolve `"C:\…\node_modules\.bin\esbuild"` sem `.cmd` e o `--banner:js="…;…"` chega inteiro | `node scripts\package.mjs` no worktree `package` | [ ] |
+| L3 | `MessAI.exe` com `ELECTRON_RUN_AS_NODE=1` escreve no console (binário GUI) | pós-build | [ ] |
+| L4 | better-sqlite3 13 tem prebuild para Electron 45 (evita compilar) | log do `electron-rebuild` | [ ] |
+| O | `agents.test.ts` passa no Windows mesmo com `fake-cli` sem extensão (X_OK não verifica execução) | `npx vitest run apps/runtime/src/agents.test.ts` | [ ] |
+| P | `realpathSync` no Windows devolve caixa diferente da gravada → `isWithinCanonicalRoot` falso negativo | `node -e "console.log(require('fs').realpathSync('c:\\users'))"` | [ ] |
+| SIGUSR2 | `process.on("SIGUSR2")` não lança no Windows | `node -e "process.on('SIGUSR2',()=>{}); console.log('ok')"` | [ ] |
+| Fase 6 | electron-builder 25.1.8 aceita `win.azureSignOptions` | doc/`electron-builder --help` ou build de teste | [ ] |
+
+---
+
+## 12. Nota histórica — modelo de 7 papéis (rev. 4)
+
+A rev. 4 propunha 7 papéis (Orquestrador, A1 Spawn/PTY, A2 Ciclo de vida, A3 Service/CLI, A4 Empacotamento, Revisor Codex, QA) em 4 worktrees e 3 ondas, com 9–14 dias úteis de relógio. A rev. 5 concluiu, e a rev. 6 confirma, que três das quatro "ilhas" de código convergem em `service.ts` e `packages/domain` — dividi-las entre agentes gerava mais rebase do que código — e que a coordenação (contrato com stubs, propriedade por arquivo, integrações por onda) custava mais do que o paralelismo rendia. Ficou o que era bom: a trilha de empacotamento independente desde o dia 1, o contrato mínimo de `platform.ts`/`killtree.ts` (§9.4), a regra de propriedade por arquivo e os gates por PR. O detalhe do modelo antigo está em `git show 5b46fa6:plan.md`.
