@@ -48,7 +48,7 @@ Hipóteses de §11 confirmadas/refutadas nesta sessão: A ✔, B ✘, E ✔, H �
 - [ ] Monitor de processos (`procs.ts`) degradado no Windows (hoje lê `/proc`).
 - [ ] Baixo: SIGUSR2 guardado, filtro de nota secreta case-insensitive (`path`), preset `shell` antigo `/bin/bash` normalizado no boot, `expandHome` com `~\`, `includes("/")` cosmético.
 - [ ] Investigar: terminal/nota encolhe ao arrastar (tela com escala 150%, DPI 144).
-- [ ] `mess routine --help` não lista os parâmetros (dono testou: rotina funciona, só a ajuda está vazia) — provavelmente geral, não só Windows.
+- [ ] `mess routine --help` não mostra a descrição/ajuda do subcomando (dono testou: a rotina funciona; só a ajuda não aparece) — provavelmente geral, não só Windows.
 - [ ] Mojibake ao canalizar a saída do `mess` no PowerShell 5.1 (`mess --help | Select-Object`).
 - [ ] Marcar caixinhas do `plan.md` e abrir PR `win/core → windows_version`.
 
