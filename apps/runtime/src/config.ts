@@ -3,6 +3,8 @@ import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, writeFileSync }
 import { homedir, hostname, platform, userInfo } from "node:os";
 import { join } from "node:path";
 import { resolveDataDir } from "./data.js";
+import { IS_WIN } from "./platform.js";
+import { whichOnPath } from "./providers.js";
 
 export type Config = {
   dataDir: string;
@@ -26,12 +28,21 @@ export type Config = {
   ollamaModel: string | undefined;
 };
 
-/** Shell padrão do PC: override MESS_SHELL, senão o shell de login do usuário (/etc/passwd), senão $SHELL, senão bash. */
-function resolveDefaultShell(): string {
-  const override = process.env["MESS_SHELL"];
+/**
+ * Shell padrão do PC: override MESS_SHELL, senão o shell de login do usuário (/etc/passwd), senão $SHELL, senão bash.
+ * Windows (#3): MESS_SHELL > pwsh (PowerShell 7) > powershell.exe 5.1 (vem em todo Windows) > %COMSPEC% > cmd.exe.
+ */
+export function resolveDefaultShell(env: NodeJS.ProcessEnv = process.env, win = IS_WIN, exists: (p: string) => boolean = existsSync): string {
+  const override = env["MESS_SHELL"];
   if (override && override.trim()) return override.trim();
+  if (win) {
+    const pwsh = whichOnPath("pwsh", env, true); if (pwsh) return pwsh;
+    const root = env["SystemRoot"] ?? env["SYSTEMROOT"] ?? "C:\\Windows";
+    const ps = `${root}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`; if (exists(ps)) return ps;
+    return whichOnPath("powershell", env, true) ?? env["ComSpec"] ?? env["COMSPEC"] ?? "cmd.exe";
+  }
   try { const s = userInfo().shell; if (s && s.trim() && s !== "/sbin/nologin" && s !== "/usr/sbin/nologin") return s; } catch { /* sem passwd */ }
-  return process.env["SHELL"] ?? "/bin/bash";
+  return env["SHELL"] ?? "/bin/bash";
 }
 
 export function loadConfig(): Config {
