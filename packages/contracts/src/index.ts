@@ -974,6 +974,7 @@ export const AGENT_ENV = {
   skillsText: "MESS_SKILLS_TEXT", // #57 instruções completas das habilidades
   maestro: "MESS_MAESTRO", // #29 "1" quando o terminal é condutor
   cli: "MESS_CLI", // caminho absoluto do executável `mess` (p/ CLIs como o Codex que resetam o PATH via shell snapshot)
+  cliCmd: "MESS_CLI_CMD", // Windows: caminho do `mess.cmd` (pwsh/cmd não executam o launcher sh de MESS_CLI)
 } as const;
 
 // #57 — Skills: conjuntos de instruções reutilizáveis anexáveis a um terminal (vários por nó), injetadas como o papel.
