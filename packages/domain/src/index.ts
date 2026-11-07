@@ -158,15 +158,20 @@ export function formatDelivery(m: { messageId: string; fromTitle: string; text: 
  * costuma animar enquanto pensa, então a quiescência é mais longa.
  */
 export type AgentKind = { isAgent: boolean; agentType: string; label: string };
+// Separadores aceitam `\` e o nome aceita sufixo .exe/.cmd/.bat/.ps1 (Windows, M) — ex.: `sh -c "C:\x\codex.cmd ..."`.
 const AGENT_BINS: { re: RegExp; type: string; label: string }[] = [
-  { re: /(^|[\s/])claude([\s/-]|$)/, type: "claudeCode", label: "claude" },
-  { re: /(^|[\s/])codex([\s/-]|$)/, type: "codex", label: "codex" },
-  { re: /(^|[\s/])opencode([\s/-]|$)/, type: "openCode", label: "opencode" },
-  { re: /(^|[\s/])(antigravity|agy)([\s/-]|$)/, type: "antigravityCLI", label: "antigravity" }, // binário: agy
-  { re: /(^|[\s/])aider([\s/-]|$)/, type: "aider", label: "aider" },
+  { re: /(^|[\s/\\])claude(\.(?:exe|cmd|bat|ps1))?([\s/\\-]|$)/, type: "claudeCode", label: "claude" },
+  { re: /(^|[\s/\\])codex(\.(?:exe|cmd|bat|ps1))?([\s/\\-]|$)/, type: "codex", label: "codex" },
+  { re: /(^|[\s/\\])opencode(\.(?:exe|cmd|bat|ps1))?([\s/\\-]|$)/, type: "openCode", label: "opencode" },
+  { re: /(^|[\s/\\])(antigravity|agy)(\.(?:exe|cmd|bat|ps1))?([\s/\\-]|$)/, type: "antigravityCLI", label: "antigravity" }, // binário: agy
+  { re: /(^|[\s/\\])aider(\.(?:exe|cmd|bat|ps1))?([\s/\\-]|$)/, type: "aider", label: "aider" },
 ];
+/** Nome lógico do binário (M): tira diretório (`/` e `\`) e sufixo .exe/.cmd/.bat/.ps1/.com; minúsculas. `C:\x\Claude.cmd` → `claude`. */
+export function binaryName(command: string): string {
+  return (command.split(/[\\/]/).pop() ?? command).replace(/\.(exe|cmd|bat|ps1|com)$/i, "").toLowerCase();
+}
 export function agentKind(command: string, args: string[] = []): AgentKind {
-  const hay = [command, ...args].join(" ");
+  const hay = [binaryName(command), ...args].join(" ");
   for (const a of AGENT_BINS) if (a.re.test(hay)) return { isAgent: true, agentType: a.type, label: a.label };
   return { isAgent: false, agentType: "genericShell", label: "shell" };
 }
@@ -289,7 +294,7 @@ export const skillsText = (skills: { name: string; instructions: string }[]): st
 /** Injeta as habilidades na linha de comando como o papel (só Claude Code aceita system prompt); acumula no mesmo --append-system-prompt. */
 export function applySkills(command: string, args: string[], skills: { name: string; instructions: string }[]): string[] {
   if (!skills.length) return args;
-  if (command.split("/").pop() !== "claude") return args;
+  if (binaryName(command) !== "claude") return args;
   const i = args.indexOf("--append-system-prompt");
   const text = skillsText(skills);
   if (i >= 0 && i + 1 < args.length) return args.map((a, j) => (j === i + 1 ? `${a}\n\n${text}` : a));
@@ -299,8 +304,7 @@ export function applySkills(command: string, args: string[], skills: { name: str
 /** Injeta o papel na linha de comando quando a CLI aceita system prompt (Claude Code). Outras CLIs recebem só por variável de ambiente. */
 export function applyRole(command: string, args: string[], role: { name: string; instructions: string } | undefined): string[] {
   if (!role) return args;
-  const bin = command.split("/").pop();
-  if (bin !== "claude") return args;
+  if (binaryName(command) !== "claude") return args;
   const i = args.indexOf("--append-system-prompt");
   const text = roleText(role);
   if (i >= 0 && i + 1 < args.length) return args.map((a, j) => (j === i + 1 ? `${a}\n\n${text}` : a));
