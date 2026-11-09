@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { defaultPresets, MAX_PRESETS, parsePresets, validatePresets } from "./presets.js";
+import { defaultPresets, MAX_PRESETS, normalizePresets, parsePresets, validatePresets } from "./presets.js";
 
 const D = defaultPresets("/bin/sh");
+
+describe("normalizePresets", () => {
+  const p = [{ id: "shell", label: "Shell", command: "/bin/bash", args: [] }, { id: "x", label: "X", command: "/opt/x", args: [] }] as unknown as Parameters<typeof normalizePresets>[0];
+  it("Windows troca só o preset shell com caminho POSIX; Linux não mexe", () => {
+    expect(normalizePresets(p, "C:\\ps.exe", true).map((x) => x.command)).toEqual(["C:\\ps.exe", "/opt/x"]);
+    expect(normalizePresets(p, "/bin/zsh", false)).toBe(p);
+  });
+});
 
 describe("presets (#56)", () => {
   it("padrões: shell usa o shell padrão; claude leva a dica do MessAI; todos habilitados", () => {

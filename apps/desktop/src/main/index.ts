@@ -321,7 +321,7 @@ ipcMain.handle("mess:clipboard-read", async () => {
 ipcMain.handle("mess:clipboard-write", async (_e, text: unknown) => { if (typeof text === "string") await clipboard.writeText(text); });
 ipcMain.handle("mess:save-text", async (_e, suggested: unknown, text: unknown) => {
   if (typeof text !== "string") return null;
-  const name = typeof suggested === "string" && suggested && !suggested.includes("/") ? suggested : "messai.txt";
+  const name = typeof suggested === "string" && suggested && !/[\\/]/.test(suggested) ? suggested : "messai.txt";
   const r = await dialog.showSaveDialog({ defaultPath: join(homedir(), name) });
   if (r.canceled || !r.filePath) return null;
   writeFileSync(r.filePath, text, "utf8"); return r.filePath;
@@ -407,4 +407,4 @@ app.whenReady().then(() => {
 });
 app.on("window-all-closed", () => app.quit()); // o runtime continua vivo
 // Ajuda de desenvolvimento: `kill -USR2 <pid>` traz a janela para frente.
-process.on("SIGUSR2", () => showMain());
+if (process.platform !== "win32") process.on("SIGUSR2", () => showMain()); // o Windows não tem SIGUSR2

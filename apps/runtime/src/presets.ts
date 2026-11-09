@@ -10,6 +10,10 @@ export const AGENT_HINT = "Você está rodando dentro de um nó terminal do Mess
 
 export const PRESETS_META_KEY = "presets";
 export const MAX_PRESETS = 20;
+/** Preset Shell salvo noutro sistema (backup do Linux: `/bin/bash`) não existe no Windows: volta ao shell padrão. */
+export function normalizePresets(presets: PresetInput[], defaultShell: string, win = process.platform === "win32"): PresetInput[] {
+  return win ? presets.map((p) => (p.id === "shell" && p.command.startsWith("/") ? { ...p, command: defaultShell } : p)) : presets;
+}
 const base = { enabled: true, icon: "", color: "", maestro: false, target: "terminal" as const, theme: "system" as const };
 export function defaultPresets(defaultShell: string): PresetInput[] {
   return [

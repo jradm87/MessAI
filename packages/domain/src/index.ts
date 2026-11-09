@@ -687,7 +687,7 @@ export function bwrapPlan(plan: TerminalPlan, iso: NodeIsolationProfile, ctx: Is
   return { ...plan, command: "bwrap", args: a, env: outerEnv };
 }
 /** Perfil efetivo = o do nó + caminhos globais; normaliza `~` e remove duplicatas. */
-export function expandHome(p: string, home: string): string { return p === "~" ? home : p.startsWith("~/") ? home + p.slice(1) : p; }
+export function expandHome(p: string, home: string): string { return p === "~" ? home : p.startsWith("~/") || p.startsWith("~\\") ? home + p.slice(1) : p; }
 /** Ambiente mínimo de um terminal isolado: nada herdado do runtime além do estritamente seguro (sem chaves/tokens do shell do usuário). */
 export const ISOLATED_ENV_ALLOW = ["PATH", "LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "TZ", "TERM", "COLORTERM", "TERMINFO", "TERMINFO_DIRS"] as const;
 export function scrubEnv(base: Record<string, string>, inject: Record<string, string>): Record<string, string> {
