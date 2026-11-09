@@ -66,6 +66,22 @@ export function shellCommandArgs(shell: string, cmd: string): string[] {
   return ["-c", cmd];
 }
 
+/** Nome de env que nota secreta não pode sobrescrever (PATH/SHELL/MESS_*). No Windows o ambiente não diferencia caixa: `path` seria o PATH. */
+export function reservedEnvName(name: string, win = IS_WIN): boolean {
+  const n = win ? name.toUpperCase() : name;
+  return n === "PATH" || n === "SHELL" || n.startsWith("MESS_");
+}
+
+/**
+ * H: o PowerShell 5.1 decodifica a saída de programas em codepage OEM quando há pipe (`mess --help | Select-Object` virava "espa├ºo").
+ * Terminal interativo sem argumentos sobe já em UTF-8; com argumentos do usuário, não mexe.
+ */
+export function powershellInitArgs(command: string, args: string[]): string[] {
+  const name = (command.split(/[\\/]/).pop() ?? command).toLowerCase().replace(/\.exe$/, "");
+  if (args.length || (name !== "powershell" && name !== "pwsh")) return args;
+  return ["-NoExit", "-Command", "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; $OutputEncoding=[System.Text.Encoding]::UTF8"];
+}
+
 /** Converte `C:\a\b` → `/c/a/b` (Git Bash/MSYS). Caminho que não começa com letra de drive só troca `\` por `/`. */
 export function toPosixPath(p: string): string {
   const s = p.replace(/\\/g, "/");

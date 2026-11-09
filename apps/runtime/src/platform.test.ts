@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { join } from "node:path";
-import { getPath, isPathLike, pathExts, pathKey, prependPath, shellCommandArgs, socketPathFor, toPosixPath } from "./platform.js";
+import { getPath, isPathLike, pathExts, pathKey, powershellInitArgs, prependPath, reservedEnvName, shellCommandArgs, socketPathFor, toPosixPath } from "./platform.js";
 
 describe("platform (porte Windows)", () => {
   it("pathKey/getPath: Windows acha a chave em qualquer caixa; fora dele é sempre PATH", () => {
@@ -37,6 +37,18 @@ describe("platform (porte Windows)", () => {
     expect(shellCommandArgs("C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "x")).toEqual(["-NoProfile", "-NonInteractive", "-Command", `${utf8}x`]);
     expect(shellCommandArgs("C:\\Windows\\system32\\cmd.exe", "dir")).toEqual(["/d", "/s", "/c", "dir"]);
     expect(shellCommandArgs("C:\\Program Files\\Git\\bin\\bash.exe", "ls")).toEqual(["-c", "ls"]);
+  });
+  it("reservedEnvName: caixa só importa fora do Windows", () => {
+    expect(reservedEnvName("path", true)).toBe(true);
+    expect(reservedEnvName("mess_token", true)).toBe(true);
+    expect(reservedEnvName("path", false)).toBe(false);
+    expect(reservedEnvName("PATH", false)).toBe(true);
+    expect(reservedEnvName("API_KEY", true)).toBe(false);
+  });
+  it("powershellInitArgs (H): só PowerShell sem argumentos", () => {
+    expect(powershellInitArgs("C:\\x\\powershell.exe", [])[0]).toBe("-NoExit");
+    expect(powershellInitArgs("pwsh", ["-File", "a.ps1"])).toEqual(["-File", "a.ps1"]);
+    expect(powershellInitArgs("claude", [])).toEqual([]);
   });
   it("isPathLike e toPosixPath", () => {
     expect(isPathLike("claude", true)).toBe(false);

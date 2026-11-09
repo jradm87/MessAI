@@ -445,7 +445,9 @@ export function safeRelPath(rel: string): Result<string> {
  * comparando por componentes de caminho (evita falso-positivo de `startsWith` como `/tmp/ws` vs `/tmp/ws2`).
  */
 export function isWithinCanonicalRoot(realRoot: string, realTarget: string): boolean {
-  const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "") || "/";
+  // P: caminho com letra de drive = Windows, onde NTFS não diferencia caixa (`realpath` pode devolver `c:\a` ou `C:\A`)
+  const fold = /^[a-zA-Z]:/.test(realRoot);
+  const norm = (p: string) => { const s = p.replace(/\\/g, "/").replace(/\/+$/, "") || "/"; return fold ? s.toLowerCase() : s; };
   const r = norm(realRoot);
   const t = norm(realTarget);
   if (r === "/") return t.startsWith("/");
@@ -685,7 +687,7 @@ export function bwrapPlan(plan: TerminalPlan, iso: NodeIsolationProfile, ctx: Is
   return { ...plan, command: "bwrap", args: a, env: outerEnv };
 }
 /** Perfil efetivo = o do nó + caminhos globais; normaliza `~` e remove duplicatas. */
-export function expandHome(p: string, home: string): string { return p === "~" ? home : p.startsWith("~/") ? home + p.slice(1) : p; }
+export function expandHome(p: string, home: string): string { return p === "~" ? home : p.startsWith("~/") || p.startsWith("~\\") ? home + p.slice(1) : p; }
 /** Ambiente mínimo de um terminal isolado: nada herdado do runtime além do estritamente seguro (sem chaves/tokens do shell do usuário). */
 export const ISOLATED_ENV_ALLOW = ["PATH", "LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "TZ", "TERM", "COLORTERM", "TERMINFO", "TERMINFO_DIRS"] as const;
 export function scrubEnv(base: Record<string, string>, inject: Record<string, string>): Record<string, string> {

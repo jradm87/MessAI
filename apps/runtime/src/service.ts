@@ -21,7 +21,7 @@ import { listProviders } from "./providers.js";
 import { probeAccounts } from "./accounts.js";
 import { backupName, copyBackupFiles, dataStats, isBackupName, listBackups, validateBackup, validateMoveTarget, writeManifest, type BackupEntry } from "./data.js";
 import { BUILD_VERSION } from "@messai/contracts";
-import { defaultPresets, parsePresets, validatePresets, PRESETS_META_KEY } from "./presets.js";
+import { defaultPresets, normalizePresets, parsePresets, validatePresets, PRESETS_META_KEY } from "./presets.js";
 import { applyRole, withAgentAutonomy, parseNodeColor, parseBinder, serializeBinder, binderAddPage, binderPatchPage, binderFindPage, binderDeletePage, binderMovePage, binderBringToFront, binderSetActive, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, DEFAULT_FLOOR_EXCLUDES, normalizeFloorExcludes, shouldExcludeFloorDir, parseGitRemote, buildPrCompareUrl, normalizeEnvVars, mergeEnvLayers, safeRelPath, isWithinCanonicalRoot, looksBinary, canMessage, checkRevision, formatDelivery, normalizeGeometry, planLocalTerminal, resolveNodeRef, resolveCrossNodeRef, validateNewNode, agentKind, agentResume, stripAnsi, fail, succeed, type Result, applySkills, skillsText, placeGeometries, connectionsWithin } from "@messai/domain";
 import { createHash, randomUUID, randomBytes, timingSafeEqual } from "node:crypto";
 import { Companion } from "./companion.js";
@@ -38,7 +38,7 @@ import { fileURLToPath } from "node:url";
 const CLI_DIR = process.env["MESS_RESOURCES"] ? join(process.env["MESS_RESOURCES"], "cli") : join(dirname(fileURLToPath(import.meta.url)), "../../cli/bin");
 import { restorable, SessionManager } from "./sessions.js";
 import { fitAppendPrompt } from "./spawncmd.js";
-import { getPath, IS_WIN, prependPath, shellCommandArgs } from "./platform.js";
+import { getPath, IS_WIN, powershellInitArgs, prependPath, reservedEnvName, shellCommandArgs } from "./platform.js";
 import { killTree } from "./killtree.js";
 import { watch, type FSWatcher } from "chokidar";
 
@@ -877,7 +877,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       let dest = join(d.value.abs, base);
       for (let i = 1; existsSync(dest); i++) dest = join(d.value.abs, `${stem}-${i}${ext}`);
       copyFileSync(r.value.att.path, dest);
-      return succeed({ path: relative(root.value, dest) });
+      return succeed({ path: relative(root.value, dest).replace(/\\/g, "/") });
     } catch (e) { return fail("INTERNAL", String((e as Error).message ?? e)); }
   }
   listChat(nodeId: string, thread: number | undefined, limit: number, since?: string): Result<ChatMessage[]> {
@@ -1316,7 +1316,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       for (const e of entries) {
         if (out.length >= limit) return;
         visited++;
-        const full = join(dir, e.name); const rel = relative(root, full);
+        const full = join(dir, e.name); const rel = relative(root, full).replace(/\\/g, "/"); // a UI sempre recebe caminho com /
         const isDir = e.isDirectory();
         if (isDir && SKIP.has(e.name)) continue;
         if (!q || rel.toLowerCase().includes(q)) out.push({ path: rel, dir: isDir });
@@ -1961,7 +1961,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
         if (!/\.(md|markdown|txt)$/i.test(input.filePath)) return fail("INVALID", "só arquivos .md ou .txt podem virar nota");
         if (!existsSync(input.filePath)) return fail("NOT_FOUND", "arquivo não encontrado");
         node.filePath = input.filePath; node.content = readFileSync(input.filePath, "utf8");
-        if (!input.title) node.title = deriveNoteTitle(node.content) ?? input.filePath.split("/").pop()!.replace(/\.(md|markdown|txt)$/i, "");
+        if (!input.title) node.title = deriveNoteTitle(node.content) ?? input.filePath.split(/[\\/]/).pop()!.replace(/\.(md|markdown|txt)$/i, "");
       } else {
         node.filePath = join(this.notesDir(workspaceId), `${node.nodeId.slice(0, 8)}-${noteFileName(input.title ?? deriveNoteTitle(node.content ?? "") ?? "nota")}`);
         if (!input.title) { const t = deriveNoteTitle(node.content ?? ""); if (t) node.title = t; }
@@ -2040,7 +2040,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     for (const c of this.store.listNodeConnections(node.nodeId)) {
       const otherId = c.sourceNodeId === node.nodeId ? c.targetNodeId : c.sourceNodeId;
       const o = this.store.getNode(otherId);
-      if (o?.kind === "note" && o.secret && o.secretEnv && o.content && !/^(PATH|SHELL)$/.test(o.secretEnv) && !o.secretEnv.startsWith("MESS_")) out[o.secretEnv] = o.content;
+      if (o?.kind === "note" && o.secret && o.secretEnv && o.content && !reservedEnvName(o.secretEnv)) out[o.secretEnv] = o.content;
     }
     return out;
   }
@@ -2085,7 +2085,9 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       const f = join(dir, `${s.sessionId}.md`); writeFileSync(f, text, { mode: 0o600 }); return f;
     });
     if (agentKind(s.command, s.args).agentType === "claudeCode" && termArgs.includes("--dangerously-skip-permissions")) this.ensureClaudeBypassAccepted(); // W
-    let plan = planLocalTerminal({ command: s.command, args: termArgs, cwd: s.cwd, defaultShell: this.cfg.defaultShell, baseEnv, inject });
+    // H: PowerShell interativo em UTF-8 (só no spawn; a sessão guarda o comando original)
+    const spawnArgs = IS_WIN ? powershellInitArgs(s.command, termArgs) : termArgs;
+    let plan = planLocalTerminal({ command: s.command, args: spawnArgs, cwd: s.cwd, defaultShell: this.cfg.defaultShell, baseEnv, inject });
     // #93 modo isolado: bubblewrap por fora (e tmux, se persistente, por fora dele). Falha FECHADA se o isolamento não for possível.
     if (node.kind === "terminal" && node.isolation) {
       const st = this.settings();
@@ -2438,7 +2440,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
   }
   /** Reinicia o processo de um nó terminal cuja sessão saiu ou se perdeu. Mesmo sessionId. */
   // #56 — presets de Início rápido (persistidos na meta; padrões como semente).
-  presetDefs(): PresetInput[] { return parsePresets(this.store.getMeta(PRESETS_META_KEY), defaultPresets(this.cfg.defaultShell)); }
+  presetDefs(): PresetInput[] { return normalizePresets(parsePresets(this.store.getMeta(PRESETS_META_KEY), defaultPresets(this.cfg.defaultShell)), this.cfg.defaultShell); }
   putPresets(list: PresetInput[]): Result<PresetInput[]> {
     const v = validatePresets(list); if (!v.ok) return v;
     this.store.setMeta(PRESETS_META_KEY, JSON.stringify(list));

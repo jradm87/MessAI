@@ -3,12 +3,14 @@ import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { bwrapPlan, expandHome, scrubEnv, type NodeIsolationProfile, type TerminalPlan } from "@messai/domain";
 import { whichOnPath } from "./providers.js";
+import { IS_WIN } from "./platform.js";
 
 /** #93 — suporte do modo isolado nesta máquina (cacheado): bubblewrap utilizável e systemd de usuário para limites de cgroup. */
 export type IsolationSupport = { available: boolean; reason?: string; cgroup: boolean };
 let cache: IsolationSupport | null = null;
 export function probeIsolation(force = false): IsolationSupport {
   if (cache && !force) return cache;
+  if (IS_WIN) return (cache = { available: false, reason: "o modo isolado não existe no Windows (depende do bubblewrap do Linux); para usá-lo, rode o MessAI no WSL2", cgroup: false });
   const bw = whichOnPath("bwrap");
   if (!bw) return (cache = { available: false, reason: "bubblewrap (bwrap) não está instalado — instale o pacote `bubblewrap` para usar o modo isolado", cgroup: false });
   // Mesmo layout do sandbox real (links usr-merged incluídos: sem /lib64 o carregador dinâmico não acha o libc e `true` nem executa).
@@ -48,6 +50,8 @@ export function buildIsolatedPlan(i: IsolatedPlanInput): TerminalPlan {
   const sup = probeIsolation();
   if (!sup.available) {
     // Falha FECHADA: nunca roda sem isolar quando o usuário pediu isolamento.
+    // Windows (nó isolado vindo de backup do Linux): não há /bin/sh; avisa pelo cmd e fica parado, sem rodar o comando.
+    if (IS_WIN) return { ...i.plan, command: process.env["ComSpec"] ?? "cmd.exe", args: ["/d", "/s", "/c", "echo MODO ISOLADO INDISPONIVEL NO WINDOWS (use o WSL2). O terminal NAO foi iniciado. & pause >nul"] };
     return { ...i.plan, command: "/bin/sh", args: ["-c", `echo "MODO ISOLADO INDISPONÍVEL: ${(sup.reason ?? "").replace(/["$`\\]/g, " ")}"; echo "O terminal NÃO foi iniciado (não roda sem isolar). Desligue o modo isolado ou instale o bubblewrap."; exec sleep 3600`], env: { PATH: "/usr/bin:/bin", TERM: "xterm-256color" } };
   }
   const env = scrubEnv(i.baseEnv, i.inject);

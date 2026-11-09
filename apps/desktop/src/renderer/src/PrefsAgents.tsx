@@ -164,7 +164,7 @@ function UsagePanel({ api, onOpenUsage }: { api: Api; onOpenUsage: () => void })
           </div>
         </div>
       ))}
-      {data?.errors.map((e) => <div key={e.file} className="err">{e.file.split("/").pop()}: {e.error}</div>)}
+      {data?.errors.map((e) => <div key={e.file} className="err">{e.file.split(/[\\/]/).pop()}: {e.error}</div>)}
       {data && <div className="row">
         <button onClick={() => void window.messai.openPath?.(data.dir).then((r) => { if (r) say(r); })} data-testid="prov-open-dir"><FolderOpen size={14} /> Abrir pasta de provedores</button>
         <button onClick={() => void copy(data.dir)} data-testid="prov-copy-dir"><Copy size={14} /> Copiar caminho</button>
