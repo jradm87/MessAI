@@ -1,5 +1,6 @@
-import { accessSync, constants, existsSync, readdirSync, readFileSync } from "node:fs";
-import { delimiter, join } from "node:path";
+import { accessSync, constants, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { delimiter, extname, join } from "node:path";
+import { getPath, isPathLike, IS_WIN, pathExts } from "./platform.js";
 
 /**
  * #38 — provedores de agente (CLIs de IA) conhecidos pelo MessAI: os embutidos + extras em JSON
@@ -14,14 +15,25 @@ export const BUILTIN_PROVIDERS: { id: string; label: string; binary: string; col
 ];
 const ID_RE = /^[a-z0-9][a-z0-9-]{0,39}$/;
 
-/** Caminho executável de `cmd` no PATH (ou o próprio, se vier com `/` e for executável). */
-export function whichOnPath(cmd: string, env: NodeJS.ProcessEnv = process.env): string | null {
+/**
+ * Caminho executável de `cmd` no PATH (ou o próprio, se vier como caminho e for executável).
+ * Windows (#2): sem `X_OK` (lá não verifica execução) — vale arquivo existente com extensão do PATHEXT;
+ * `cmd` sem extensão tenta cada uma (`claude` → `claude.exe`/`claude.cmd`); reconhece `\` e `C:` como caminho.
+ */
+export function whichOnPath(cmd: string, env: NodeJS.ProcessEnv = process.env, win = IS_WIN): string | null {
   if (!cmd) return null;
-  if (cmd.includes("/")) { try { accessSync(cmd, constants.X_OK); return cmd; } catch { return null; } }
-  for (const dir of (env["PATH"] ?? "").split(delimiter)) {
+  const exts = pathExts(env, win);
+  const hit = (p: string): string | null => {
+    if (!win) { try { accessSync(p, constants.X_OK); return p; } catch { return null; } }
+    const candidates = exts.includes(extname(p).toLowerCase()) ? [p] : exts.map((e) => p + e);
+    for (const c of candidates) { try { if (statSync(c).isFile()) return c; } catch { /* próximo */ } }
+    return null;
+  };
+  if (isPathLike(cmd, win)) return hit(cmd);
+  for (const dir of getPath(env, win).split(win ? ";" : delimiter)) {
     if (!dir) continue;
-    const p = join(dir, cmd);
-    try { accessSync(p, constants.X_OK); return p; } catch { /* próximo */ }
+    const p = hit(join(dir, cmd));
+    if (p) return p;
   }
   return null;
 }

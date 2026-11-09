@@ -1,5 +1,5 @@
 import {  describe, expect, it } from "vitest";
-import { canMessage, formatDelivery, resolveNodeRef, parseCrossRef, resolveCrossNodeRef, parseGitRemote, buildPrCompareUrl, canWrite, checkRevision, decideLease, normalizeGeometry, trimBuffer, MAX_BUFFER_BYTES, applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxAttachPlan, shellQuote, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, alignGeometries, gridLayout, agentKind, agentResume, stripAnsi, normalizePortalUrl, parsePortal, portalKey, serializePortal, androidInputText, androidKey, isAdbSerial, isAndroidActivity, isAndroidPackage, isAvdName, parseAdbDevices, parseAndroidFocus, parseAndroidPackages, parseUiDump, parseWmSize, pngSize, uiNodeAt, withClaudeAutonomy, withAgentAutonomy, parseNodeColor, rectBorderToward, floatingEnds, borderSide, treeLayout, pushOutsideRect } from "./index.js";
+import { canMessage, formatDelivery, resolveNodeRef, parseCrossRef, resolveCrossNodeRef, parseGitRemote, buildPrCompareUrl, canWrite, checkRevision, decideLease, normalizeGeometry, trimBuffer, MAX_BUFFER_BYTES, applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxAttachPlan, shellQuote, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, alignGeometries, gridLayout, agentKind, agentResume, stripAnsi, normalizePortalUrl, parsePortal, portalKey, serializePortal, androidInputText, androidKey, isAdbSerial, isAndroidActivity, isAndroidPackage, isAvdName, parseAdbDevices, parseAndroidFocus, parseAndroidPackages, parseUiDump, parseWmSize, pngSize, uiNodeAt, withClaudeAutonomy, withAgentAutonomy, binaryName, applySkills, parseNodeColor, rectBorderToward, floatingEnds, borderSide, treeLayout, pushOutsideRect } from "./index.js";
 
 describe("revisão", () => {
   it("aceita revisão igual e devolve próxima", () => {
@@ -473,5 +473,27 @@ describe("colisão da corda (pushOutsideRect)", () => {
     expect(pushOutsideRect(205, 150, r)).toEqual({ x: 208, y: 150 });  // perto da direita → x=208
     expect(pushOutsideRect(150, 100, r)).toEqual({ x: 150, y: 92 });   // perto do topo → y=92
     expect(pushOutsideRect(150, 205, r)).toEqual({ x: 150, y: 208 });  // perto da base → y=208
+  });
+});
+
+describe("binaryName e detecção de agente no Windows (M)", () => {
+  it("tira diretório (/ e \\) e sufixo .exe/.cmd/.bat/.ps1", () => {
+    expect(binaryName("claude")).toBe("claude");
+    expect(binaryName("C:\\x\\claude.cmd")).toBe("claude");
+    expect(binaryName("C:\\Users\\u\\.local\\bin\\Claude.EXE")).toBe("claude");
+    expect(binaryName("/usr/bin/codex")).toBe("codex");
+    expect(binaryName("codex.ps1")).toBe("codex");
+  });
+  it("agentKind, applyRole, applySkills e autonomia reconhecem claude.cmd/claude.exe/codex.cmd", () => {
+    expect(agentKind("C:\\x\\claude.cmd")).toMatchObject({ isAgent: true, agentType: "claudeCode" });
+    expect(agentKind("claude.exe")).toMatchObject({ isAgent: true, agentType: "claudeCode" });
+    expect(agentKind("codex.cmd")).toMatchObject({ isAgent: true, agentType: "codex" });
+    expect(agentKind("cmd.exe", ["/c", "C:\\npm\\codex.cmd --x"])).toMatchObject({ agentType: "codex" });
+    expect(agentKind("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe").isAgent).toBe(false);
+    const role = { name: "Revisor", instructions: "revise" };
+    expect(applyRole("C:\\x\\claude.cmd", [], role)).toContain("--append-system-prompt");
+    expect(applySkills("claude.exe", [], [{ name: "s", instructions: "i" }])).toContain("--append-system-prompt");
+    expect(withAgentAutonomy("C:\\x\\claude.cmd", [])).toContain("--dangerously-skip-permissions");
+    expect(withAgentAutonomy("codex.cmd", [])).toContain("--dangerously-bypass-approvals-and-sandbox");
   });
 });

@@ -1,25 +1,40 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { jwtPayload, probeAccounts } from "./accounts.js";
+import { IS_WIN } from "./platform.js";
 import { BUILTIN_PROVIDERS, listProviders, loadExtraProviders, whichOnPath } from "./providers.js";
 
 let dir: string;
 beforeAll(() => { dir = mkdtempSync(join(tmpdir(), "mess-agents-")); });
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
-const b64url = (s: string) => Buffer.from(s).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const FAKE = IS_WIN ? "fake-cli.cmd" : "fake-cli"; // O: no Windows só conta o que tem extensão do PATHEXT
+const b64url =(s: string) => Buffer.from(s).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 
 describe("provedores (#38)", () => {
   it("whichOnPath acha executável no PATH informado; caminho absoluto precisa ser executável", () => {
     const bin = join(dir, "bin"); mkdirSync(bin, { recursive: true });
-    writeFileSync(join(bin, "fake-cli"), "#!/bin/sh\n"); chmodSync(join(bin, "fake-cli"), 0o755);
+    writeFileSync(join(bin, FAKE), "#!/bin/sh\n"); chmodSync(join(bin, FAKE), 0o755);
     writeFileSync(join(bin, "nao-exec"), "");
-    expect(whichOnPath("fake-cli", { PATH: bin })).toBe(join(bin, "fake-cli"));
-    expect(whichOnPath("nao-exec", { PATH: bin })).toBeNull();
+    expect(whichOnPath("fake-cli", { PATH: bin })).toBe(join(bin, FAKE));
+    expect(whichOnPath("nao-exec", { PATH: bin })).toBeNull(); // Linux: sem +x; Windows: sem extensão do PATHEXT
     expect(whichOnPath("inexistente", { PATH: bin })).toBeNull();
-    expect(whichOnPath(join(bin, "fake-cli"))).toBe(join(bin, "fake-cli"));
+    expect(whichOnPath(join(bin, FAKE))).toBe(join(bin, FAKE));
     expect(whichOnPath("")).toBeNull();
+  });
+  it("whichOnPath no Windows (#2): PATHEXT, chave Path, `\\` como caminho, ignora shim sem extensão", () => {
+    const bin = join(dir, "winbin"); mkdirSync(bin, { recursive: true });
+    writeFileSync(join(bin, "claude"), "#!/bin/sh\n"); // shim sh do npm: não roda via CreateProcess
+    writeFileSync(join(bin, "claude.cmd"), "@echo off\r\n");
+    writeFileSync(join(bin, "codex.exe"), "");
+    const env = { Path: bin, PATHEXT: ".COM;.EXE;.BAT;.CMD" };
+    expect(whichOnPath("claude", env, true)).toBe(join(bin, "claude.cmd"));
+    expect(whichOnPath("codex", env, true)).toBe(join(bin, "codex.exe"));
+    expect(whichOnPath("codex.exe", env, true)).toBe(join(bin, "codex.exe")); // já com extensão: não acrescenta outra
+    expect(whichOnPath("nada", env, true)).toBeNull();
+    expect(whichOnPath(join(bin, "codex"), {}, true)).toBe(join(bin, "codex.exe")); // caminho sem extensão + PATHEXT padrão
+    expect(whichOnPath(join(bin, "claude"), env, true)).toBe(join(bin, "claude.cmd"));
   });
   it("extras em JSON: válido entra; inválido/repetido/embutido vira erro sem derrubar a lista", () => {
     const pd = join(dir, "providers"); mkdirSync(pd, { recursive: true });
@@ -32,10 +47,10 @@ describe("provedores (#38)", () => {
     const r = loadExtraProviders(pd);
     expect(r.providers.map((p) => p.id)).toEqual(["meu", "outro"]);
     expect(r.providers[1]!.color).toBe("#8a8a90"); // cor inválida → cinza padrão
-    expect(r.errors.map((e) => e.file.split("/").pop())).toEqual(["b-semlabel.json", "c-lixo.json", "d-claude.json"]);
+    expect(r.errors.map((e) => basename(e.file))).toEqual(["b-semlabel.json", "c-lixo.json", "d-claude.json"]);
     const all = listProviders(pd, { PATH: join(dir, "bin") });
     expect(all.providers.slice(0, BUILTIN_PROVIDERS.length).every((p) => p.builtin)).toBe(true);
-    expect(all.providers.find((p) => p.id === "meu")).toMatchObject({ path: join(dir, "bin", "fake-cli"), builtin: false });
+    expect(all.providers.find((p) => p.id === "meu")).toMatchObject({ path: join(dir, "bin", FAKE), builtin: false });
     expect(all.providers.find((p) => p.id === "outro")!.path).toBeNull();
     expect(listProviders(join(dir, "nao-existe"), { PATH: "" }).providers).toHaveLength(BUILTIN_PROVIDERS.length); // pasta ausente: só embutidos
   });

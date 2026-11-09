@@ -36,7 +36,10 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 // Dev: CLI em apps/cli/bin. Empacotado: resources/cli (MESS_RESOURCES vem do main).
 const CLI_DIR = process.env["MESS_RESOURCES"] ? join(process.env["MESS_RESOURCES"], "cli") : join(dirname(fileURLToPath(import.meta.url)), "../../cli/bin");
-import { SessionManager } from "./sessions.js";
+import { restorable, SessionManager } from "./sessions.js";
+import { fitAppendPrompt } from "./spawncmd.js";
+import { getPath, IS_WIN, prependPath, shellCommandArgs } from "./platform.js";
+import { killTree } from "./killtree.js";
 import { watch, type FSWatcher } from "chokidar";
 
 const MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", svg: "image/svg+xml", pdf: "application/pdf", md: "text/markdown", markdown: "text/markdown", txt: "text/plain", json: "application/json", csv: "text/csv", html: "text/html", log: "text/plain", ts: "text/plain", js: "text/plain", py: "text/plain", sh: "text/plain", yml: "text/plain", yaml: "text/plain" };
@@ -407,7 +410,8 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     } else {
       const env = { ...process.env, ...this.effectiveEnvForWorkspace(w) } as NodeJS.ProcessEnv;
       try {
-        const { stdout } = await execFileP("/bin/sh", ["-c", r.payload], { cwd: w.cwd, env, timeout: 15_000, maxBuffer: 2 * 1024 * 1024, encoding: "utf8" });
+        const sh = IS_WIN ? this.cfg.defaultShell : "/bin/sh"; // F: rotina de comando roda em PowerShell no Windows
+        const { stdout } = await execFileP(sh, shellCommandArgs(sh, r.payload), { cwd: w.cwd, env, timeout: 15_000, maxBuffer: 2 * 1024 * 1024, encoding: "utf8", windowsHide: true });
         status = "ok";
         output = String(stdout ?? "").trim().slice(0, 500);
       } catch (e) {
@@ -1534,9 +1538,9 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     return { setup: get("setup"), run: get("run"), teardown: get("teardown") };
   }
   private hookEnv(w: Workspace, section: FloorHookSection): Record<string, string> {
-    const baseEnv: Record<string, string> = {};
+    let baseEnv: Record<string, string> = {};
     for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !/^(CLAUDECODE|CLAUDE_CODE_|CODEX_)/.test(k)) baseEnv[k] = v;
-    baseEnv["PATH"] = `${CLI_DIR}${delimiter}${baseEnv["PATH"] ?? ""}`;
+    baseEnv = prependPath(baseEnv, CLI_DIR); // C: no Windows a chave é "Path" — não criar uma segunda "PATH"
     const ground = w.parentId ? this.store.getWorkspace(w.parentId) : undefined;
     return {
       ...baseEnv,
@@ -1583,7 +1587,8 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const promise = new Promise<FloorHookStatus>((resolveP) => {
       let proc: ChildProcess;
       try {
-        proc = spawn(this.cfg.defaultShell || "/bin/sh", ["-c", cmd], { cwd: w.cwd, env: this.hookEnv(w, section), detached: true, stdio: ["ignore", "pipe", "pipe"] });
+        const sh = this.cfg.defaultShell || "/bin/sh"; // F/N: flag por shell; sem janela; grupo próprio só fora do Windows
+        proc = spawn(sh, shellCommandArgs(sh, cmd), { cwd: w.cwd, env: this.hookEnv(w, section), detached: !IS_WIN, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
       } catch (e) {
         status.state = "failed"; status.exitCode = 1; status.finishedAt = nowIso();
         status.log = String((e as Error).message ?? e);
@@ -1625,7 +1630,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     entry.status.finishedAt = nowIso();
     const pid = entry.proc?.pid;
     if (pid) {
-      try { process.kill(-pid, "SIGTERM"); } catch { /* grupo já saiu */ }
+      killTree(pid, "SIGTERM"); // #5: grupo (Linux) / taskkill /T (Windows)
       try { entry.proc?.kill("SIGTERM"); } catch { /* processo já saiu */ }
     }
     delete entry.proc;
@@ -1873,7 +1878,8 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     if (w.parentId) {
       const hk = this.readHooksConfig(id);
       if (hk.teardown.trim() && existsSync(w.cwd)) {
-        spawnSync(this.cfg.defaultShell || "/bin/sh", ["-c", hk.teardown], { cwd: w.cwd, env: this.hookEnv(w, "teardown"), stdio: "ignore", timeout: GIT_SYNC_TIMEOUT_MS });
+        const sh = this.cfg.defaultShell || "/bin/sh";
+        spawnSync(sh, shellCommandArgs(sh, hk.teardown), { cwd: w.cwd, env: this.hookEnv(w, "teardown"), stdio: "ignore", timeout: GIT_SYNC_TIMEOUT_MS, windowsHide: true });
         this.revokeHookToken(`${id}:teardown`); // #87
       }
     }
@@ -2045,10 +2051,10 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     return succeed({ value: n.content ?? "", ...(n.secretEnv ? { envName: n.secretEnv } : {}) });
   }
   private plan(w: Workspace, node: Node, s: Session, opts: { reattach?: boolean } = {}) {
-    const baseEnv: Record<string, string> = {};
+    let baseEnv: Record<string, string> = {};
     // Não herdar marcadores de sessão de agentes que possam ter lançado o runtime.
     for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !/^(CLAUDECODE|CLAUDE_CODE_|CODEX_)/.test(k)) baseEnv[k] = v;
-    baseEnv["PATH"] = `${CLI_DIR}${delimiter}${baseEnv["PATH"] ?? ""}`;
+    baseEnv = prependPath(baseEnv, CLI_DIR); // C
     const role = node.roleId ? this.store.getRole(node.roleId) : undefined;
     const skills = (node.skillIds ?? []).map((id) => this.store.getSkill(id)).filter((k): k is Skill => !!k); // #57
     const ground = w.parentId ? this.store.getWorkspace(w.parentId) : undefined;
@@ -2064,14 +2070,21 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       [AGENT_ENV.socket]: this.cfg.socketPath, [AGENT_ENV.token]: agentToken,
       [AGENT_ENV.workspaceId]: w.workspaceId, [AGENT_ENV.workspaceName]: w.name, [AGENT_ENV.workspaceDir]: w.cwd,
       [AGENT_ENV.nodeId]: node.nodeId, [AGENT_ENV.sessionId]: s.sessionId, [AGENT_ENV.cli]: join(CLI_DIR, "mess"),
+      ...(IS_WIN ? { [AGENT_ENV.cliCmd]: join(CLI_DIR, "mess.cmd") } : {}), // #1: pwsh/cmd não rodam o launcher sh
       ...(node.maestro ? { [AGENT_ENV.maestro]: "1" } : {}), // #29
-      SHELL: this.cfg.defaultShell,
+      // Q: no Windows não exporta SHELL=pwsh — o Claude Code de lá usa Git Bash e SHELL apontando para pwsh pode confundi-lo.
+      ...(IS_WIN ? {} : { SHELL: this.cfg.defaultShell }),
       // Empacotado: o launcher `mess` roda o CLI com o Node do Electron (sem Node do sistema).
       ...(process.env["MESS_RESOURCES"] ? { MESS_ELECTRON: process.execPath } : {}),
     };
     if (agentKind(s.command, s.args).agentType === "claudeCode") this.ensureClaudeTrust(s.cwd); // #6 pré-confia a pasta: evita o diálogo de trust (cujo default "No, exit" o briefing fechava)
     // Claude autônomo SÓ quando isolado (#93): no sandbox do MessAI o agente roda sem as perguntas de permissão do Claude Code; fora dele, mantém.
-    const termArgs = withAgentAutonomy(s.command, applySkills(s.command, applyRole(s.command, s.args, role), skills));
+    // Windows (A): papel+skills longos não cabem na linha de comando → --append-system-prompt-file <dataDir>/prompts/<sessão>.md
+    const termArgs = fitAppendPrompt(s.command, withAgentAutonomy(s.command, applySkills(s.command, applyRole(s.command, s.args, role), skills)), (text) => {
+      const dir = join(this.cfg.dataDir, "prompts"); mkdirSync(dir, { recursive: true });
+      const f = join(dir, `${s.sessionId}.md`); writeFileSync(f, text, { mode: 0o600 }); return f;
+    });
+    if (agentKind(s.command, s.args).agentType === "claudeCode" && termArgs.includes("--dangerously-skip-permissions")) this.ensureClaudeBypassAccepted(); // W
     let plan = planLocalTerminal({ command: s.command, args: termArgs, cwd: s.cwd, defaultShell: this.cfg.defaultShell, baseEnv, inject });
     // #93 modo isolado: bubblewrap por fora (e tmux, se persistente, por fora dele). Falha FECHADA se o isolamento não for possível.
     if (node.kind === "terminal" && node.isolation) {
@@ -2079,7 +2092,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       plan = buildIsolatedPlan({ plan, iso: node.isolation, home: homedir(), baseEnv, inject, workspaceCwd: w.cwd, groundCwd: ground?.cwd, socketPath: this.cfg.socketPath,
         cliRoot: process.env["MESS_RESOURCES"] ?? join(CLI_DIR, "../../.."), globalRo: st.isolationRo ?? [], globalRw: st.isolationRw ?? [] });
     }
-    return s.persistent ? wrapInTmux(plan, tmuxSessionName(s.sessionId), { ...inject, PATH: baseEnv["PATH"]! }, this.cfg.tmuxSocket) : plan;
+    return s.persistent ? wrapInTmux(plan, tmuxSessionName(s.sessionId), { ...inject, PATH: getPath(baseEnv) }, this.cfg.tmuxSocket) : plan;
   }
 
   // ---- #72 Ambientes: variáveis de ambiente por espaço e global ----
@@ -2480,7 +2493,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     let reattached = 0, respawned = 0, lost = 0, skipped = 0;
     const restore = this.settings().restoreSessions; // #55: desligado → não RE-SOBE após reboot (tmux vivo ainda reanexa)
     for (const s of this.store.listSessions()) {
-      if (!s.persistent || (s.state !== "running" && s.state !== "starting")) continue;
+      if (!restorable(s) || (s.state !== "running" && s.state !== "starting")) continue; // Windows: agente sem tmux também volta
       const node = this.store.getNode(s.nodeId); const w = node && this.store.getWorkspace(node.workspaceId);
       if (!node || !w) { this.store.updateSession(s.sessionId, { state: "lost", pid: null }); lost++; continue; }
       if (this.sessions.tmuxAlive(s.sessionId)) { this.sessions.start({ ...s, state: "starting" }, this.plan(w, node, s, { reattach: true })); reattached++; }
@@ -2511,7 +2524,9 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     if (s.state === "unloaded") return this.reloadNode(nodeId);
     this.sessions.dispose(s.sessionId);
     this.store.updateSession(s.sessionId, { state: "starting", exitCode: null, pid: null });
-    return succeed(this.sessions.start({ ...s, state: "starting" }, this.plan(w, node, s)));
+    // Claude com id fixo: repetir --session-id falha ("Session ID ... is already in use") → retoma a conversa (--resume <id>).
+    const r = s.resumeId ? this.resumeSession(s) : s;
+    return succeed(this.sessions.start({ ...r, state: "starting" }, this.plan(w, node, r)));
   }
 
   // ---- #84 Descarregar/recarregar espaços e terminais (poupar recursos) ----
@@ -3211,6 +3226,18 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
       j.projects[cwd] = { ...cur, hasTrustDialogAccepted: true };
       writeFileSync(p, JSON.stringify(j, null, 2));
     } catch { /* não bloqueia o spawn se o json estiver indisponível/em uso */ }
+  }
+  /** O Claude recrutado roda com --dangerously-skip-permissions; na 1ª vez numa máquina o Claude Code mostra um aviso cujo
+   * default é "No, exit" — o briefing fecharia o agente. Aceita o aviso uma vez em ~/.claude/settings.json (W). */
+  private ensureClaudeBypassAccepted(): void {
+    try {
+      const p = join(homedir(), ".claude", "settings.json");
+      const j = existsSync(p) ? JSON.parse(readFileSync(p, "utf8")) as Record<string, unknown> : {};
+      if (j["skipDangerousModePermissionPrompt"] === true) return;
+      j["skipDangerousModePermissionPrompt"] = true;
+      mkdirSync(dirname(p), { recursive: true });
+      writeFileSync(p, JSON.stringify(j, null, 2));
+    } catch { /* não bloqueia o spawn */ }
   }
   /** Uma posição que NÃO sobrepõe nenhum nó existente: à direita de tudo, no topo. Simples e nunca colide (usado por agentes/CLI via autoPlace). */
   private placeFree(nodes: Node[], w: number, h: number): Node["geometry"] {

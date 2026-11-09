@@ -1,11 +1,13 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { normalizePortalUrl, portalKey } from "@messai/domain";
 import type { PortalInspect, PortalSnapshot, PortalState } from "@messai/contracts";
 import { whichOnPath } from "./providers.js";
+import { IS_WIN } from "./platform.js";
+import { killTree } from "./killtree.js";
 
 /**
  * #26 — Portais: um Chromium por portal, dirigido pelo RUNTIME via Chrome DevTools Protocol.
@@ -16,9 +18,24 @@ import { whichOnPath } from "./providers.js";
 export const PORTAL_MAX_SESSIONS = 6;
 export const PORTAL_IDLE_MS = 10 * 60_000;
 const BROWSER_CANDIDATES = ["google-chrome-stable", "google-chrome", "chromium", "chromium-browser", "brave-browser", "microsoft-edge", "microsoft-edge-stable"];
-export function findBrowser(): string | null {
-  const env = process.env["MESS_BROWSER"]; if (env) return env;
-  for (const c of BROWSER_CANDIDATES) { const p = whichOnPath(c); if (p) return p; }
+/** Windows (E): Chrome/Edge não ficam no PATH — caminhos padrão de instalação (Edge vem em todo Windows 10/11). */
+export function windowsBrowserPaths(env: NodeJS.ProcessEnv): string[] {
+  const pf = env["ProgramFiles"] ?? "C:\\Program Files", pf86 = env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)", local = env["LOCALAPPDATA"] ?? "";
+  return [
+    `${pf}\\Google\\Chrome\\Application\\chrome.exe`, `${pf86}\\Google\\Chrome\\Application\\chrome.exe`,
+    ...(local ? [`${local}\\Google\\Chrome\\Application\\chrome.exe`] : []),
+    `${pf86}\\Microsoft\\Edge\\Application\\msedge.exe`, `${pf}\\Microsoft\\Edge\\Application\\msedge.exe`,
+    `${pf}\\BraveSoftware\\Brave-Browser\\Application\\brave.exe`,
+  ];
+}
+export function findBrowser(env: NodeJS.ProcessEnv = process.env, win = IS_WIN, exists: (p: string) => boolean = existsSync): string | null {
+  const override = env["MESS_BROWSER"]; if (override) return override;
+  if (win) {
+    for (const p of windowsBrowserPaths(env)) if (exists(p)) return p;
+    for (const c of ["chrome", "msedge", "brave"]) { const p = whichOnPath(c, env, true); if (p) return p; }
+    return null;
+  }
+  for (const c of BROWSER_CANDIDATES) { const p = whichOnPath(c, env); if (p) return p; }
   return null;
 }
 
@@ -98,7 +115,7 @@ export class PortalSession {
       "--headless=new", "--remote-debugging-pipe", `--user-data-dir=${s.profile}`, `--window-size=${w},${h}`, "--no-first-run", "--no-default-browser-check", "--disable-extensions", "--disable-sync",
       "--disable-background-networking", "--disable-component-update", "--password-store=basic", "--use-mock-keychain", "--hide-scrollbars", "--mute-audio", "--disable-dev-shm-usage", "about:blank",
     ];
-    s.proc = spawn(bin, args, { stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"], detached: true }); // grupo próprio: matar o grupo leva zygote/renderer/gpu junto (senão seguem escrevendo no perfil)
+    s.proc = spawn(bin, args, { stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"], detached: !IS_WIN, windowsHide: true }); // grupo próprio (Windows: sem grupo POSIX; killTree usa taskkill /T): matar o grupo leva zygote/renderer/gpu junto (senão seguem escrevendo no perfil)
     let stderr = ""; s.proc.stderr!.setEncoding("utf8"); s.proc.stderr!.on("data", (d: string) => { stderr = (stderr + d).slice(-1500); });
     s.cdp = new CdpPipe(s.proc.stdio[3] as Writable, s.proc.stdio[4] as Readable);
     s.cdp.onEvent((m, p, sid) => s.onEvent(m, p, sid));
@@ -253,7 +270,7 @@ export class PortalSession {
     if (this.closed) return; this.closed = true;
     this.cdp?.failAll(reason);
     const pid = this.proc?.pid;
-    try { if (pid) process.kill(-pid, "SIGKILL"); else this.proc?.kill("SIGKILL"); } catch { try { this.proc?.kill("SIGKILL"); } catch { /* já morto */ } }
+    if (pid) killTree(pid); else { try { this.proc?.kill("SIGKILL"); } catch { /* já morto */ } } // #5: leva zygote/renderer/gpu junto
     try { if (this.profile) rmSync(this.profile, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 }); } catch { /* */ }
     this.hooks.onClosed(reason);
   }

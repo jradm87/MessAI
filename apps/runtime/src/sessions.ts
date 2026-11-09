@@ -10,6 +10,16 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import type { Store } from "@messai/storage";
 import { nowIso } from "./config.js";
+import { resolveSpawnCommand } from "./spawncmd.js";
+import { IS_WIN } from "./platform.js";
+
+/**
+ * A sessão volta sozinha quando o runtime sobe de novo? Persistente (tmux) sim. No Windows não há tmux:
+ * agente (claude/codex/...) conta como restaurável — o boot o RE-SOBE retomando a conversa (claude --resume).
+ */
+export function restorable(s: Pick<Session, "persistent" | "command" | "args">, win = IS_WIN): boolean {
+  return !!s.persistent || (win && agentKind(s.command, s.args).isAgent);
+}
 
 type Live = {
   proc: pty.IPty;
@@ -38,6 +48,12 @@ export type SessionEvents = {
 /** Dono dos PTYs. Nunca depende do cliente estar conectado. */
 export class SessionManager extends EventEmitter<SessionEvents> {
   private live = new Map<string, Live>();
+  /** Saídas de PTY ainda não confirmadas (dispose → kill → onExit). */
+  private exiting = new Set<Promise<void>>();
+  /** Espera os PTYs mortos confirmarem a saída (até `ms`). Windows: sair antes disso trava o processo (node-pty/ConPTY). */
+  async drained(ms: number): Promise<void> {
+    await Promise.race([Promise.all([...this.exiting]), new Promise((r) => setTimeout(r, ms))]);
+  }
   /** #69 sessões de agente que concluíram um turno e ainda não foram vistas (sessionId → quando). */
   private readonly awaiting = new Map<string, string>();
   markSeen(sessionId: string): boolean { return this.awaiting.delete(sessionId); }
@@ -48,7 +64,7 @@ export class SessionManager extends EventEmitter<SessionEvents> {
     // Sessões gravadas como running por um runtime anterior não existem mais neste processo,
     // exceto as persistentes (tmux), que o serviço tenta reanexar na subida.
     for (const s of store.listSessions()) {
-      if ((s.state === "running" || s.state === "starting") && !s.persistent) store.updateSession(s.sessionId, { state: "lost", pid: null });
+      if ((s.state === "running" || s.state === "starting") && !restorable(s)) store.updateSession(s.sessionId, { state: "lost", pid: null });
     }
   }
 
@@ -61,7 +77,7 @@ export class SessionManager extends EventEmitter<SessionEvents> {
   tmuxKill(sessionId: string): void {
     try { execFileSync("tmux", ["-L", this.tmuxSocket, "kill-session", "-t", tmuxSessionName(sessionId)], { stdio: "ignore" }); } catch { /* já não existe */ }
   }
-  static tmuxAvailable(): boolean { try { execFileSync("tmux", ["-V"], { stdio: "ignore" }); return true; } catch { return false; } }
+  static tmuxAvailable(): boolean { if (IS_WIN) return false; /* tmux do MSYS2 no PATH não roda sobre ConPTY */ try { execFileSync("tmux", ["-V"], { stdio: "ignore" }); return true; } catch { return false; } }
 
   get(sessionId: string): Session | undefined {
     const s = this.store.getSession(sessionId);
@@ -76,7 +92,9 @@ export class SessionManager extends EventEmitter<SessionEvents> {
     // Diretório inexistente faria o pty falhar com "chdir(2) failed"; cai para o home e avisa.
     const wantedCwd = plan.cwd;
     const cwd = wantedCwd && existsSync(wantedCwd) ? wantedCwd : homedir();
-    const proc = pty.spawn(plan.command, plan.args, {
+    // Windows (A): resolve PATHEXT/shim npm só aqui; session.command continua o nome lógico (M).
+    const sp = resolveSpawnCommand(plan.command, plan.args, plan.env);
+    const proc = pty.spawn(sp.command, sp.args, {
       name: "xterm-256color",
       cols: session.cols,
       rows: session.rows,
@@ -292,6 +310,9 @@ export class SessionManager extends EventEmitter<SessionEvents> {
     if (!keepTmux && this.store.getSession(sessionId)?.persistent) this.tmuxKill(sessionId);
     if (l) {
       if (l.idleTimer) clearTimeout(l.idleTimer);
+      // #4/J: acompanha a saída real do PTY — no Windows o runtime só pode sair depois (ver drained()).
+      const gone: Promise<void> = new Promise<void>((res) => { try { l.proc.onExit(() => res()); } catch { res(); } });
+      this.exiting.add(gone); void gone.then(() => this.exiting.delete(gone));
       try { l.proc.kill(); } catch { /* já encerrado */ }
       l.term.dispose();
       this.live.delete(sessionId);
@@ -300,7 +321,7 @@ export class SessionManager extends EventEmitter<SessionEvents> {
 
   shutdownAll(): void {
     // Sessões tmux continuam vivas: o próximo runtime reanexa.
-    for (const id of [...this.live.keys()]) { const p = this.store.getSession(id)?.persistent; this.dispose(id, true); if (p) this.store.updateSession(id, { state: "starting", pid: null }); }
+    for (const id of [...this.live.keys()]) { const s = this.store.getSession(id); const p = !!s && restorable(s); this.dispose(id, true); if (p) this.store.updateSession(id, { state: "starting", pid: null }); }
   }
 
   /**
@@ -309,7 +330,7 @@ export class SessionManager extends EventEmitter<SessionEvents> {
    */
   disposeAllHard(): void {
     for (const id of [...this.live.keys()]) {
-      const persistent = this.store.getSession(id)?.persistent;
+      const s = this.store.getSession(id); const persistent = !!s && restorable(s);
       this.dispose(id, false);
       this.store.updateSession(id, { state: persistent ? "starting" : "exited", pid: null });
     }

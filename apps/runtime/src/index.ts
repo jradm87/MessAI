@@ -8,6 +8,7 @@ import { WorkspaceService } from "./service.js";
 import { buildServer, type DataOp } from "./server.js";
 import { installAgentSkills } from "./skills.js";
 import { performMove, performReset, performRestore } from "./data.js";
+import { IS_WIN } from "./platform.js";
 
 const cfg = loadConfig();
 const store = new Store(cfg.dbPath);
@@ -19,31 +20,41 @@ svc.ensureDefaultWorkspace(); // primeira vez: cria um espaço padrão (canvas n
 svc.initNoteWatches(); // observa .md das notas: edição externa reflete na hora
 
 const pidPath = join(cfg.dataDir, "runtime.pid");
+/** Socket unix sobra no disco e precisa sumir; named pipe (Windows, #6) some sozinho — e `existsSync` nele abriria uma conexão. */
+const removeSocket = (): void => { if (IS_WIN) return; try { if (existsSync(cfg.socketPath)) unlinkSync(cfg.socketPath); } catch { /* já foi */ } };
+
+/**
+ * Sai do processo. Windows (#4/J): `process.exit` logo após matar 2+ ConPTYs trava para sempre (bug do node-pty,
+ * reproduzido isolado) → espera os PTYs confirmarem a saída e, se ainda assim não der, encerra via TerminateProcess.
+ */
+const exitNow = (): void => { if (IS_WIN) process.kill(process.pid, "SIGKILL"); else process.exit(0); };
+// Se o `process.exit` travar, nenhum timer JS roda depois → no Windows a saída final é sempre TerminateProcess (banco já fechado).
+const exitClean = async (): Promise<void> => { if (IS_WIN) { await sessions.drained(1500); exitNow(); } else process.exit(0); };
 
 const shutdown = async (killAgents = false) => {
   // killAgents=false: mantém as sessões tmux (reinício do runtime; o próximo boot reanexa).
   // killAgents=true: "Encerrar tudo" — mata também os agentes dentro do tmux.
   // Teto de segurança: `close()` do Fastify espera conexões abertas (WebSocket do app) terminarem e pode
   // nunca voltar — o runtime viraria um zumbi segurando a porta. Encerra os WS e, no pior caso, sai à força.
-  setTimeout(() => process.exit(0), 2000).unref();
+  setTimeout(exitNow, 3000).unref();
   // pid file e socket somem JÁ: o processo vai embora de qualquer jeito (gracioso ou pelo teto acima), e um
   // pid file sobrevivente faria o version-check do app mandar SIGTERM num pid reciclado depois.
   try { if (existsSync(pidPath)) unlinkSync(pidPath); } catch { /* já foi */ }
-  try { if (existsSync(cfg.socketPath)) unlinkSync(cfg.socketPath); } catch { /* já foi */ }
+  removeSocket();
   svc.shutdownPortals(); // #26 navegadores dos portais
   svc.shutdownDevices(); // #73 para os fluxos de captura (emuladores iniciados continuam rodando)
   if (killAgents) sessions.disposeAllHard(); else sessions.shutdownAll();
   for (const s of [http, agent]) { try { for (const c of s.websocketServer?.clients ?? []) c.terminate(); } catch { /* sem WS neste servidor */ } }
   await Promise.all([http.close(), agent.close()]);
   store.close();
-  process.exit(0);
+  await exitClean();
 };
 
 // #62 — restaurar/mover/apagar: para tudo, fecha o banco, mexe nos arquivos e SAI; o app detecta e sobe um runtime novo.
 const dataOp = async (op: DataOp) => {
-  setTimeout(() => process.exit(0), 4000).unref();
+  setTimeout(exitNow, 4000).unref();
   try { if (existsSync(pidPath)) unlinkSync(pidPath); } catch { /* já foi */ }
-  try { if (existsSync(cfg.socketPath)) unlinkSync(cfg.socketPath); } catch { /* já foi */ }
+  removeSocket();
   if (op.kind === "move") sessions.shutdownAll(); else sessions.disposeAllHard(); // mover mantém os tmux (o banco vai junto); restaurar/apagar não têm para onde voltar
   for (const s of [http, agent]) { try { for (const c of s.websocketServer?.clients ?? []) c.terminate(); } catch { /* */ } }
   await Promise.all([http.close(), agent.close()]).catch(() => {});
@@ -54,16 +65,16 @@ const dataOp = async (op: DataOp) => {
     else performMove(cfg.dataDir, op.dir);
     console.log(`dados: ${op.kind} concluído`);
   } catch (e) { console.error(`dados: ${op.kind} falhou:`, e); }
-  process.exit(0);
+  await exitClean();
 };
 const http = buildServer(cfg, svc, { unix: false, onShutdown: (killAgents) => void shutdown(killAgents), onDataOp: (op) => void dataOp(op) });
 const agent = buildServer(cfg, svc, { unix: true });
 
-if (existsSync(cfg.socketPath)) unlinkSync(cfg.socketPath);
+removeSocket();
 try { const r = installAgentSkills(); if (r.installed) console.log(`[skills] ${r.installed} skills MessAI instaladas em ${r.dirs} pastas`); } catch (e) { console.error("[skills] falha ao instalar skills:", e); }
 await http.listen({ host: cfg.host, port: cfg.port });
 await agent.listen({ path: cfg.socketPath });
-chmodSync(cfg.socketPath, 0o600);
+if (!IS_WIN) chmodSync(cfg.socketPath, 0o600); // named pipe não tem chmod (#6): a proteção é o Bearer
 try { writeFileSync(pidPath, String(process.pid), { mode: 0o600 }); } catch { /* sem pid file */ }
 console.log(`messai-runtime machine=${cfg.machineId} http=http://${cfg.host}:${cfg.port} socket=${cfg.socketPath} data=${cfg.dataDir} pid=${process.pid}`);
 

@@ -51,7 +51,7 @@ import { bandsOfNode } from "./bands.js";
 import { BinderNode } from "./BinderNode.js";
 import { StackNode } from "./StackNode.js";
 import { binderAddPage, binderRemovePage, emptyBinder, parseBinder, serializeBinder, parseStack, serializeStack, stackRemoveChild } from "@messai/domain";
-import type { PaletteItem } from "./palette.js";
+import type { PaletteItem } from "./paletteRank.js";
 import { useHint, useKeymap } from "./shortcuts.js";
 
 const nodeTypes: NodeTypes = { terminal: TerminalNode as never, note: NoteNode as never, text: TextNode as never, tree: TreeNode as never, binder: BinderNode as never, portal: PortalNode as never, device: DeviceNode as never, stack: StackNode as never };
@@ -101,7 +101,7 @@ function ZoomBar({ minimap, setMinimap, onUsage, onRoutines, agents, wsName, inF
 }
 
 function Canvas({ conn }: { conn: Connection }) {
-  useAtomValue(themeAtom); // a grade do canvas e o fundo seguem o tema; re-render ao trocar
+  const theme = useAtomValue(themeAtom); // a grade do canvas e o fundo seguem o tema; re-render ao trocar
   const { t } = useI18n();
   const api = useMemo(() => new Api(conn), [conn]);
   const stream = useMemo(() => new Stream(conn), [conn]);
@@ -1077,7 +1077,7 @@ function Canvas({ conn }: { conn: Connection }) {
         <ReactFlow nodes={flow} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onNodeDragStart={onNodeDragStart} onNodeDragStop={onNodeDragStop} onEdgesChange={onEdgesChange} onConnect={onConnect} onEdgesDelete={onEdgesDelete}
           onNodeClick={(_, n) => { if (linkingRef.current) finishLink(n.id); }} onPaneClick={() => { if (linkingRef.current) setLinking(null); if (selDrawingsRef.current.size) setSelDrawings(new Set()); }}
           nodesDraggable={selectMode} nodesConnectable={selectMode} elementsSelectable={selectMode} panOnDrag={tool === "pan" ? [0, 1, 2] : selectMode ? [1, 2] : false} selectionOnDrag={selectMode} panOnScroll zoomOnScroll={false} zoomActivationKeyCode="Alt" panActivationKeyCode="Control" multiSelectionKeyCode={null}
-          nodesFocusable={false} fitView minZoom={0.1} maxZoom={3} proOptions={{ hideAttribution: true }} colorMode="dark" deleteKeyCode="Delete"
+          nodesFocusable={false} fitView minZoom={0.1} maxZoom={3} proOptions={{ hideAttribution: true }} colorMode={theme} deleteKeyCode="Delete"
           onNodesDelete={() => {}} onBeforeDelete={async ({ nodes: ns, edges: es }) => ({ nodes: [], edges: ns.length ? [] : es })}>
           <Background variant={BackgroundVariant.Lines} gap={48} size={1} color={cssVar("--grid") || "#2c2c30"} />
           {minimap && <MiniMap pannable zoomable />}

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Bell, Bot, FileText, Layers, MessageSquare, Search, SquareTerminal, Zap, FolderOpen } from "lucide-react";
 import type { AttentionItem, FindHit, Workspace } from "@messai/contracts";
 import type { Api } from "./api.js";
-import { groupItems, rankItems, type PaletteItem } from "./palette.js";
+import { groupItems, rankItems, type PaletteItem } from "./paletteRank.js";
 import { relTime } from "./hud-model.js";
 
 /**

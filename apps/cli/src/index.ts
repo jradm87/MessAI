@@ -2,7 +2,9 @@
 // CLI mínima para agentes e humanos dentro de um terminal REA. Fala com o runtime pelo socket Unix.
 import { request } from "node:http";
 import { readFileSync, writeFileSync } from "node:fs";
-import { resolve as resolvePath } from "node:path";
+import { join as joinPath, resolve as resolvePath } from "node:path";
+import { createHash } from "node:crypto";
+import { homedir } from "node:os";
 import { AGENT_ENV, type Band, type BandAskResult, type AskResult, type ChatMessage, type EnvVarEntry, type FloorCopyInfo, type FloorHooksState, type FloorPrState, type GitHostEntry, type Message, type Node, type NotificationItem, type Routine, type RoutineRunResult, type Session, type Workspace, type WorkspaceBundle, type WorkspaceBundlePreview, type WorkspaceSnapshot } from "@messai/contracts";
 
 import type { BinderView } from "@messai/contracts";
@@ -10,7 +12,13 @@ import type { PortalActResult, PortalSnapshot, PortalScreenshot, DeviceList, Dev
 
 const env = (k: keyof typeof AGENT_ENV) => process.env[AGENT_ENV[k]];
 // Socket é determinístico (não-secreto): se o agente perdeu MESS_SOCKET no ambiente (ex.: política de env de alguns CLIs), cai no padrão.
-const defaultSocket = () => { const d = process.env["MESS_DATA_DIR"]; return (d ? `${d}/agent.sock` : `${process.env["HOME"] ?? ""}/.messai/agent.sock`); };
+// Mesma regra de apps/runtime/src/platform.ts socketPathFor (#6): no Windows é named pipe derivado da pasta de dados.
+const defaultSocket = () => {
+  const d = process.env["MESS_DATA_DIR"] || joinPath(homedir(), ".messai"); // homedir(): no Windows não há HOME
+  if (process.platform !== "win32") return joinPath(d, "agent.sock");
+  const norm = d.replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
+  return `\\\\.\\pipe\\messai-${createHash("sha1").update(norm).digest("hex").slice(0, 16)}`;
+};
 const socketPath = env("socket") || defaultSocket();
 const token = env("token"), workspaceId = env("workspaceId"), nodeId = env("nodeId");
 const [cmd, sub, ...rest] = process.argv.slice(2);

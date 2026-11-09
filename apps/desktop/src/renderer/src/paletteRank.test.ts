@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fold, groupItems, rankItems, scoreText, type PaletteItem } from "./palette.js";
+import { fold, groupItems, rankItems, scoreText, type PaletteItem } from "./paletteRank.js";
 
 const I = (id: string, kind: PaletteItem["kind"], label: string, extra: Partial<PaletteItem> = {}): PaletteItem => ({ id, kind, label, ...extra });
 

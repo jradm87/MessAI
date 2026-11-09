@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { androidInputText, androidKey, isAdbSerial, isAndroidActivity, isAndroidPackage, isAvdName, parseAdbDevices, parseAndroidFocus, parseAndroidPackages, parseUiDump, parseWmSize, pngSize } from "@messai/domain";
 import type { DeviceInfo, DeviceList, DeviceState, DeviceUiTree } from "@messai/contracts";
 import { whichOnPath } from "./providers.js";
+import { IS_WIN } from "./platform.js";
+import { killTree } from "./killtree.js";
 
 /**
  * #73 — Portais de dispositivo: Android/emulador dirigido pelo RUNTIME via adb. Só ações ESTRUTURADAS (toque, swipe, tecla, texto, abrir/parar app,
@@ -181,7 +183,7 @@ export class DeviceManager {
         const used = new Set(have.map((d) => Number(d.serial.replace("emulator-", ""))));
         let port = 5554; while (used.has(port) && port < 5586) port += 2; if (port >= 5586) throw new Error("sem porta livre para o emulador (5554–5584)");
         const args = ["-avd", avd, "-port", String(port), "-no-window", "-no-audio", "-no-snapshot", "-no-boot-anim", "-gpu", process.env["MESS_EMULATOR_GPU"] ?? "swiftshader_indirect", ...(persist ? [] : ["-read-only"])];
-        const child = spawn(emu, args, { stdio: ["ignore", "pipe", "pipe"], detached: true });
+        const child = spawn(emu, args, { stdio: ["ignore", "pipe", "pipe"], detached: !IS_WIN, windowsHide: true }); // N: -no-window; sem console no Windows
         let tail = ""; for (const s of [child.stdout!, child.stderr!]) { s.setEncoding("utf8"); s.on("data", (d: string) => { tail = (tail + d).slice(-1200); }); }
         let exited = false; child.on("exit", () => { exited = true; if (this.entries.get(nodeId)?.owned === child) { const en = this.entries.get(nodeId)!; en.owned = undefined; } });
         e.owned = child; serial = `emulator-${port}`;
@@ -193,7 +195,7 @@ export class DeviceManager {
           if (ds.some((d) => d.serial === serial && d.state === "device") && text(await runBin(adb, ["-s", serial, "shell", "getprop", "sys.boot_completed"], { timeoutMs: 8000 })).trim() === "1") { ready = true; break; }
           await new Promise((r) => setTimeout(r, 2000));
         }
-        if (!ready) { try { process.kill(-child.pid!, "SIGTERM"); } catch { /* */ } throw new Error("o emulador não terminou de iniciar em 4 min"); }
+        if (!ready) { killTree(child.pid, "SIGTERM"); throw new Error("o emulador não terminou de iniciar em 4 min"); }
       }
       delete e.message; await this.select(nodeId, serial, avd);
     })().catch((err) => { e.error = (err as Error).message; delete e.message; this.publish(nodeId); throw err; }).finally(() => { e.starting = undefined; });
@@ -239,7 +241,7 @@ export class DeviceManager {
     const dev = e.dev; const child = e.owned; this.disconnect(nodeId);
     if (dev) await dev.emuKill().catch(() => {});
     for (let i = 0; i < 40 && child.exitCode === null && child.signalCode === null; i++) await new Promise((r) => setTimeout(r, 500));
-    if (child.exitCode === null && child.signalCode === null) { try { process.kill(-child.pid!, "SIGKILL"); } catch { /* */ } }
+    if (child.exitCode === null && child.signalCode === null) killTree(child.pid); // #5
     e.owned = undefined; this.publish(nodeId);
   }
   /** Apagar o nó: solta o aparelho; o emulador que NÓS iniciamos é encerrado junto (não deixa 2 GB de RAM órfãos). */
