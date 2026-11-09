@@ -43,11 +43,11 @@ Scripts de teste fora do repo em `C:\mess-qa\` (smoke.mjs, ask.mjs, portal.mjs, 
 Hipóteses de §11 confirmadas/refutadas nesta sessão: A ✔, B ✘, E ✔, H ✔ (Claude aceita paste+Enter), N ✘ (não abre janela), P ✔, Q ✘ (sem problema), V ✘ (sem diálogo), L0 ✘ (node-pty 1.0.0 não compila → 1.1.0).
 
 ## Trilha 1 — falta
-- [ ] Rejeitar `isolation` no Windows com erro claro (`service.ts` criação de nó / settings).
-- [ ] P: `O_NOFOLLOW` → `lstat` no Windows; `isWithinCanonicalRoot` sem caixa em win32.
+- [x] Rejeitar `isolation` no Windows com erro claro (501 testado; só em `win/core` por enquanto).
+- [x] P: `isWithinCanonicalRoot` sem caixa em caminho com drive; escrita via symlink já era recusada pelo `ensureSafeParent` (403 testado; só em `win/core` por enquanto).
 - [ ] Monitor de processos (`procs.ts`) degradado no Windows (hoje lê `/proc`).
 - [ ] Baixo: SIGUSR2 guardado, filtro de nota secreta case-insensitive (`path`), preset `shell` antigo `/bin/bash` normalizado no boot, `expandHome` com `~\`, `includes("/")` cosmético.
-- [ ] Investigar: terminal/nota encolhe ao arrastar (tela com escala 150%, DPI 144).
+- [x] Terminal/nota encolhe ao arrastar (tela 150%, DPI 144): dono não reproduziu ao testar de novo; item encerrado sem alteração de código, reabrir se voltar.
 - [ ] `mess routine --help` não mostra a descrição/ajuda do subcomando (dono testou: a rotina funciona; só a ajuda não aparece) — provavelmente geral, não só Windows.
 - [ ] Mojibake ao canalizar a saída do `mess` no PowerShell 5.1 (`mess --help | Select-Object`).
 - [ ] Marcar caixinhas do `plan.md` e abrir PR `win/core → windows_version`.
