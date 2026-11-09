@@ -5,8 +5,8 @@
 ## Onde está o trabalho
 | Branch | Worktree | Estado |
 |---|---|---|
-| `windows_version` | `C:\Users\ctscs\Documents\MessAI` | Fase 0 + `.gitattributes` (K) + node-pty 1.1.0 (L0) |
-| `win/core` (Trilha 1) | `C:\Users\ctscs\Documents\MessAI-wt\core` | **30 commits, no GitHub, ainda sem PR** |
+| `windows_version` | `C:\Users\ctscs\Documents\MessAI` | Fase 0 + Trilha 1 até o `abrir.cmd` (merge de `win/core`, 25 commits) |
+| `win/core` (Trilha 1) | `C:\Users\ctscs\Documents\MessAI-wt\core` | já incluída na `windows_version`; o que falta continua aqui e é mesclado de novo |
 | `win/package` (Trilha 2) | `C:\Users\ctscs\Documents\MessAI-wt\package` | criado, nada feito |
 
 Máquina: ver `plan.md` §11 e a memória. Antes de `npm`: `NODE_OPTIONS=--use-system-ca` (agente Cloudflare). Node 22 via fnm.
