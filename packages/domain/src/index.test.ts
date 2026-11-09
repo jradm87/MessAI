@@ -1,5 +1,5 @@
 import {  describe, expect, it } from "vitest";
-import { canMessage, formatDelivery, resolveNodeRef, parseCrossRef, resolveCrossNodeRef, parseGitRemote, buildPrCompareUrl, canWrite, checkRevision, decideLease, normalizeGeometry, trimBuffer, MAX_BUFFER_BYTES, applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxAttachPlan, shellQuote, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, alignGeometries, gridLayout, agentKind, agentResume, stripAnsi, normalizePortalUrl, parsePortal, portalKey, serializePortal, androidInputText, androidKey, isAdbSerial, isAndroidActivity, isAndroidPackage, isAvdName, parseAdbDevices, parseAndroidFocus, parseAndroidPackages, parseUiDump, parseWmSize, pngSize, uiNodeAt, withClaudeAutonomy, withAgentAutonomy, binaryName, applySkills, parseNodeColor, rectBorderToward, floatingEnds, borderSide, treeLayout, pushOutsideRect } from "./index.js";
+import { canMessage, formatDelivery, resolveNodeRef, parseCrossRef, resolveCrossNodeRef, parseGitRemote, buildPrCompareUrl, canWrite, checkRevision, decideLease, normalizeGeometry, trimBuffer, MAX_BUFFER_BYTES, applyRole, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxAttachPlan, shellQuote, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, safeRelPath, looksBinary, alignGeometries, gridLayout, agentKind, agentResume, stripAnsi, normalizePortalUrl, parsePortal, portalKey, serializePortal, androidInputText, androidKey, isAdbSerial, isAndroidActivity, isAndroidPackage, isAvdName, parseAdbDevices, parseAndroidFocus, parseAndroidPackages, parseUiDump, parseWmSize, pngSize, uiNodeAt, withClaudeAutonomy, withAgentAutonomy, binaryName, applySkills, isWithinCanonicalRoot, parseNodeColor, rectBorderToward, floatingEnds, borderSide, treeLayout, pushOutsideRect } from "./index.js";
 
 describe("revisão", () => {
   it("aceita revisão igual e devolve próxima", () => {
@@ -495,5 +495,15 @@ describe("binaryName e detecção de agente no Windows (M)", () => {
     expect(applySkills("claude.exe", [], [{ name: "s", instructions: "i" }])).toContain("--append-system-prompt");
     expect(withAgentAutonomy("C:\\x\\claude.cmd", [])).toContain("--dangerously-skip-permissions");
     expect(withAgentAutonomy("codex.cmd", [])).toContain("--dangerously-bypass-approvals-and-sandbox");
+  });
+});
+
+describe("isWithinCanonicalRoot (P)", () => {
+  it("Windows não diferencia caixa; Linux continua diferenciando; irmão com prefixo parecido fica fora", () => {
+    const b = String.fromCharCode(92);
+    expect(isWithinCanonicalRoot(`C:${b}Users${b}A`, `c:${b}users${b}a${b}x.txt`)).toBe(true);
+    expect(isWithinCanonicalRoot(`C:${b}Users${b}A`, `C:${b}Users${b}AB${b}x.txt`)).toBe(false);
+    expect(isWithinCanonicalRoot("/home/A", "/home/a/x.txt")).toBe(false);
+    expect(isWithinCanonicalRoot("/home/a", "/home/a/x.txt")).toBe(true);
   });
 });

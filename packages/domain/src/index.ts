@@ -445,7 +445,9 @@ export function safeRelPath(rel: string): Result<string> {
  * comparando por componentes de caminho (evita falso-positivo de `startsWith` como `/tmp/ws` vs `/tmp/ws2`).
  */
 export function isWithinCanonicalRoot(realRoot: string, realTarget: string): boolean {
-  const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "") || "/";
+  // P: caminho com letra de drive = Windows, onde NTFS não diferencia caixa (`realpath` pode devolver `c:\a` ou `C:\A`)
+  const fold = /^[a-zA-Z]:/.test(realRoot);
+  const norm = (p: string) => { const s = p.replace(/\\/g, "/").replace(/\/+$/, "") || "/"; return fold ? s.toLowerCase() : s; };
   const r = norm(realRoot);
   const t = norm(realTarget);
   if (r === "/") return t.startsWith("/");
