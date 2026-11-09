@@ -23,7 +23,8 @@ const socketPath = env("socket") || defaultSocket();
 const token = env("token"), workspaceId = env("workspaceId"), nodeId = env("nodeId");
 const [cmd, sub, ...rest] = process.argv.slice(2);
 const isHelp = !cmd || cmd === "help" || cmd === "--help" || cmd === "-h";
-if (!isHelp && !token) { console.error("Fora de um terminal MessAI: a credencial (MESS_TOKEN) não chegou ao comando.\nSe este é um terminal Codex, o preset já herda o ambiente — recrie o terminal na versão nova. Caso contrário, rode `mess` de dentro de um terminal do MessAI."); process.exit(2); }
+const subHelp = !isHelp && (sub === "--help" || sub === "-h"); // `mess <comando> --help`: só as linhas daquele comando
+if (!isHelp && !subHelp && !token) { console.error("Fora de um terminal MessAI: a credencial (MESS_TOKEN) não chegou ao comando.\nSe este é um terminal Codex, o preset já herda o ambiente — recrie o terminal na versão nova. Caso contrário, rode `mess` de dentro de um terminal do MessAI."); process.exit(2); }
 
 function call<T>(method: string, path: string, body?: unknown): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -51,8 +52,8 @@ const COLOR_HELP = "cores: cinza vermelho laranja amarelo verde ciano azul roxo 
 const short = (id: string) => id.slice(0, 8);
 
 try {
-  if (isHelp) {
-    console.log(`rea — workspace visual
+  if (isHelp || subHelp) {
+    const usage = `rea — workspace visual
   mess context                      espaço, seu nó e notas conectadas (com conteúdo)
   mess nodes                        lista nós do espaço
   mess note read <id|título>        conteúdo de uma nota
@@ -101,7 +102,19 @@ try {
   mess floor land [--squash] [--keep] [--delete-branch]      pousa o andar atual no térreo
   mess floor delete <id|nome> [--delete-branch]
   mess floor hooks [set <setup|run|teardown> <cmd> | run [seção] | stop [seção] | logs [seção]]
-  mess env [list [--global] [--reveal] | set <KEY=VALUE> [--global] [--secret] | unset <KEY> [--global]]`);
+  mess env [list [--global] [--reveal] | set <KEY=VALUE> [--global] [--secret] | unset <KEY> [--global]]
+  mess routine list                 rotinas do espaço
+  mess routine create <nome> (--prompt <texto> [--node <ref>] | --command <cmd>) [--every <seg>] [--once] [--no-wake]
+                                    prompt entregue a um terminal ou comando no shell; padrão: a cada 300 s
+  mess routine run <rotina>         executa agora
+  mess routine enable|disable <rotina>   ativa ou pausa
+  mess routine delete <rotina>      remove`;
+    if (!subHelp) console.log(usage);
+    else {
+      const out: string[] = []; let keep = false;
+      for (const l of usage.split("\n")) { if (l.includes("mess ")) keep = new RegExp(`mess ${cmd}\\b`).test(l); else if (!/^\s{4,}/.test(l)) keep = false; if (keep) out.push(l); }
+      console.log(out.length ? out.join("\n") : usage);
+    }
   } else if (cmd === "floor") {
     const s = await snapshot(); const me = s.workspace;
     const groundId = me.parentId ?? me.workspaceId;
