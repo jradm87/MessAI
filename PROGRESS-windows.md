@@ -42,15 +42,15 @@ Scripts de teste fora do repo em `C:\mess-qa\` (smoke.mjs, ask.mjs, portal.mjs, 
 
 Hipóteses de §11 confirmadas/refutadas nesta sessão: A ✔, B ✘, E ✔, H ✔ (Claude aceita paste+Enter), N ✘ (não abre janela), P ✔, Q ✘ (sem problema), V ✘ (sem diálogo), L0 ✘ (node-pty 1.0.0 não compila → 1.1.0).
 
-## Trilha 1 — falta
-- [x] Rejeitar `isolation` no Windows com erro claro (501 testado; só em `win/core` por enquanto).
-- [x] P: `isWithinCanonicalRoot` sem caixa em caminho com drive; escrita via symlink já era recusada pelo `ensureSafeParent` (403 testado; só em `win/core` por enquanto).
-- [ ] Monitor de processos (`procs.ts`) degradado no Windows (hoje lê `/proc`).
-- [ ] Baixo: SIGUSR2 guardado, filtro de nota secreta case-insensitive (`path`), preset `shell` antigo `/bin/bash` normalizado no boot, `expandHome` com `~\`, `includes("/")` cosmético.
+## Trilha 1 — Fase 1 concluída
+- [x] Rejeitar `isolation` no Windows com erro claro (501 testado).
+- [x] P: `isWithinCanonicalRoot` sem caixa em caminho com drive; escrita via symlink já era recusada pelo `ensureSafeParent` (403 testado).
+- [x] Monitor de processos no Windows via WMI em segundo plano (testado).
+- [x] Baixo: SIGUSR2, nota secreta `path`, preset `shell` com caminho POSIX, `expandHome` com `~\`, caminhos com `\`.
 - [x] Terminal/nota encolhe ao arrastar (tela 150%, DPI 144): dono não reproduziu ao testar de novo; item encerrado sem alteração de código, reabrir se voltar.
-- [ ] `mess routine --help` não mostra a descrição/ajuda do subcomando (dono testou: a rotina funciona; só a ajuda não aparece) — provavelmente geral, não só Windows.
-- [ ] Mojibake ao canalizar a saída do `mess` no PowerShell 5.1 (`mess --help | Select-Object`).
-- [ ] Marcar caixinhas do `plan.md` e abrir PR `win/core → windows_version`.
+- [x] `mess routine --help` agora mostra a ajuda (antes não mostrava).
+- [x] Mojibake ao canalizar a saída do `mess` no PowerShell 5.1 (`mess --help | Select-Object`).
+- [x] Caixinhas do `plan.md` marcadas e `win/core` mesclada na `windows_version` após CI Linux verde (run 42641913431), a pedido do dono, sem PR.
 
 ## Observações para o Linux (bugs gerais achados no porte)
 - Runtime não tinha CORS: renderer em dev (`localhost:5173`) não conecta — verificar como funciona no Linux.
