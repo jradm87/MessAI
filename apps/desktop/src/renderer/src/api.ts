@@ -3,6 +3,7 @@ import type { DeviceList, DeviceState, DeviceAct, DeviceActResult, DeviceUiTree,
 export type Connection = { baseUrl: string; wsUrl: string; token: string; homeDir?: string };
 export type RunningEntry = { title: string; agentType: string; isAgent: boolean; workspace: string };
 export type FocusTarget = { workspaceId: string; nodeId: string };
+export type WinState = { maximized: boolean; focused: boolean };
 declare global { interface Window { messai: {
   connection(): Promise<Connection | null>; pickDirectory?: () => Promise<string | null>; pathForFile?: (f: File) => string;
   onShutdownPrompt?: (cb: (data: { running: RunningEntry[] }) => void) => void; shutdownDecision?: (action: "background" | "all" | "cancel") => Promise<void>;
@@ -10,6 +11,8 @@ declare global { interface Window { messai: {
   hudToggle?: (open?: boolean) => Promise<boolean>; hudState?: () => Promise<boolean>; onHudState?: (cb: (open: boolean) => void) => () => void;
   hudFocus?: (target: FocusTarget) => Promise<void>; onFocusNode?: (cb: (target: FocusTarget) => void) => () => void;
   hudDismiss?: (nodeId: string) => Promise<void>; onHudDismiss?: (cb: (nodeId: string) => void) => () => void;
+  // Barra de título própria (Windows): janela sem moldura do SO
+  frameless?: boolean; winControl?: (action: "close" | "min" | "max" | "state") => Promise<WinState | null>; onWinState?: (cb: (s: WinState) => void) => () => void;
   // #55 — preferências que vivem no processo principal
   setUiPrefs?: (p: UiPrefs) => Promise<UiPrefsState>; uiPrefsState?: () => Promise<UiPrefsState>;
   // #38 — abre uma pasta DENTRO de ~/.messai no gerenciador de arquivos; devolve "" ou a mensagem de erro

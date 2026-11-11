@@ -3,6 +3,7 @@ window.addEventListener("error", (e) => { if (e.message && e.message.includes("R
 import { createRoot } from "react-dom/client";
 import { App } from "./App.js";
 import { Hud } from "./Hud.js";
+import { TitleBar } from "./TitleBar.js";
 import { initTheme, onTheme, getEffectiveTheme } from "./theme.js";
 import { initUiPrefs } from "./ui-prefs.js";
 import { store, themeAtom } from "./atoms.js";
@@ -20,6 +21,14 @@ if (!isHud) initUiPrefs(); // #55: cursor + prefs que vivem no processo principa
 
 // Remove o splash estático (index.html) com um fade curto quando o conteúdo React já está pronto.
 const dropSplash = () => { const s = document.getElementById("splash"); if (s) { s.style.opacity = "0"; setTimeout(() => s.remove(), 250); } };
+
+// Windows: janela sem moldura do SO → barra de título própria acima do app (também na tela de erro, para poder fechar)
+if (!isHud && window.messai.frameless) {
+  document.documentElement.dataset["frameless"] = "1";
+  const bar = document.createElement("div"); bar.id = "titlebar-root";
+  document.body.insertBefore(bar, document.getElementById("root"));
+  createRoot(bar).render(<TitleBar />);
+}
 
 const root = createRoot(document.getElementById("root")!);
 window.messai.connection().then((conn) => {

@@ -14,6 +14,10 @@ contextBridge.exposeInMainWorld("messai", {
   onHudState: (cb: (open: boolean) => void) => on<boolean>("mess:hud-state", cb),
   hudFocus: (target: { workspaceId: string; nodeId: string }): Promise<void> => ipcRenderer.invoke("mess:hud-focus", target),
   onFocusNode: (cb: (target: { workspaceId: string; nodeId: string }) => void) => on<{ workspaceId: string; nodeId: string }>("mess:focus-node", cb),
+  // Barra de título própria (Windows: janela sem moldura)
+  frameless: process.platform === "win32",
+  winControl: (action: "close" | "min" | "max" | "state"): Promise<{ maximized: boolean; focused: boolean } | null> => ipcRenderer.invoke("mess:win", action),
+  onWinState: (cb: (s: { maximized: boolean; focused: boolean }) => void) => on<{ maximized: boolean; focused: boolean }>("mess:win-state", cb),
   hudDismiss: (nodeId: string): Promise<void> => ipcRenderer.invoke("mess:hud-dismiss", nodeId),
   onHudDismiss: (cb: (nodeId: string) => void) => on<string>("mess:hud-dismiss", cb),
   // #55 — preferências que vivem no processo principal (energia, confirmação ao sair, bandeja)
