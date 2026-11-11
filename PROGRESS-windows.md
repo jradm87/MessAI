@@ -52,6 +52,15 @@ Hipóteses de §11 confirmadas/refutadas nesta sessão: A ✔, B ✘, E ✔, H �
 - [x] Mojibake ao canalizar a saída do `mess` no PowerShell 5.1 (`mess --help | Select-Object`).
 - [x] Caixinhas do `plan.md` marcadas e `win/core` mesclada na `windows_version` após CI Linux verde (run 42641913431), a pedido do dono, sem PR.
 
+## Depois da Fase 1 (merge 555147b, CI Linux 43017514461, testado pelo dono)
+- [x] Janela preta piscando a cada ação (git do status da árvore, adb, fork do node-pty ao matar terminal): `windowsHide` + `hideForkConsoles()`.
+- [x] Menu de contexto da árvore saía da tela e o fundo invisível bloqueava a árvore (geral, não só Windows): portal ao body.
+- [x] Modo isolado indisponível mostra o motivo real (WSL2 no Windows).
+- [x] Recrutas e notas/portais/fichários do agente em grade perto dele, até 4 por linha (`gridSpotNear`, `nearNodeId`) — muda também no Linux.
+- [ ] Busca por conteúdo da árvore (`>texto`) usa `grep`: conferir no Windows.
+- [ ] Barra flutuante do nó cobre "Lista"/"Grade" da árvore quando ela está no topo da tela.
+- Pendente do dono: dar push na `main` (novidades do canvas no Linux) para trazer à `windows_version` e testar aqui antes de voltar.
+
 ## Observações para o Linux (bugs gerais achados no porte)
 - Runtime não tinha CORS: renderer em dev (`localhost:5173`) não conecta — verificar como funciona no Linux.
 - ↻ reiniciar Claude dava "Session ID already in use" (corrigido para todos).
