@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
+import { createPortal } from "react-dom";
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
 import { ArrowLeft, ArrowRight, ArrowUp, Folder, FolderOpen, FileText, File as FileIcon, FileCode2, Image as ImageIcon, LayoutList, LayoutGrid, RefreshCw, FolderPlus, FilePlus, Search, Home, GitBranch } from "lucide-react";
 import type { TreeEntry, SearchHit } from "@messai/contracts";
@@ -63,7 +64,7 @@ function TreeNodeImpl({ id, data, selected }: NodeProps & { data: TreeData }) {
   ]);
 
   return (
-    <div className={`node tree ${selected ? "sel" : ""}`} onContextMenu={(ev) => { ev.preventDefault(); setMenu({ x: ev.clientX, y: ev.clientY }); }}>
+    <div className={`node tree ${selected ? "sel" : ""}`} onContextMenu={(ev) => { ev.preventDefault(); ev.stopPropagation(); setMenu({ x: ev.clientX, y: ev.clientY }); }}>
       <NodeResizer minWidth={220} minHeight={180} isVisible={selected} />
       <div className="bar tree-bar">
         <button className="ib nodrag" title="Voltar" disabled={!hist.current.back.length} onClick={back}><ArrowLeft size={13} /></button>
@@ -93,9 +94,10 @@ function TreeNodeImpl({ id, data, selected }: NodeProps & { data: TreeData }) {
           </div>))}
       </div>
       <div className="tr-search nodrag"><Search size={12} className="mut" /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar nome · > busca conteúdo" data-testid="tree-search" /></div>
-      {menu && (
-        <div className="menu-backdrop fixed" onMouseDown={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }}>
-          <div className="menu" style={{ left: menu.x, top: menu.y, position: "fixed" }} onMouseDown={(e) => e.stopPropagation()} onClick={() => setMenu(null)}>
+      {/* No body: dentro do nó o `transform` do canvas deslocava o menu para fora da tela e o fundo cobria a árvore. */}
+      {menu && createPortal(
+        <div className="menu-backdrop fixed" onMouseDown={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setMenu(null); }}>
+          <div className="menu" style={{ left: Math.min(menu.x, window.innerWidth - 200), top: Math.min(menu.y, window.innerHeight - 240), position: "fixed" }} onMouseDown={(e) => e.stopPropagation()} onClick={() => setMenu(null)}>
             {menu.e ? (<>
               {menu.e.dir && <div className="mi" onClick={() => go(menu.e!.path)}>Abrir como raiz</div>}
               {!menu.e.dir && /\.(md|markdown|txt)$/i.test(menu.e.name) && <div className="mi" onClick={() => data.onOpenNote(menu.e!.path)}>Abrir como nota</div>}
@@ -110,7 +112,8 @@ function TreeNodeImpl({ id, data, selected }: NodeProps & { data: TreeData }) {
               <div className="mi" onClick={refresh}>Atualizar</div>
             </>)}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
       <Handle type="source" position={Position.Right} /><Handle type="target" position={Position.Left} />
     </div>

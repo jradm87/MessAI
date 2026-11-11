@@ -22,7 +22,7 @@ import { probeAccounts } from "./accounts.js";
 import { backupName, copyBackupFiles, dataStats, isBackupName, listBackups, validateBackup, validateMoveTarget, writeManifest, type BackupEntry } from "./data.js";
 import { BUILD_VERSION } from "@messai/contracts";
 import { defaultPresets, normalizePresets, parsePresets, validatePresets, PRESETS_META_KEY } from "./presets.js";
-import { applyRole, withAgentAutonomy, parseNodeColor, parseBinder, serializeBinder, binderAddPage, binderPatchPage, binderFindPage, binderDeletePage, binderMovePage, binderBringToFront, binderSetActive, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, DEFAULT_FLOOR_EXCLUDES, normalizeFloorExcludes, shouldExcludeFloorDir, parseGitRemote, buildPrCompareUrl, normalizeEnvVars, mergeEnvLayers, safeRelPath, isWithinCanonicalRoot, looksBinary, canMessage, checkRevision, formatDelivery, normalizeGeometry, planLocalTerminal, resolveNodeRef, resolveCrossNodeRef, validateNewNode, agentKind, agentResume, stripAnsi, fail, succeed, type Result, applySkills, skillsText, placeGeometries, connectionsWithin } from "@messai/domain";
+import { applyRole, withAgentAutonomy, parseNodeColor, parseBinder, serializeBinder, binderAddPage, binderPatchPage, binderFindPage, binderDeletePage, binderMovePage, binderBringToFront, binderSetActive, roleText, deriveNoteTitle, noteFileName, wrapInTmux, tmuxSessionName, slugify, floorGitPlan, parseMergeConflicts, DEFAULT_FLOOR_EXCLUDES, normalizeFloorExcludes, shouldExcludeFloorDir, parseGitRemote, buildPrCompareUrl, normalizeEnvVars, mergeEnvLayers, safeRelPath, isWithinCanonicalRoot, looksBinary, canMessage, checkRevision, formatDelivery, normalizeGeometry, planLocalTerminal, resolveNodeRef, resolveCrossNodeRef, validateNewNode, agentKind, agentResume, stripAnsi, fail, succeed, type Result, applySkills, skillsText, placeGeometries, connectionsWithin, gridSpotNear } from "@messai/domain";
 import { createHash, randomUUID, randomBytes, timingSafeEqual } from "node:crypto";
 import { Companion } from "./companion.js";
 import type { Store } from "@messai/storage";
@@ -98,7 +98,7 @@ const execFileP = promisify(execFile);
  */
 async function runCmd(cmd: string, args: string[], opts: { cwd?: string; timeoutMs: number; maxBuffer?: number }): Promise<{ status: number; stdout: string }> {
   try {
-    const { stdout } = await execFileP(cmd, args, { cwd: opts.cwd, timeout: opts.timeoutMs, maxBuffer: opts.maxBuffer ?? 8 * 1024 * 1024, encoding: "utf8" });
+    const { stdout } = await execFileP(cmd, args, { cwd: opts.cwd, windowsHide: true, timeout: opts.timeoutMs, maxBuffer: opts.maxBuffer ?? 8 * 1024 * 1024, encoding: "utf8" });
     return { status: 0, stdout: String(stdout) };
   } catch (e) {
     const err = e as { code?: number | string; stdout?: string };
@@ -1343,7 +1343,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
 
   // ---- andares (floors) ----
   private git(cwd: string, args: string[]): { ok: boolean; out: string } {
-    const r = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8", timeout: GIT_SYNC_TIMEOUT_MS });
+    const r = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8", timeout: GIT_SYNC_TIMEOUT_MS, windowsHide: true });
     return { ok: r.status === 0, out: `${r.stdout ?? ""}${r.stderr ?? ""}`.trim() };
   }
   isGitRepo(cwd: string): boolean { return this.git(cwd, ["rev-parse", "--is-inside-work-tree"]).ok; }
@@ -1889,9 +1889,9 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     if (w.parentId && (w.floorType === "worktree" || w.floorType === "copy")) {
       const ground = this.store.getWorkspace(w.parentId);
       if (ground && w.floorType === "worktree") {
-        spawnSync("git", ["-C", ground.cwd, "worktree", "remove", "--force", w.cwd], { stdio: "ignore", timeout: GIT_SYNC_TIMEOUT_MS });
-        spawnSync("git", ["-C", ground.cwd, "worktree", "prune"], { stdio: "ignore", timeout: GIT_SYNC_TIMEOUT_MS });
-        if (opts.deleteBranch && w.branch) spawnSync("git", ["-C", ground.cwd, "branch", "-D", w.branch], { stdio: "ignore", timeout: GIT_SYNC_TIMEOUT_MS });
+        spawnSync("git", ["-C", ground.cwd, "worktree", "remove", "--force", w.cwd], { stdio: "ignore", timeout: GIT_SYNC_TIMEOUT_MS, windowsHide: true });
+        spawnSync("git", ["-C", ground.cwd, "worktree", "prune"], { stdio: "ignore", timeout: GIT_SYNC_TIMEOUT_MS, windowsHide: true });
+        if (opts.deleteBranch && w.branch) spawnSync("git", ["-C", ground.cwd, "branch", "-D", w.branch], { stdio: "ignore", timeout: GIT_SYNC_TIMEOUT_MS, windowsHide: true });
       }
       if (existsSync(w.cwd) && w.cwd.startsWith(join(this.cfg.dataDir, "floors"))) rmSync(w.cwd, { recursive: true, force: true });
     }
@@ -1928,7 +1928,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const node: Node = {
       nodeId: newId(), workspaceId, kind: input.kind,
       title: input.title ?? (input.kind === "terminal" ? "Terminal" : input.kind === "text" ? "Texto" : input.kind === "tree" ? "Arquivos" : input.kind === "binder" ? "Fichário" : input.kind === "portal" ? "Portal" : input.kind === "device" ? "Dispositivo" : input.kind === "stack" ? "Grupo" : "Nota"),
-      geometry: input.autoPlace ? this.placeFree(this.store.listNodes(workspaceId), input.geometry.w, input.geometry.h) : normalizeGeometry(input.geometry), createdAt: nowIso(),
+      geometry: input.autoPlace ? this.autoGeometry(workspaceId, input.geometry, input.nearNodeId) : normalizeGeometry(input.geometry), createdAt: nowIso(),
       ...(input.kind === "note" || input.kind === "text" ? { content: input.content ?? "" } : {}),
       ...(input.kind === "tree" ? { content: input.content ?? JSON.stringify({ root: "", mode: "list" }) } : {}),
       ...(input.kind === "portal" ? { content: portalContent } : {}),
@@ -3249,14 +3249,18 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const bottom = Math.max(...nodes.map((n) => n.geometry.y + n.geometry.h));
     return { x: left, y: bottom + 40, w: norm.w, h: norm.h }; // empilha de cima para baixo (mesma coluna à esquerda)
   }
+  /** autoPlace: em grade à direita do nó âncora (o agente que criou), até 4 por linha; sem âncora, abaixo de tudo. */
+  private autoGeometry(workspaceId: string, g: Node["geometry"], nearNodeId?: string): Node["geometry"] {
+    const nodes = this.store.listNodes(workspaceId);
+    const anchor = nearNodeId ? nodes.find((n) => n.nodeId === nearNodeId) : undefined;
+    if (!anchor) return this.placeFree(nodes, g.w, g.h);
+    const norm = normalizeGeometry({ x: 0, y: 0, w: g.w, h: g.h });
+    return gridSpotNear(anchor.geometry, nodes, { w: norm.w, h: norm.h }, { side: "right" });
+  }
   // (O arranjo em árvore automático foi removido: atropelava o layout manual do usuário. A árvore fica sob comando no app — "Organizar em árvore".)
+  /** Recrutas: grade logo abaixo do condutor, até 4 lado a lado, pulando vagas ocupadas. */
   private freeSpotNear(anchor: Node, nodes: Node[], w: number, h: number): Node["geometry"] {
-    const x = anchor.geometry.x; // mesma coluna do condutor
-    for (let k = 1; k < 80; k++) {
-      const y = anchor.geometry.y + k * (anchor.geometry.h + 30); // empilha para baixo
-      if (!nodes.some((n) => x < n.geometry.x + n.geometry.w && x + w > n.geometry.x && y < n.geometry.y + n.geometry.h && y + h > n.geometry.y)) return { x, y, w, h };
-    }
-    return { x, y: anchor.geometry.y + 80 * (anchor.geometry.h + 30), w, h };
+    return gridSpotNear(anchor.geometry, nodes, { w, h }, { side: "below" });
   }
   /** Recruta um terminal (por preset ou comando), liga ao condutor, opcionalmente com papel e numa banda. */
   recruit(maestroId: string, input: MaestroRecruit): Result<{ node: Node; bandId?: string }> {
@@ -3282,7 +3286,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     const node = made.value.node;
     const link = this.createConnection(w.workspaceId, { expectedRevision: this.store.getWorkspace(w.workspaceId)!.revision, sourceNodeId: maestro.nodeId, targetNodeId: node.nodeId });
     if (!link.ok) return link;
-    // o recrutado já nasceu posicionado por freeSpotNear (abaixo do Maestro, sem sobrepor). NÃO re-arranjamos a árvore
+    // o recrutado já nasceu posicionado por freeSpotNear (em grade abaixo do Maestro, sem sobrepor). NÃO re-arranjamos a árvore
     // automaticamente: isso atropelava o layout manual do usuário. A árvore fica sob comando ("Organizar em árvore").
     let bandId: string | undefined;
     if (input.band) {

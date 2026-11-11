@@ -494,6 +494,23 @@ export function snapGeometry(moving: Geometry, others: Geometry[], opt: { thresh
 
 // ---------- #71 partituras ----------
 /** Move um arranjo para que o canto superior esquerdo fique em `at`, preservando posições relativas. */
+/**
+ * Vaga livre numa grade perto de `anchor`: `cols` por linha (padrão 4), da esquerda para a direita e depois a linha de baixo.
+ * `side: "below"` começa logo abaixo do nó (recrutas); `"right"`, à direita dele, no topo (notas). Vagas ocupadas por
+ * qualquer nó (com folga de `gap`) são puladas, então um canvas cheio só empurra o novo nó para a próxima vaga perto.
+ */
+export function gridSpotNear(anchor: Geometry, nodes: { geometry: Geometry }[], size: { w: number; h: number }, opts: { side: "below" | "right"; cols?: number; gap?: number; maxRows?: number }): Geometry {
+  const cols = opts.cols ?? 4, gap = opts.gap ?? 30, maxRows = opts.maxRows ?? 60;
+  const ox = opts.side === "below" ? anchor.x : anchor.x + anchor.w + gap;
+  const oy = opts.side === "below" ? anchor.y + anchor.h + gap : anchor.y;
+  const hits = (x: number, y: number) => nodes.some(({ geometry: g }) => x < g.x + g.w + gap && x + size.w + gap > g.x && y < g.y + g.h + gap && y + size.h + gap > g.y);
+  for (let r = 0; r < maxRows; r++) for (let c = 0; c < cols; c++) {
+    const x = Math.round(ox + c * (size.w + gap)), y = Math.round(oy + r * (size.h + gap));
+    if (!hits(x, y)) return { x, y, w: size.w, h: size.h };
+  }
+  return { x: Math.round(ox), y: Math.round(oy + maxRows * (size.h + gap)), w: size.w, h: size.h };
+}
+
 export function placeGeometries(items: { key: string; geometry: Geometry }[], at: { x: number; y: number }): Map<string, Geometry> {
   const out = new Map<string, Geometry>(); if (!items.length) return out;
   const minX = Math.min(...items.map((i) => i.geometry.x)), minY = Math.min(...items.map((i) => i.geometry.y));

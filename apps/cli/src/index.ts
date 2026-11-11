@@ -274,7 +274,7 @@ try {
     let s = await snapshot();
     const me = s.nodes.find((n) => n.nodeId === nodeId);
     const g = me ? { x: me.geometry.x + me.geometry.w + 40, y: me.geometry.y, w: 280, h: 180 } : { x: 40, y: 40, w: 280, h: 180 };
-    const r = await call<{ node: Node; revision: number }>("POST", `/v1/workspaces/${workspaceId}/nodes`, { expectedRevision: s.workspace.revision, kind: "note", title, geometry: g, autoPlace: true, content: text.join(" "), ...col });
+    const r = await call<{ node: Node; revision: number }>("POST", `/v1/workspaces/${workspaceId}/nodes`, { expectedRevision: s.workspace.revision, kind: "note", title, geometry: g, autoPlace: true, ...(nodeId ? { nearNodeId: nodeId } : {}), content: text.join(" "), ...col });
     if (nodeId) { s = await snapshot(); await call("POST", `/v1/workspaces/${workspaceId}/connections`, { expectedRevision: s.workspace.revision, sourceNodeId: nodeId, targetNodeId: r.node.nodeId }); }
     console.log(`nota criada [${short(r.node.nodeId)}]${nodeId ? " e ligada ao seu nó" : ""}`);
   } else if (cmd === "note" && sub === "append") {
@@ -379,7 +379,7 @@ try {
       args.shift(); const col = takeColor(args); const name = flagVal("--name") ?? (args[1] && !args[1].startsWith("-") ? args.splice(1,1)[0] : undefined); const url = args[0] ?? "";
       const s = await snapshot(); const me = s.nodes.find((n) => n.nodeId === nodeId);
       const g = me ? { x: me.geometry.x + me.geometry.w + 40, y: me.geometry.y, w: 560, h: 400 } : { x: 40, y: 40, w: 560, h: 400 };
-      const r = await call<{ node: Node }>("POST", `/v1/workspaces/${workspaceId}/nodes`, { expectedRevision: s.workspace.revision, kind: "portal", ...(name ? { title: name } : {}), geometry: g, autoPlace: true, content: JSON.stringify({ url }), ...col });
+      const r = await call<{ node: Node }>("POST", `/v1/workspaces/${workspaceId}/nodes`, { expectedRevision: s.workspace.revision, kind: "portal", ...(name ? { title: name } : {}), geometry: g, autoPlace: true, ...(nodeId ? { nearNodeId: nodeId } : {}), content: JSON.stringify({ url }), ...col });
       if (nodeId) { const s2 = await snapshot(); await call("POST", `/v1/workspaces/${workspaceId}/connections`, { expectedRevision: s2.workspace.revision, sourceNodeId: nodeId, targetNodeId: r.node.nodeId }).catch(() => {}); }
       console.log(`portal criado [${short(r.node.nodeId)}] "${r.node.title}"${url ? ` → ${url}` : ""}${nodeId ? " e ligado ao seu nó" : ""}`);
     } else {
@@ -436,7 +436,7 @@ try {
       args.shift(); const col = takeColor(args); const name = flagVal("--name"); const serial = flagVal("--serial"); const avd = flagVal("--avd");
       const s = await snapshot(); const me = s.nodes.find((n) => n.nodeId === nodeId);
       const g = me ? { x: me.geometry.x + me.geometry.w + 40, y: me.geometry.y, w: 360, h: 640 } : { x: 40, y: 40, w: 360, h: 640 };
-      const r = await call<{ node: Node }>("POST", `/v1/workspaces/${workspaceId}/nodes`, { expectedRevision: s.workspace.revision, kind: "device", ...(name ? { title: name } : {}), geometry: g, autoPlace: true, content: JSON.stringify({ ...(serial ? { serial } : {}), ...(avd ? { avd } : {}) }), ...col });
+      const r = await call<{ node: Node }>("POST", `/v1/workspaces/${workspaceId}/nodes`, { expectedRevision: s.workspace.revision, kind: "device", ...(name ? { title: name } : {}), geometry: g, autoPlace: true, ...(nodeId ? { nearNodeId: nodeId } : {}), content: JSON.stringify({ ...(serial ? { serial } : {}), ...(avd ? { avd } : {}) }), ...col });
       if (nodeId) { const s2 = await snapshot(); await call("POST", `/v1/workspaces/${workspaceId}/connections`, { expectedRevision: s2.workspace.revision, sourceNodeId: nodeId, targetNodeId: r.node.nodeId }).catch(() => {}); }
       console.log(`dispositivo criado [${short(r.node.nodeId)}] "${r.node.title}"${nodeId ? " e ligado ao seu nó" : ""}`);
     } else {
@@ -513,7 +513,7 @@ try {
       const col = takeColor(args); const title = args.join(" ").trim() || "Fichário";
       const me = s.nodes.find((n) => n.nodeId === nodeId);
       const g = me ? { x: me.geometry.x + me.geometry.w + 40, y: me.geometry.y, w: 520, h: 360 } : { x: 40, y: 40, w: 520, h: 360 };
-      const r = await call<{ node: Node }>("POST", `/v1/workspaces/${workspaceId}/nodes`, { expectedRevision: s.workspace.revision, kind: "binder", title, geometry: g, autoPlace: true });
+      const r = await call<{ node: Node }>("POST", `/v1/workspaces/${workspaceId}/nodes`, { expectedRevision: s.workspace.revision, kind: "binder", title, geometry: g, autoPlace: true, ...(nodeId ? { nearNodeId: nodeId } : {}) });
       if (col.color) await call("POST", `/v1/nodes/${r.node.nodeId}/binder`, { op: "color", color: col.color });
       if (nodeId) { const s2 = await snapshot(); await call("POST", `/v1/workspaces/${workspaceId}/connections`, { expectedRevision: s2.workspace.revision, sourceNodeId: nodeId, targetNodeId: r.node.nodeId }).catch(() => {}); }
       console.log(`fichário "${r.node.title}" criado [${short(r.node.nodeId)}]${nodeId ? " e ligado ao seu nó" : ""}`);

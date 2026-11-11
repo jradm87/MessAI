@@ -35,7 +35,7 @@ export function findScrcpy(): string | null {
 export type AdbResult = { status: number; stdout: Buffer; stderr: string };
 export function runBin(bin: string, args: string[], opts: { timeoutMs?: number; maxBuffer?: number } = {}): Promise<AdbResult> {
   return new Promise((resolve) => {
-    execFile(bin, args, { timeout: opts.timeoutMs ?? 20_000, maxBuffer: opts.maxBuffer ?? 64 * 1024 * 1024, encoding: "buffer" }, (err, stdout, stderr) => {
+    execFile(bin, args, { windowsHide: true, timeout: opts.timeoutMs ?? 20_000, maxBuffer: opts.maxBuffer ?? 64 * 1024 * 1024, encoding: "buffer" }, (err, stdout, stderr) => {
       const code = err ? (err as { code?: number | string }).code : 0;
       resolve({ status: typeof code === "number" ? code : err ? 1 : 0, stdout: Buffer.isBuffer(stdout) ? stdout : Buffer.from(String(stdout ?? "")), stderr: (Buffer.isBuffer(stderr) ? stderr.toString("utf8") : String(stderr ?? "")) + (err && typeof code !== "number" ? `\n${(err as Error).message}` : "") });
     });
