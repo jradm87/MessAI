@@ -18,6 +18,8 @@ function resolveDataDir(): string {
 }
 let DATA_DIR = resolveDataDir();
 const PORT = Number(process.env["MESS_PORT"] ?? 47821);
+/** Janela principal sem moldura do SO (barra própria no renderer). Só Windows: no Linux/macOS segue a moldura nativa. */
+const FRAMELESS = process.platform === "win32";
 const BASE = `http://127.0.0.1:${PORT}`;
 const here = fileURLToPath(new URL(".", import.meta.url));
 
@@ -144,7 +146,14 @@ function load(win: BrowserWindow, hash?: string): void {
 }
 
 function createWindow(): void {
-  const win = new BrowserWindow({ width: 1400, height: 900, title: "MessAI", webPreferences: WEB_PREFS });
+  // Windows: sem barra de título nem menu (File/Edit/View…); o renderer desenha a barra com os botões estilo macOS.
+  // titleBarStyle "hidden" (sem overlay) mantém borda de redimensionar, sombra e o snap do Windows.
+  const win = new BrowserWindow({ width: 1400, height: 900, title: "MessAI", webPreferences: WEB_PREFS, ...(FRAMELESS ? { titleBarStyle: "hidden" as const, backgroundColor: "#0a0a0b" } : {}) });
+  if (FRAMELESS) {
+    win.removeMenu();
+    const send = () => { if (!win.isDestroyed()) win.webContents.send("mess:win-state", { maximized: win.isMaximized(), focused: win.isFocused() }); };
+    for (const ev of ["maximize", "unmaximize", "focus", "blur", "enter-full-screen", "leave-full-screen"] as const) win.on(ev as "focus", send);
+  }
   mainWin = win;
   win.on("close", (e) => {
     if (allowClose) return;
@@ -208,6 +217,14 @@ ipcMain.handle("mess:hud-focus", (_e, target: { workspaceId: string; nodeId: str
   mainWin.webContents.send("mess:focus-node", { workspaceId: target.workspaceId, nodeId: target.nodeId });
 });
 // Usuário focou o terminal na janela principal: o cartão correspondente sai do HUD.
+// Barra de título própria (Windows): botões fechar/minimizar/maximizar. Fechar passa pelo "close" (tela de encerramento).
+ipcMain.handle("mess:win", (e, action: string) => {
+  const w = BrowserWindow.fromWebContents(e.sender); if (!w) return null;
+  if (action === "close") w.close();
+  else if (action === "min") w.minimize();
+  else if (action === "max") { if (w.isMaximized()) w.unmaximize(); else w.maximize(); }
+  return { maximized: w.isMaximized(), focused: w.isFocused() };
+});
 ipcMain.handle("mess:hud-dismiss", (_e, nodeId: string) => { if (hudOpen() && typeof nodeId === "string") hudWin!.webContents.send("mess:hud-dismiss", nodeId); });
 
 /** Traz a janela principal (bandeja, HUD, SIGUSR2). */
