@@ -6,7 +6,7 @@ export type GitRun = { status: number; stdout: string; stderr: string };
 export function runGit(root: string, args: string[], opts: { timeoutMs?: number; maxBuffer?: number } = {}): Promise<GitRun> {
   return new Promise((resolve) => {
     execFile("git", ["-C", root, ...args], {
-      timeout: opts.timeoutMs ?? 15_000, maxBuffer: opts.maxBuffer ?? 8 * 1024 * 1024, encoding: "utf8",
+      windowsHide: true, timeout: opts.timeoutMs ?? 15_000, maxBuffer: opts.maxBuffer ?? 8 * 1024 * 1024, encoding: "utf8",
       // nunca pergunta senha/frase/editor (travaria o runtime): falha com mensagem; ssh em lote
       env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_EDITOR: "true", GIT_PAGER: "cat", GIT_SSH_COMMAND: process.env["GIT_SSH_COMMAND"] ?? "ssh -o BatchMode=yes" },
     }, (err, stdout, stderr) => {

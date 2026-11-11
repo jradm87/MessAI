@@ -8,7 +8,9 @@ import { WorkspaceService } from "./service.js";
 import { buildServer, type DataOp } from "./server.js";
 import { installAgentSkills } from "./skills.js";
 import { performMove, performReset, performRestore } from "./data.js";
-import { IS_WIN } from "./platform.js";
+import { IS_WIN, hideForkConsoles } from "./platform.js";
+
+hideForkConsoles(); // Windows: o fork do node-pty ao matar terminal não abre janela preta
 
 const cfg = loadConfig();
 const store = new Store(cfg.dbPath);

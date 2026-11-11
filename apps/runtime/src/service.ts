@@ -98,7 +98,7 @@ const execFileP = promisify(execFile);
  */
 async function runCmd(cmd: string, args: string[], opts: { cwd?: string; timeoutMs: number; maxBuffer?: number }): Promise<{ status: number; stdout: string }> {
   try {
-    const { stdout } = await execFileP(cmd, args, { cwd: opts.cwd, timeout: opts.timeoutMs, maxBuffer: opts.maxBuffer ?? 8 * 1024 * 1024, encoding: "utf8" });
+    const { stdout } = await execFileP(cmd, args, { cwd: opts.cwd, windowsHide: true, timeout: opts.timeoutMs, maxBuffer: opts.maxBuffer ?? 8 * 1024 * 1024, encoding: "utf8" });
     return { status: 0, stdout: String(stdout) };
   } catch (e) {
     const err = e as { code?: number | string; stdout?: string };
@@ -1343,7 +1343,7 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
 
   // ---- andares (floors) ----
   private git(cwd: string, args: string[]): { ok: boolean; out: string } {
-    const r = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8", timeout: GIT_SYNC_TIMEOUT_MS });
+    const r = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8", timeout: GIT_SYNC_TIMEOUT_MS, windowsHide: true });
     return { ok: r.status === 0, out: `${r.stdout ?? ""}${r.stderr ?? ""}`.trim() };
   }
   isGitRepo(cwd: string): boolean { return this.git(cwd, ["rev-parse", "--is-inside-work-tree"]).ok; }
@@ -1889,9 +1889,9 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
     if (w.parentId && (w.floorType === "worktree" || w.floorType === "copy")) {
       const ground = this.store.getWorkspace(w.parentId);
       if (ground && w.floorType === "worktree") {
-        spawnSync("git", ["-C", ground.cwd, "worktree", "remove", "--force", w.cwd], { stdio: "ignore", timeout: GIT_SYNC_TIMEOUT_MS });
-        spawnSync("git", ["-C", ground.cwd, "worktree", "prune"], { stdio: "ignore", timeout: GIT_SYNC_TIMEOUT_MS });
-        if (opts.deleteBranch && w.branch) spawnSync("git", ["-C", ground.cwd, "branch", "-D", w.branch], { stdio: "ignore", timeout: GIT_SYNC_TIMEOUT_MS });
+        spawnSync("git", ["-C", ground.cwd, "worktree", "remove", "--force", w.cwd], { stdio: "ignore", timeout: GIT_SYNC_TIMEOUT_MS, windowsHide: true });
+        spawnSync("git", ["-C", ground.cwd, "worktree", "prune"], { stdio: "ignore", timeout: GIT_SYNC_TIMEOUT_MS, windowsHide: true });
+        if (opts.deleteBranch && w.branch) spawnSync("git", ["-C", ground.cwd, "branch", "-D", w.branch], { stdio: "ignore", timeout: GIT_SYNC_TIMEOUT_MS, windowsHide: true });
       }
       if (existsSync(w.cwd) && w.cwd.startsWith(join(this.cfg.dataDir, "floors"))) rmSync(w.cwd, { recursive: true, force: true });
     }

@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 /**
  * Camada de plataforma (porte Windows — plan.md §9.4). Todo comportamento específico do Windows mora aqui
  * ou atrás de `IS_WIN`. As funções recebem `win` opcional para que os testes cubram os dois caminhos em qualquer SO.
@@ -87,4 +88,20 @@ export function toPosixPath(p: string): string {
   const s = p.replace(/\\/g, "/");
   const m = /^([a-zA-Z]):(\/|$)(.*)$/.exec(s);
   return m ? `/${m[1]!.toLowerCase()}${m[3] ? `/${m[3]}` : ""}` : s;
+}
+
+/**
+ * O runtime roda sem console (spawn `detached`), então todo processo de console que ele cria sem `windowsHide`
+ * abre uma janela preta por um instante. O node-pty faz `child_process.fork` (conpty_console_list_agent) ao matar
+ * cada terminal ConPTY, sem opção para escondê-la: aqui o `fork` passa a usar `windowsHide` sempre.
+ */
+export function hideForkConsoles(): void {
+  if (!IS_WIN) return;
+  const cp = createRequire(import.meta.url)("node:child_process") as typeof import("node:child_process");
+  const orig = cp.fork;
+  (cp as { fork: unknown }).fork = function (mod: string, a?: unknown, o?: unknown) {
+    const args = Array.isArray(a) ? (a as string[]) : [];
+    const opts = (Array.isArray(a) ? o : a) as import("node:child_process").ForkOptions | undefined;
+    return orig.call(cp, mod, args, { ...opts, windowsHide: true });
+  };
 }
