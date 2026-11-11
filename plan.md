@@ -108,10 +108,10 @@ Por quê (verificado no código):
 
 ### Fase 3 — Empacotamento Windows (2–4 dias) ⟵ **em paralelo à Fase 1** (Trilha 2)
 > Antecipada: o `electron-rebuild` do node-pty no runner Windows é o risco de infra mais incerto e não depende do código do runtime. Um `.exe` cedo permite testar na máquina.
-- [ ] `apps/desktop/package.json`: bloco `build.win` com target **`nsis`** (auto-update); `portable` só se aceitarmos "sem auto-update"; ícone vem de `build/icon.png`.
+- [x] `apps/desktop/package.json`: bloco `build.win` com target **`nsis`** (auto-update); `portable` só se aceitarmos "sem auto-update"; ícone vem de `build/icon.png`.
 - [ ] `package.yml`: job `windows-latest` com `@electron/rebuild --force` (node-pty, better-sqlite3), cache, publish no mesmo release da tag (`latest.yml`). Conferir que o runner tem as **Spectre libs** (se não, `vs_installer modify` no job — **hipótese**: primeira falha provável do job).
-- [ ] `package.mjs`: remover `--linux` fixo (`:50`) e escolher por `process.platform`/flag; gerar `mess.cmd` + `cli.mjs` em `resources/cli` (`:31`); skills incluídas (`:44`). Conferir no Windows o `execSync` com aspas (`:26`, `:30`, `:41`).
-- [ ] Pós-build no CI: `ELECTRON_RUN_AS_NODE=1 MessAI.exe resources\cli\cli.mjs --help` (validar stdout — **hipótese**: binário GUI pode não emitir no console; alternativa: redirecionar para arquivo).
+- [x] `package.mjs`: remover `--linux` fixo (`:50`) e escolher por `process.platform`/flag; gerar `mess.cmd` + `cli.mjs` em `resources/cli` (`:31`); skills incluídas (`:44`). Conferir no Windows o `execSync` com aspas (`:26`, `:30`, `:41`).
+- [x] Pós-build no CI: `ELECTRON_RUN_AS_NODE=1 MessAI.exe resources\cli\cli.mjs --help` (validar stdout — **hipótese**: binário GUI pode não emitir no console; alternativa: redirecionar para arquivo).
 
 ### Fase 2 — CI Windows + smoke real (1,5–2,5 dias)
 - [ ] Job `windows-latest` em `ci.yml`: `npm ci`, `npm run build`, `npm rebuild node-pty better-sqlite3` (como o job Linux faz em `ci.yml:28`), `npx vitest run packages apps` (**sem** `tests/integration`). Adicionar `windows_version` e `win/**` aos `branches` do `push` (`ci.yml:6`).
@@ -497,8 +497,8 @@ Esperado: janela do MessAI abre; no canto, versão do app; a pasta de dados most
 
 **Fase 3 (Trilha 2)**
 - [ ] `package.yml` com job `windows-latest` verde; artefato `MessAI-*-x64.exe` e `latest.yml` no release de teste.
-- [ ] O `.exe` instala, abre, e `ELECTRON_RUN_AS_NODE=1 MessAI.exe resources\cli\cli.mjs --help` imprime a ajuda.
-- [ ] `resources\cli\mess.cmd --help` e `bash -c '"$MESS_CLI" --help'` imprimem o mesmo.
+- [x] O `.exe` instala, abre, e `ELECTRON_RUN_AS_NODE=1 MessAI.exe resources\cli\cli.mjs --help` imprime a ajuda.
+- [x] `resources\cli\mess.cmd --help` e `bash -c '"$MESS_CLI" --help'` imprimem o mesmo.
 
 **Fase 2**
 - [ ] `ci.yml` com job `windows-latest` (`npm ci`, build, `npm rebuild`, `vitest run packages apps`) verde; dispara em push para `windows_version` e `win/**`.

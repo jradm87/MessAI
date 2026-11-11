@@ -66,5 +66,14 @@ Hipóteses de §11 confirmadas/refutadas nesta sessão: A ✔, B ✘, E ✔, H �
 - ↻ reiniciar Claude dava "Session ID already in use" (corrigido para todos).
 - Canvas com `colorMode="dark"` fixo (corrigido).
 
-## Trilha 2 (empacotamento/CI) — não iniciada
-Fase 3 (NSIS, `package.yml` windows-latest), Fase 2 (CI Windows, smoke), Fase 5/6. Com node-pty 1.1.0 (N-API, prebuild) o `electron-rebuild` do node-pty deve sumir.
+## Depois da Fase 1 — rodada 2 (merge d6f7212, testado pelo dono)
+- [x] Clique/seleção do terminal desalinhados com zoom do canvas (xterm ignora o `transform: scale`); OSC 52 copia para o SO.
+- [x] Windows: janela sem moldura e sem menu, barra própria com botões estilo macOS (`TitleBar.tsx`).
+
+## Trilha 2 — Fase 3 (merge 81ef627)
+- [x] NSIS por usuário (`build.win`/`nsis`), `package.mjs` por plataforma + `mess.cmd`, só better-sqlite3 recompilado no Windows (node-pty usa o prebuild N-API; o fonte não compila).
+- [x] Gerado local em `..\MessAI-wt\package`: instala em `%LOCALAPPDATA%\Programs\@messaidesktop` (nome vem do pacote — trocar para `MessAI`), abre, CLI e addons ok, `mess.cmd` = `mess` (bash).
+- [x] `MessAI-Setup-0.0.15.exe` + `latest.yml` + blockmap anexados ao release v0.0.15 (pré-lançamento; os arquivos Linux são da `main`).
+- [ ] Job `windows` do `package.yml` ainda não rodou no GitHub (rodar por workflow_dispatch).
+- Build local: rede daqui falha no download do Electron/winCodeSign → repetir; último passo com `-c.electronDist=<core>\node_modules\electron\dist`.
+- Próximo: Fase 2 (ci.yml windows-latest, smoke), Fase 5/6.
