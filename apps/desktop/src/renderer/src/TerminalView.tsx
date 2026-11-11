@@ -16,7 +16,27 @@ import { copyText, readClipboard } from "./clip.js";
  * View reutilizável do terminal ao vivo (xterm + stream). Antes vivia dentro do TerminalNode; agora o nó e o
  * nó-pilha (#70 banda agrupada) compartilham a mesma lógica. Dona de: xterm, anexar/soltar sessão, tema, fit e busca.
  */
-export type TerminalViewHandle = { clear: () => void; openFind: () => void };
+/**
+ * O xterm converte clique → célula com `clientX - rect.left` dividido pelo tamanho da célula SEM escala; com o zoom
+ * do canvas (transform: scale) o clique cai em outra linha/coluna (seleção e cliques no Claude desalinhados). Desfaz
+ * a escala do evento antes de o xterm calcular. Usa o MouseService interno (nomes preservados no bundle do xterm 6).
+ */
+type Pt = { clientX: number; clientY: number };
+function unscaleMouse(term: Terminal): void {
+  const ms = (term as unknown as { _core?: { _mouseService?: Record<string, (...a: unknown[]) => unknown> } })._core?._mouseService;
+  if (!ms || typeof ms["getCoords"] !== "function" || typeof ms["getMouseReportCoords"] !== "function") return;
+  const fix = (ev: Pt, el: HTMLElement): Pt => {
+    const r = el.getBoundingClientRect(); const kx = r.width / (el.offsetWidth || r.width); const ky = r.height / (el.offsetHeight || r.height);
+    if (!(kx > 0) || !(ky > 0) || (Math.abs(kx - 1) < 1e-3 && Math.abs(ky - 1) < 1e-3)) return ev;
+    return { clientX: r.left + (ev.clientX - r.left) / kx, clientY: r.top + (ev.clientY - r.top) / ky };
+  };
+  for (const name of ["getCoords", "getMouseReportCoords"]) {
+    const orig = ms[name]!.bind(ms);
+    ms[name] = (ev: unknown, el: unknown, ...rest: unknown[]) => orig(fix(ev as Pt, el as HTMLElement), el, ...rest);
+  }
+}
+
+export type TerminalViewHandle ={ clear: () => void; openFind: () => void };
 type Props = {
   sessionId: string; nodeId: string; api: Api; stream: Stream; workspaceId?: string;
   termTheme?: string | null; padX?: number; padY?: number;
@@ -74,6 +94,14 @@ export const TerminalView = forwardRef<TerminalViewHandle, Props>(function Termi
       return true;
     });
     term.open(host.current!);
+    unscaleMouse(term);
+    // OSC 52: o app no terminal (ex.: Claude Code com seleção própria) pede para copiar → área de transferência do SO
+    const osc52 = term.parser.registerOscHandler(52, (d) => {
+      const b64 = d.slice(d.indexOf(";") + 1);
+      if (!b64 || b64 === "?") return true;
+      try { void copyText(new TextDecoder().decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)))).catch(() => {}); } catch { /* base64 inválido */ }
+      return true;
+    });
     termRef.current = term;
     applyTheme();
     const offTheme = onTheme(() => applyTheme());
@@ -125,7 +153,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, Props>(function Termi
       cbRef.current.onFocus?.();
     };
     el.addEventListener("focusin", focus);
-    return () => { fitNow.current = null; onSel.dispose(); ro.disconnect(); onData.dispose(); off(); offTheme(); el.removeEventListener("focusin", focus); stream.detach(sessionId); term.dispose(); };
+    return () => { fitNow.current = null; osc52.dispose(); onSel.dispose(); ro.disconnect(); onData.dispose(); off(); offTheme(); el.removeEventListener("focusin", focus); stream.detach(sessionId); term.dispose(); };
   }, [sessionId, stream]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
