@@ -1,6 +1,6 @@
 name: package
 
-# Gera AppImage + .deb e publica no GitHub Release ao dar push numa tag v*.
+# Gera AppImage + .deb (Linux) e o instalador NSIS (Windows) e publica no GitHub Release ao dar push numa tag v*.
 on:
   push:
     tags: ["v*"]
@@ -51,4 +51,49 @@ jobs:
           path: |
             apps/desktop/release/*.AppImage
             apps/desktop/release/*.deb
+          if-no-files-found: ignore
+
+  windows:
+    # Instalador NSIS (auto-update via latest.yml). Publica só em tag; workflow_dispatch só gera o artefato para testar.
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Build + testes (gate antes de publicar)
+        # tests/integration é Linux-only por construção (terminais com /bin/sh): fica de fora no Windows (plan.md Fase 2).
+        run: |
+          npm run build
+          npm rebuild node-pty better-sqlite3
+          npx vitest run packages apps
+      - name: Empacotar
+        run: node scripts/package.mjs ${{ startsWith(github.ref, 'refs/tags/') && '--publish' || '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Conferir o pacote (CLI e addons com o Electron empacotado)
+        # MessAI.exe é binário GUI: o pwsh não espera nem captura a saída com `&`; Start-Process -Wait + arquivo, sim.
+        run: |
+          $app = (Resolve-Path "apps/desktop/release/win-unpacked").Path
+          $env:ELECTRON_RUN_AS_NODE = "1"
+          $p = Start-Process "$app\MessAI.exe" -ArgumentList "`"$app\resources\cli\cli.mjs`"","--help" -Wait -PassThru -NoNewWindow -RedirectStandardOutput cli-help.txt -RedirectStandardError cli-err.txt
+          Get-Content cli-help.txt -TotalCount 5; Get-Content cli-err.txt
+          if ($p.ExitCode -ne 0 -or -not (Select-String -Path cli-help.txt -Pattern "mess context" -Quiet)) { throw "mess --help falhou" }
+          $p = Start-Process "$app\MessAI.exe" -ArgumentList "scripts\check-packaged-addons.cjs","`"$app\resources`"" -Wait -PassThru -NoNewWindow -RedirectStandardOutput addons.txt -RedirectStandardError addons-err.txt
+          Get-Content addons.txt; Get-Content addons-err.txt
+          if ($p.ExitCode -ne 0 -or -not (Select-String -Path addons.txt -Pattern "addons ok .* pty-ok" -Quiet)) { throw "addons nativos não carregam no Electron" }
+      - name: Guardar artefatos do build
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: messai-windows
+          path: |
+            apps/desktop/release/*.exe
+            apps/desktop/release/latest.yml
           if-no-files-found: ignore
