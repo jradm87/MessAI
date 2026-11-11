@@ -645,6 +645,7 @@ export const CreateNode = Type.Object({
   maestro: Type.Optional(Type.Boolean()), // #29 nasce condutor (preset com Maestro)
   isolation: Type.Optional(NodeIsolation), // #93 nasce no modo isolado
   autoPlace: Type.Optional(Type.Boolean()), // runtime escolhe uma posição livre (não sobrepõe) — usado por agentes/CLI
+  nearNodeId: Type.Optional(Id), // com autoPlace: nasce em grade ao lado deste nó (o agente que criou), até 4 por linha
 });
 export type CreateNode = Static<typeof CreateNode>;
 
