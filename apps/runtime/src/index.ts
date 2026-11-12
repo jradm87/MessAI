@@ -43,6 +43,7 @@ const shutdown = async (killAgents = false) => {
   // pid file sobrevivente faria o version-check do app mandar SIGTERM num pid reciclado depois.
   try { if (existsSync(pidPath)) unlinkSync(pidPath); } catch { /* já foi */ }
   removeSocket();
+  svc.stopTimers(); // rotinas leem o banco a cada 1 s: param antes do store.close()
   svc.shutdownPortals(); // #26 navegadores dos portais
   svc.shutdownDevices(); // #73 para os fluxos de captura (emuladores iniciados continuam rodando)
   if (killAgents) sessions.disposeAllHard(); else sessions.shutdownAll();
@@ -57,6 +58,7 @@ const dataOp = async (op: DataOp) => {
   setTimeout(exitNow, 4000).unref();
   try { if (existsSync(pidPath)) unlinkSync(pidPath); } catch { /* já foi */ }
   removeSocket();
+  svc.stopTimers();
   if (op.kind === "move") sessions.shutdownAll(); else sessions.disposeAllHard(); // mover mantém os tmux (o banco vai junto); restaurar/apagar não têm para onde voltar
   for (const s of [http, agent]) { try { for (const c of s.websocketServer?.clients ?? []) c.terminate(); } catch { /* */ } }
   await Promise.all([http.close(), agent.close()]).catch(() => {});

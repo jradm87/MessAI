@@ -1158,6 +1158,8 @@ export class WorkspaceService extends EventEmitter<ServiceEvents> {
   async portalSnapshot(nodeId: string): Promise<Result<PortalSnapshot>> { const s = await this.portalSession(nodeId); if (!s.ok) return s; try { return succeed(await s.value.snapshot()); } catch (e) { return fail("INVALID", (e as Error).message); } }
   async portalScreenshot(nodeId: string): Promise<Result<PortalScreenshot>> { const s = await this.portalSession(nodeId); if (!s.ok) return s; try { const r = await s.value.screenshot(); return succeed({ mime: "image/png", ...r }); } catch (e) { return fail("INVALID", (e as Error).message); } }
   shutdownPortals(): void { this.portals.killAllSync(); }
+  /** Para os temporizadores que leem o banco (rotinas) — antes do `store.close()`, senão o próximo tick derruba o processo. */
+  stopTimers(): void { if (this.routineTimer) { clearInterval(this.routineTimer); this.routineTimer = null; } }
 
   // ---- #73 dispositivos Android ----
   private deviceNode(nodeId: string): Result<Node> { const n = this.store.getNode(nodeId); if (!n || n.kind !== "device") return fail("NOT_FOUND", "dispositivo não encontrado"); return succeed(n); }
