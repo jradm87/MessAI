@@ -110,7 +110,9 @@ function Canvas({ conn }: { conn: Connection }) {
   const [current, setCurrent] = useState<string | null>(null);
   const [wsDialog, setWsDialog] = useState<{ edit?: Workspace; folderId?: string } | null>(null);
   const [transferDialog, setTransferDialog] = useState<{ mode: "export" | "import"; workspace?: Workspace } | null>(null);
-  const [sideMini, setSideMini] = useState(false);
+  // barra lateral recolhida: lembrada entre aberturas (preferência só desta máquina)
+  const [sideMini, setSideMini] = useState(() => { try { return localStorage.getItem("mess.sideMini") === "1"; } catch { return false; } });
+  useEffect(() => { try { localStorage.setItem("mess.sideMini", sideMini ? "1" : "0"); } catch { /* sem storage */ } }, [sideMini]);
   const [snap, setSnap] = useState<WorkspaceSnapshot | null>(null);
   const [flow, setFlow] = useState<FlowNode[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
@@ -961,6 +963,7 @@ function Canvas({ conn }: { conn: Connection }) {
     exportWorkspace: (w: Workspace) => setTransferDialog({ mode: "export", workspace: w }),
     importWorkspace: () => setTransferDialog({ mode: "import" }),
     unloadWorkspace: (w: Workspace) => void api.unloadWorkspace(w.workspaceId).then(async (r) => { await refreshList(); if (current === w.workspaceId) setSnap(await api.snapshot(w.workspaceId)); toast(`Espaço "${w.name}" descarregado (${r.unloadedCount} terminal(is))`, "ok"); }).catch((e) => toast(e instanceof ApiClientError ? `${e.error.code}: ${e.message}` : String(e))),
+    toggleCollapsed: () => setSideMini((v) => !v),
     reloadWorkspace: (w: Workspace) => void api.reloadWorkspace(w.workspaceId).then(async (r) => { await refreshList(); if (current === w.workspaceId) setSnap(await api.snapshot(w.workspaceId)); toast(`Espaço "${w.name}" recarregado (${r.reloadedCount} terminal(is))`, "ok"); }).catch((e) => toast(e instanceof ApiClientError ? `${e.error.code}: ${e.message}` : String(e))),
   };
   const submitFloor = async (g: Workspace, i: Parameters<typeof api.createFloor>[1]) => {

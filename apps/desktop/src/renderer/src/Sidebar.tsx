@@ -1,5 +1,5 @@
 import { useMemo, useState, type DragEvent } from "react";
-import { ChevronDown, ChevronRight, Plus, Settings, FolderPlus, Folder as FolderIcon, FolderOpen, Minus, GitBranch, Layers, Terminal, Upload } from "lucide-react";
+import { ChevronDown, ChevronRight, Plus, Settings, FolderPlus, Folder as FolderIcon, FolderOpen, Minus, GitBranch, Layers, Terminal, Upload, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import type { Folder, Sidebar as SidebarData, Workspace } from "@messai/contracts";
 import { WsIcon } from "./wsicons.js";
 import { useHint } from "./shortcuts.js";
@@ -27,6 +27,8 @@ export type SidebarActions = {
   importWorkspace?: () => void;
   unloadWorkspace?: (w: Workspace) => void;
   reloadWorkspace?: (w: Workspace) => void;
+  /** Recolher/expandir a barra lateral (o mesmo do atalho sidebar.toggle). */
+  toggleCollapsed?: () => void;
 };
 const STATUS_COLOR: Record<string, string> = { working: "#5aa9ff", blocked: "#ff6b6b", review: "#f6c344", done: "#4cd964" };
 type Ctx = { x: number; y: number; ws?: Workspace; folder?: Folder };
@@ -34,7 +36,7 @@ type Ctx = { x: number; y: number; ws?: Workspace; folder?: Folder };
 /** Barra lateral: filtro, botão +, WORKSPACES com pastas/subpastas recolhíveis, grupos (divisores) e rodapé. */
 export function Sidebar({ data, current, collapsed, machine, act, signals = {} }: { signals?: Record<string, WsSignal>; data: SidebarData; current: string | null; collapsed: boolean; machine: string; act: SidebarActions }) {
   const { t } = useI18n();
-  const hNew = useHint("ws.new"); const hPrefs = useHint("prefs.toggle"); // #58
+  const hNew = useHint("ws.new"); const hPrefs = useHint("prefs.toggle"); const hToggle = useHint("sidebar.toggle"); // #58
   const [filter, setFilter] = useState("");
   const [ctx, setCtx] = useState<Ctx | null>(null);
   const [over, setOver] = useState<string | null>(null);
@@ -105,7 +107,10 @@ export function Sidebar({ data, current, collapsed, machine, act, signals = {} }
 
   return (
     <aside className={`side ${collapsed ? "mini" : ""}`} onDragOver={(e) => allow(e, null)} onDrop={(e) => onDrop(e, null)} onContextMenu={(e) => { e.preventDefault(); setCtx({ x: e.clientX, y: e.clientY }); }}>
-      <h1>{collapsed ? "M" : "MessAI"}</h1>
+      <div className="side-head">
+        {!collapsed && <h1>MessAI</h1>}
+        {act.toggleCollapsed && <button className="tb side-collapse" data-testid="side-collapse" title={`${collapsed ? "Expandir" : "Recolher"} barra lateral${hToggle}`} onClick={act.toggleCollapsed}>{collapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}</button>}
+      </div>
       {!collapsed && <div className="slogan">Many agents. One organized mess.</div>}
       {!collapsed && <div className="machine">máquina {machine}</div>}
       <div className="side-top">

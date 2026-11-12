@@ -401,6 +401,10 @@ button.danger:hover { border-color: var(--danger); color: var(--danger-fg); }
 /* fundo do canvas igual ao Maestri: cinza bem escuro com grade de pontos */
 .react-flow, .react-flow__viewport { background: transparent; }
 .canvas .react-flow { background: var(--canvas); }
+.side-head { display: flex; align-items: center; gap: 6px; min-height: 26px; }
+.side-head h1 { flex: 1; margin: 0 !important; }
+.side-head .side-collapse { width: 26px; height: 26px; padding: 0; display: grid; place-items: center; color: var(--mut); }
+.side-head .side-collapse:hover { color: var(--fg); }
 .side .slogan { color: var(--mut); font-size: 10px; font-style: italic; margin: -2px 0 4px; letter-spacing: .01em; }
 
 /* visão 3D dos andares */
