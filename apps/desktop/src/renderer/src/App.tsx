@@ -725,8 +725,12 @@ function Canvas({ conn }: { conn: Connection }) {
       for (const nd of moved) {
         const sn = snap?.nodes.find((x) => x.nodeId === nd.id);
         if (sn) {
-          const g = { ...sn.geometry, x: Math.round(posOf(nd).x), y: Math.round(posOf(nd).y) };
-          if (g.x !== sn.geometry.x || g.y !== sn.geometry.y) { before.push({ nodeId: nd.id, geometry: sn.geometry }); after.push({ nodeId: nd.id, geometry: g }); }
+          // tamanho = o que está na tela (nó local), não o do snapshot: se o resize ainda não voltou do runtime (ou o patch se
+          // perdeu), soltar o arrasto gravava o tamanho antigo e o nó "encolhia de novo".
+          const lf = (flowRef.current.find((x) => x.id === nd.id) ?? nd) as FlowNode & { width?: number; height?: number; style?: { width?: number; height?: number } };
+          const lw = Math.round(Number(lf.width ?? lf.style?.width ?? lf.measured?.width ?? sn.geometry.w)), lh = Math.round(Number(lf.height ?? lf.style?.height ?? lf.measured?.height ?? sn.geometry.h));
+          const g = { x: Math.round(posOf(nd).x), y: Math.round(posOf(nd).y), w: lw >= 40 ? lw : sn.geometry.w, h: lh >= 40 ? lh : sn.geometry.h };
+          if (g.x !== sn.geometry.x || g.y !== sn.geometry.y || g.w !== sn.geometry.w || g.h !== sn.geometry.h) { before.push({ nodeId: nd.id, geometry: sn.geometry }); after.push({ nodeId: nd.id, geometry: g }); }
           await mutate((r) => api.patchNode(nd.id, { expectedRevision: r, geometry: g })); // sequencial: sem colisão de revisão
         } else missing = true;
       }
