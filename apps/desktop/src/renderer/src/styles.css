@@ -824,4 +824,6 @@ html[data-frameless] #root { height: calc(100% - 30px); }
 :where(.ui-zone) > * { pointer-events: auto; }
 .canvas .react-flow__minimap { right: var(--zone-r, 0px) !important; }
 .canvas > .modal-backdrop:not(.ask) { padding-left: var(--zone-l, 0px); padding-right: var(--zone-r, 0px); }
+.shutdown-ov, .modal-backdrop.ask, .pf-busy { padding-left: var(--home-l, 0px); padding-right: var(--home-r, 0px); }
+.titlebar .tb-title { left: calc(var(--home-l, 0px) + (100% - var(--home-l, 0px) - var(--home-r, 0px)) / 2); }
 .titlebar .tb-title { position: absolute; left: 50%; transform: translateX(-50%); font-size: 12px; color: var(--mut); pointer-events: none; letter-spacing: .02em; }

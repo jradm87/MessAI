@@ -154,6 +154,10 @@ function createWindow(): void {
     win.removeMenu();
     const send = () => { if (!win.isDestroyed()) win.webContents.send("mess:win-state", winState(win)); };
     for (const ev of ["maximize", "unmaximize", "focus", "blur", "enter-full-screen", "leave-full-screen", "moved", "resized"] as const) win.on(ev as "focus", send);
+    // setBounds (esticar) e o snap do Windows não disparam "moved"/"resized": acompanha "move"/"resize" com folga.
+    let moveT: ReturnType<typeof setTimeout> | undefined;
+    const sendSoon = () => { clearTimeout(moveT); moveT = setTimeout(send, 150); };
+    win.on("move", sendSoon); win.on("resize", sendSoon);
     // Monitor ligado/desligado: o botão de esticar aparece/some; se a janela estava esticada, maximiza no que sobrou.
     const onAdded = () => send();
     const onRemoved = () => { if (spanPrev && !win.isDestroyed()) { spanPrev = null; win.maximize(); } send(); };
@@ -254,7 +258,10 @@ ipcMain.handle("mess:win", (e, action: string) => {
   else if (action === "min") w.minimize();
   else if (action === "max") { if (w.isMaximized()) w.unmaximize(); else w.maximize(); }
   else if (action === "span") toggleSpan(w);
-  return winState(w);
+  const st = winState(w);
+  // todos os ouvintes (canvas, barra de título), não só quem pediu: o canvas precisa dos monitores logo ao esticar
+  if (action !== "state" && !w.isDestroyed()) w.webContents.send("mess:win-state", st);
+  return st;
 });
 ipcMain.handle("mess:hud-dismiss", (_e, nodeId: string) => { if (hudOpen() && typeof nodeId === "string") hudWin!.webContents.send("mess:hud-dismiss", nodeId); });
 

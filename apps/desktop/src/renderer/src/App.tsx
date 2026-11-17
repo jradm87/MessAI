@@ -597,9 +597,13 @@ function Canvas({ conn }: { conn: Connection }) {
   const [zone, setZone] = useState({ l: 0, r: 0 });
   useEffect(() => {
     const calc = () => {
+      const home = homeSeg(segs, uiScreen);
       const pr = document.querySelector("main.canvas")?.getBoundingClientRect();
-      const z = pr ? zoneInsets({ x: pr.left, y: pr.top, w: pr.width, h: pr.height }, homeSeg(segs, uiScreen)) : { l: 0, r: 0 };
+      const z = pr ? zoneInsets({ x: pr.left, y: pr.top, w: pr.width, h: pr.height }, home) : { l: 0, r: 0 };
       setZone((o) => (o.l === z.l && o.r === z.r ? o : z));
+      // camadas da janela inteira (tela de encerrar, perguntas, título): recuos relativos à janela
+      const v = zoneInsets({ x: 0, y: 0, w: window.innerWidth, h: window.innerHeight }, home);
+      document.documentElement.style.setProperty("--home-l", `${v.l}px`); document.documentElement.style.setProperty("--home-r", `${v.r}px`);
     };
     calc();
     const el = document.querySelector("main.canvas"); const ro = el ? new ResizeObserver(calc) : null; if (el) ro!.observe(el);

@@ -122,7 +122,7 @@ describe("Duplo clique na barra centraliza o item", () => {
   it("janela em dois monitores: controles no esquerdo (ou no principal) e zoom no monitor do item", async () => {
     // simula a janela esticada: o cliente dividido ao meio em dois monitores; o principal é o da direita
     const vw = await page.evaluate(() => window.innerWidth); const vh = await page.evaluate(() => window.innerHeight); const half = Math.round(vw / 2);
-    const fake = (screens: unknown[]) => app.evaluate(({ BrowserWindow }, s) => BrowserWindow.getAllWindows()[0]!.webContents.send("mess:win-state", { maximized: false, focused: true, spanned: true, displays: 2, screens: s }), screens);
+    const fake = (screens: unknown[]) => app.evaluate(({ BrowserWindow }, s) => BrowserWindow.getAllWindows().forEach((w) => w.webContents.send("mess:win-state", { maximized: false, focused: true, spanned: true, displays: 2, screens: s })), screens);
     await fake([{ x: 0, y: 0, width: half, height: vh, primary: false }, { x: half, y: 0, width: vw - half, height: vh, primary: true }]);
     await sleep(200);
     const pane = (await page.locator("main.canvas .react-flow").boundingBox())!;
@@ -130,6 +130,9 @@ describe("Duplo clique na barra centraliza o item", () => {
     expect(zone.x + zone.width).toBeLessThanOrEqual(half + 1); // controles só no monitor esquerdo
     const add = (await page.locator('[data-testid="add"]').boundingBox())!;
     expect(add.x + add.width).toBeLessThanOrEqual(half + 1);
+    // camadas da janela inteira (tela de encerrar, perguntas): recuo direito = monitor direito
+    const homeR = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--home-r")));
+    expect(Math.abs(homeR - (vw - half))).toBeLessThanOrEqual(1);
 
     // Centralizar: todos os itens dentro do monitor esquerdo
     await page.click('[data-testid="fit-all"]'); await sleep(500);
