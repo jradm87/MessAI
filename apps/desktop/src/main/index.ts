@@ -240,7 +240,14 @@ function toggleSpan(w: BrowserWindow): void {
   const gap = uncoveredArea(areas);
   if (gap > 0) console.warn(`[messai] esticar: ${gap}px² da janela ficam fora das telas (monitores desalinhados ou de alturas diferentes)`);
 }
-const winState = (w: BrowserWindow) => ({ maximized: w.isMaximized(), focused: w.isFocused(), spanned: isSpanned(w), displays: screen.getAllDisplays().length });
+/** Monitores que a janela cobre, relativos ao conteúdo da janela (px CSS do renderer): zoom e controles por monitor. */
+function winScreens(w: BrowserWindow): { x: number; y: number; width: number; height: number; primary: boolean }[] {
+  const cb = w.getContentBounds(); const z = w.webContents.getZoomFactor() || 1; const pid = screen.getPrimaryDisplay().id;
+  return screen.getAllDisplays()
+    .filter((d) => { const a = d.workArea; return a.x < cb.x + cb.width && a.x + a.width > cb.x && a.y < cb.y + cb.height && a.y + a.height > cb.y; })
+    .map((d) => { const a = d.workArea; return { x: (a.x - cb.x) / z, y: (a.y - cb.y) / z, width: a.width / z, height: a.height / z, primary: d.id === pid }; });
+}
+const winState = (w: BrowserWindow) => ({ maximized: w.isMaximized(), focused: w.isFocused(), spanned: isSpanned(w), displays: screen.getAllDisplays().length, screens: winScreens(w) });
 ipcMain.handle("mess:win", (e, action: string) => {
   const w = BrowserWindow.fromWebContents(e.sender); if (!w) return null;
   if (action === "close") w.close();

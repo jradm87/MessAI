@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Background, BackgroundVariant, MiniMap, ReactFlow, applyNodeChanges, applyEdgeChanges, type EdgeChange, useReactFlow, ReactFlowProvider, useOnViewportChange, type Connection as FlowConnection, type Edge, type EdgeTypes, type Node as FlowNode, type NodeChange, type NodeTypes } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { Map as MapIcon, Minus, Plus, Scan, Activity, Layers, AlignStartVertical, AlignCenterVertical, AlignEndVertical, AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal, LayoutGrid, Sun, Moon, Monitor, Sparkles, Undo2, Redo2, Magnet, Clock } from "lucide-react";
 import { useAtomValue } from "jotai";
 import { themeAtom } from "./atoms.js";
+import { fitViewport, homeSeg, paneTarget, segAt, segsAtom, uiScreenAtom, zoneInsets, type Seg } from "./screens.js";
 import { getThemePref, setThemePref, nextTheme, THEME_LABEL, cssVar } from "./theme.js";
 import { BUILD_VERSION, type Role, type Drawing, type Folder, type Geometry, type Node, type NodeGroup, type NodeIsolation, type Preset, type Sidebar as SidebarData, type Skill, type TermTheme, type Workspace, type WorkspaceSnapshot } from "@messai/contracts";
 import { gridLayout, alignGeometries, treeLayout, type AlignMode, snapGeometry } from "@messai/domain";
@@ -69,7 +70,7 @@ function freeSpot(nodes: { geometry: Geometry }[], size: { w: number; h: number 
 const isTyping = () => { const el = document.activeElement as HTMLElement | null; return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable || el.classList.contains("xterm-helper-textarea") || !!el.closest?.(".portal-view") || !!el.closest?.(".device-view")); }; // portal (#26): as teclas vão para a página, não para os atalhos
 
 type UndoProps = { canUndo: boolean; canRedo: boolean; undoLabel: string | null; redoLabel: string | null; onUndo: () => void; onRedo: () => void };
-function ZoomBar({ minimap, setMinimap, onUsage, onRoutines, agents, wsName, inFloors, onFloors, hud, onHud, history }: { minimap: boolean; setMinimap: (v: boolean) => void; onUsage: () => void; onRoutines: () => void; agents: AgentPresence[]; wsName?: string; inFloors: boolean; onFloors: () => void; hud: boolean; onHud: () => void; history: UndoProps }) {
+function ZoomBar({ minimap, setMinimap, onUsage, onRoutines, agents, wsName, inFloors, onFloors, hud, onHud, history, onFitAll }: { onFitAll: () => void; minimap: boolean; setMinimap: (v: boolean) => void; onUsage: () => void; onRoutines: () => void; agents: AgentPresence[]; wsName?: string; inFloors: boolean; onFloors: () => void; hud: boolean; onHud: () => void; history: UndoProps }) {
   const rf = useReactFlow(); const [z, setZ] = useState(100);
   useOnViewportChange({ onChange: (v) => setZ(Math.round(v.zoom * 100)) });
   useAtomValue(themeAtom); // re-renderiza o botão quando o tema efetivo muda
@@ -95,7 +96,7 @@ function ZoomBar({ minimap, setMinimap, onUsage, onRoutines, agents, wsName, inF
         <button className="tb" title={`Reduzir${hOut}`} onClick={() => void rf.zoomOut({ duration: 120 })}><Minus size={14} /></button>
         <span className="pct" onClick={() => void rf.zoomTo(1, { duration: 150 })} title="100%">{z}%</span>
         <button className="tb" title={`Ampliar${hIn}`} onClick={() => void rf.zoomIn({ duration: 120 })}><Plus size={14} /></button>
-        <button className="tb" title={`Centralizar: mostrar todo o canvas${hFit}`} data-testid="fit-all" onClick={() => void rf.fitView({ padding: 0.15, duration: 250, maxZoom: 1 })}><Scan size={14} /></button>
+        <button className="tb" title={`Centralizar: mostrar todo o canvas${hFit}`} data-testid="fit-all" onClick={onFitAll}><Scan size={14} /></button>
       </div>
     </div>
   );
@@ -557,14 +558,54 @@ function Canvas({ conn }: { conn: Connection }) {
     });
   }, [snap, composerFor, chatFor, roles, skills, renameSig, stackFocus]);
 
-  /** Enquadra e centraliza um nó (duplo clique na barra, clique no minimapa). */
-  const frameNode = (id: string) => void rf.fitView({ nodes: [{ id }], padding: 0.08, duration: 250, maxZoom: 2 });
+  /**
+   * Enquadra nós (ou todos) na vista. Janela esticada em vários monitores: enquadra dentro de UM monitor — o do ponto
+   * `at` (coordenadas do cliente, ex.: onde foi o duplo clique) ou, sem ponto, o monitor dos controles — nunca na divisa.
+   */
+  const fitIn = (o: { ids?: string[]; padding: number; duration: number; maxZoom?: number; at?: { x: number; y: number } }) => {
+    const segs = store.get(segsAtom);
+    const pr = document.querySelector("main.canvas .react-flow")?.getBoundingClientRect();
+    const all = o.ids ?? rf.getNodes().map((n) => n.id);
+    if (segs.length < 2 || !pr || !all.length) { void rf.fitView({ ...(o.ids ? { nodes: o.ids.map((id) => ({ id })) } : {}), padding: o.padding, duration: o.duration, ...(o.maxZoom ? { maxZoom: o.maxZoom } : {}) }); return; }
+    const seg = o.at ? segAt(segs, o.at) : homeSeg(segs, store.get(uiScreenAtom));
+    const b = rf.getNodesBounds(all);
+    void rf.setViewport(fitViewport({ x: b.x, y: b.y, w: b.width, h: b.height }, paneTarget({ x: pr.left, y: pr.top, w: pr.width, h: pr.height }, seg), o.padding, 0.1, o.maxZoom ?? 2), { duration: o.duration });
+  };
+  /** Centraliza um ponto do fluxo sem mudar o zoom (no monitor dos controles, se a janela estiver esticada). */
+  const centerOn = (p: { x: number; y: number }) => {
+    const segs = store.get(segsAtom); const pr = document.querySelector("main.canvas .react-flow")?.getBoundingClientRect(); const zoom = rf.getZoom();
+    if (segs.length < 2 || !pr) { void rf.setCenter(p.x, p.y, { zoom, duration: 250 }); return; }
+    const t = paneTarget({ x: pr.left, y: pr.top, w: pr.width, h: pr.height }, homeSeg(segs, store.get(uiScreenAtom)));
+    void rf.setViewport({ x: t.x + t.w / 2 - p.x * zoom, y: t.y + t.h / 2 - p.y * zoom, zoom }, { duration: 250 });
+  };
+  /** Enquadra e centraliza um nó (duplo clique na barra: no monitor do clique; minimapa: no monitor dos controles). */
+  const frameNode = (id: string, at?: { x: number; y: number }) => fitIn({ ids: [id], padding: 0.08, duration: 250, maxZoom: 2, ...(at ? { at } : {}) });
+  const fitAll = () => fitIn({ padding: 0.15, duration: 250, maxZoom: 1 });
   /** Seleciona um nó e o traz para a vista. */
   const selectNode = (id: string) => {
     const next = flowRef.current.map((n) => ({ ...n, selected: n.id === id }));
     flowRef.current = next; setFlow(next);
-    void rf.fitView({ nodes: [{ id }], padding: 0.5, duration: 200, maxZoom: 1.2 });
+    fitIn({ ids: [id], padding: 0.5, duration: 200, maxZoom: 1.2 });
   };
+  // Monitores cobertos pela janela (esticada) e recuos para os controles ficarem só no monitor escolhido.
+  const segs = useAtomValue(segsAtom); const uiScreen = useAtomValue(uiScreenAtom);
+  useEffect(() => {
+    const set = (s: { screens?: Seg[] } | null) => store.set(segsAtom, s?.screens ?? []);
+    void window.messai.winControl?.("state").then(set).catch(() => {});
+    return window.messai.onWinState?.(set);
+  }, []);
+  const [zone, setZone] = useState({ l: 0, r: 0 });
+  useEffect(() => {
+    const calc = () => {
+      const pr = document.querySelector("main.canvas")?.getBoundingClientRect();
+      const z = pr ? zoneInsets({ x: pr.left, y: pr.top, w: pr.width, h: pr.height }, homeSeg(segs, uiScreen)) : { l: 0, r: 0 };
+      setZone((o) => (o.l === z.l && o.r === z.r ? o : z));
+    };
+    calc();
+    const el = document.querySelector("main.canvas"); const ro = el ? new ResizeObserver(calc) : null; if (el) ro!.observe(el);
+    window.addEventListener("resize", calc);
+    return () => { ro?.disconnect(); window.removeEventListener("resize", calc); };
+  }, [segs, uiScreen, sideMini]);
   // "Ir ao terminal" vindo do HUD: troca de espaço (se preciso) e seleciona o nó quando ele existir no canvas.
   /** Vai a um nó (deste ou de outro espaço): seleciona direto ou troca de espaço e seleciona quando ele aparecer. Usado pelo HUD e pela paleta. */
   const focusNode = (workspaceId: string, nodeId: string) => {
@@ -645,7 +686,7 @@ function Canvas({ conn }: { conn: Connection }) {
     if (!snap || !current || fittedFor.current === current) return;
     if (snap.nodes.length === 0) { fittedFor.current = current; return; }
     const id = current;
-    const t = setTimeout(() => { if (fittedFor.current === id) return; fittedFor.current = id; void rf.fitView({ padding: 0.2, duration: 300, maxZoom: 1.2 }).catch(() => {}); }, 120);
+    const t = setTimeout(() => { if (fittedFor.current === id) return; fittedFor.current = id; fitIn({ padding: 0.2, duration: 300, maxZoom: 1.2 }); }, 120);
     return () => clearTimeout(t);
   }, [snap, current, rf]);
   useEffect(() => { flowRef.current = flow; }, [flow]);
@@ -757,7 +798,7 @@ function Canvas({ conn }: { conn: Connection }) {
     const main = document.querySelector("main.canvas")!.getBoundingClientRect();
     const tl = rf.screenToFlowPosition({ x: main.left, y: main.top }), br = rf.screenToFlowPosition({ x: main.right, y: main.bottom });
     const visible = g.x >= tl.x && g.y >= tl.y && g.x + g.w <= br.x && g.y + g.h <= br.y;
-    if (!visible) setTimeout(() => void rf.fitView({ padding: 0.15, duration: 250 }), 80);
+    if (!visible) setTimeout(() => fitIn({ padding: 0.15, duration: 250 }), 80);
   };
   const createTerminal = (geometry: Geometry, i: NewTerminalInput) => {
     if (!current) return; setDialog(null);
@@ -851,7 +892,7 @@ function Canvas({ conn }: { conn: Connection }) {
     void mutate((r) => api.applyLayout(current, r, moves.map((m) => ({ nodeId: m.id, geometry: m.geometry }))));
     const before = moves.map((m) => ({ nodeId: m.id, geometry: items.find((i) => i.id === m.id)!.geometry }));
     rec({ label: `organizar em árvore ${plural(moves.length, "nó", "nós")}`, forward: [{ type: "layout", moves: moves.map((m) => ({ nodeId: m.id, geometry: m.geometry })) }], inverse: [{ type: "layout", moves: before }] });
-    setTimeout(() => void rf.fitView({ padding: 0.15, duration: 300 }), 120);
+    setTimeout(() => fitIn({ padding: 0.15, duration: 300 }), 120);
   };
   const alignSelected = (mode: AlignMode) => layoutSelected((items) => alignGeometries(items, mode), false);
 
@@ -898,7 +939,7 @@ function Canvas({ conn }: { conn: Connection }) {
       if (is("minimap.toggle")) { e.preventDefault(); setMinimap((v) => !v); return; }
       if (is("zoom.in")) { e.preventDefault(); void rf.zoomIn({ duration: 120 }); return; }
       if (is("zoom.out")) { e.preventDefault(); void rf.zoomOut({ duration: 120 }); return; }
-      if (is("view.fit")) { e.preventDefault(); const sel = flowRef.current.filter((n) => n.selected); void rf.fitView(sel.length ? { nodes: sel, padding: 0.3, duration: 250 } : { padding: 0.15, duration: 250 }); return; }
+      if (is("view.fit")) { e.preventDefault(); const sel = flowRef.current.filter((n) => n.selected); fitIn(sel.length ? { ids: sel.map((n) => n.id), padding: 0.3, duration: 250 } : { padding: 0.15, duration: 250 }); return; }
       if (is("node.duplicate")) { e.preventDefault(); void duplicateSelected(); return; }
       if (is("arrange.grid")) { e.preventDefault(); arrangeGrid(); return; } // Ctrl+Shift+T não é entrada de terminal; vale mesmo com o xterm focado
       if (is("drawings.group") || is("drawings.ungroup")) { // agrupar / desagrupar: nós selecionados primeiro (#78), senão desenhos
@@ -988,7 +1029,7 @@ function Canvas({ conn }: { conn: Connection }) {
   return (
     <div className={`app ${sideMini ? "mini" : ""}`}>
       <Sidebar signals={wsSignals} data={side} current={current} collapsed={sideMini} machine={conn.baseUrl.replace("http://", "")} act={sideActions} />
-      <main className={`canvas tool-${tool} ${linking ? "linking" : ""}`}
+      <main className={`canvas tool-${tool} ${linking ? "linking" : ""}`} style={{ "--zone-l": `${zone.l}px`, "--zone-r": `${zone.r}px` } as CSSProperties}
         onDragOver={(e) => { if (e.dataTransfer.types.includes("Files") || e.dataTransfer.types.includes("application/x-mess-chat-att")) e.preventDefault(); }}
         onDrop={(e) => {
           if (!current) return;
@@ -1016,6 +1057,7 @@ function Canvas({ conn }: { conn: Connection }) {
             else toast(`${f.name}: só .md/.txt viram nota (outros arquivos: em breve)`);
           });
         }} onContextMenu={(e) => { e.preventDefault(); if (!current || tool !== "select") return; const r = e.currentTarget.getBoundingClientRect(); setMenu({ x: e.clientX - r.left, y: e.clientY - r.top, at: rf.screenToFlowPosition({ x: e.clientX, y: e.clientY }) }); }}>
+        <div className="ui-zone" data-testid="ui-zone">
         <Toolbar tool={tool} setTool={setTool} style={style} setStyle={setStyle} onFileTree={() => {}} onPortal={() => add({ kind: "portal" })} />
         {current && snap && (snap.bands ?? []).length > 0 && (
           <BandPanel bands={snap.bands ?? []} terminals={snap.nodes.filter((n) => n.kind === "terminal").map((n) => ({ nodeId: n.nodeId, title: n.title }))}
@@ -1061,6 +1103,7 @@ function Canvas({ conn }: { conn: Connection }) {
           <div key={t.id} className={`toast ${t.kind}`} onClick={() => setToasts((ts) => ts.filter((x) => x.id !== t.id))}>{t.text}</div>
         ))}</div>
         <button className="pri add-btn" data-testid="add" disabled={!current} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); const p = e.currentTarget.closest("main")!.getBoundingClientRect(); setMenu({ x: r.left - p.left, y: r.bottom - p.top + 4 }); }}>{t("app.add")}</button>
+        </div>
         {stale && <div className="banner">O runtime em execução é de uma versão anterior ao app. Reinicie o runtime para usar os recursos novos (isso encerra os shells dele; eles ficam como "lost" e podem ser reiniciados).</div>}
         {!current && <div className="empty">Crie um espaço com o botão + da barra lateral ou Ctrl+Shift+N.</div>}
         {wsDialog && <WorkspaceDialog api={api} {...(wsDialog.edit ? { edit: wsDialog.edit } : {})} {...(wsDialog.folderId ? { defaultFolderId: wsDialog.folderId } : {})} defaultCwd={homeDir} folders={side.folders} onSubmit={(i) => void submitWs(i)} onClose={() => setWsDialog(null)} />}
@@ -1089,7 +1132,7 @@ function Canvas({ conn }: { conn: Connection }) {
           onNodeDoubleClick={(e, n) => { // duplo clique na barra (fora do título e dos controles): enquadra e centraliza o nó
             const t = e.target as HTMLElement;
             if (!t.closest(".bar") || t.closest(".title, .title-edit, button, input, textarea, select, .menu, .role-pill")) return;
-            frameNode(n.id);
+            frameNode(n.id, { x: e.clientX, y: e.clientY });
           }}
           onPaneClick={() => { if (linkingRef.current) setLinking(null); if (selDrawingsRef.current.size) setSelDrawings(new Set()); }}
           nodesDraggable={selectMode} nodesConnectable={selectMode} elementsSelectable={selectMode} panOnDrag={tool === "pan" ? [0, 1, 2] : selectMode ? [1, 2] : false} selectionOnDrag={selectMode} panOnScroll zoomOnScroll={false} zoomActivationKeyCode="Alt" panActivationKeyCode="Control" multiSelectionKeyCode={null}
@@ -1097,7 +1140,7 @@ function Canvas({ conn }: { conn: Connection }) {
           onNodesDelete={() => {}} onBeforeDelete={async ({ nodes: ns, edges: es }) => ({ nodes: [], edges: ns.length ? [] : es })}>
           <Background variant={BackgroundVariant.Lines} gap={48} size={1} color={cssVar("--grid") || "#2c2c30"} />
           {minimap && <MiniMap pannable zoomable onNodeClick={(_, n) => frameNode(n.id)}
-            onClick={(e, p) => { if ((e.target as Element).closest(".react-flow__minimap-node")) return; void rf.setCenter(p.x, p.y, { zoom: rf.getZoom(), duration: 250 }); }} />}
+            onClick={(e, p) => { if ((e.target as Element).closest(".react-flow__minimap-node")) return; centerOn(p); }} />}
           <GroupLayer groups={snap?.groups ?? []} flow={flow} guides={guides} onSelect={(gid) => selectNodes(membersOf(gid))} onRename={(gid, label) => patchGroup(gid, { label })} onColor={(gid, color) => patchGroup(gid, { color })} onUngroup={(gid) => void ungroup(gid)} />
           <DrawingLayer tool={tool} style={style} drawings={drawings}
             selected={selDrawings} onSelect={selectDrawing} onMovePoints={moveDrawing}
@@ -1105,7 +1148,7 @@ function Canvas({ conn }: { conn: Connection }) {
             onErase={(id) => { const dd = snap?.drawings.find((x) => x.drawingId === id); void mutate((r) => api.deleteDrawing(id, r)); if (dd) rec({ label: "apagar desenho", forward: [{ type: "deleteDrawing", id }], inverse: [{ type: "createDrawing", ref: id, spec: drawSpec(dd) }] }); }}
             onCreateRect={onCreateRect} />
         </ReactFlow>
-        <ZoomBar minimap={minimap} setMinimap={setMinimap} onUsage={() => setUsage(true)} onRoutines={() => { if (current) setRoutinesOpen(true); }} agents={barAgents} {...(curWs ? { wsName: curWs.name } : {})} inFloors={!!overview} onFloors={() => (overview ? setOverview(null) : grd && setOverview(grd.workspaceId))} hud={hud} onHud={() => void window.messai.hudToggle?.().then(setHud)} history={{ canUndo: hist().canUndo, canRedo: hist().canRedo, undoLabel: hist().undoLabel, redoLabel: hist().redoLabel, onUndo: () => void undo(), onRedo: () => void redo() }} />
+        <div className="ui-zone"><ZoomBar onFitAll={fitAll} minimap={minimap} setMinimap={setMinimap} onUsage={() => setUsage(true)} onRoutines={() => { if (current) setRoutinesOpen(true); }} agents={barAgents} {...(curWs ? { wsName: curWs.name } : {})} inFloors={!!overview} onFloors={() => (overview ? setOverview(null) : grd && setOverview(grd.workspaceId))} hud={hud} onHud={() => void window.messai.hudToggle?.().then(setHud)} history={{ canUndo: hist().canUndo, canRedo: hist().canRedo, undoLabel: hist().undoLabel, redoLabel: hist().redoLabel, onUndo: () => void undo(), onRedo: () => void redo() }} /></div>
         {usage && <AgentUsage api={api} onClose={() => setUsage(false)} />}
       </main>
     </div>

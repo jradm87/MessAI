@@ -118,4 +118,39 @@ describe("Duplo clique na barra centraliza o item", () => {
       expect(b.x + b.width).toBeLessThanOrEqual(pane.x + pane.width); expect(b.y + b.height).toBeLessThanOrEqual(pane.y + pane.height);
     }
   }, 30_000);
+
+  it("janela em dois monitores: controles no esquerdo (ou no principal) e zoom no monitor do item", async () => {
+    // simula a janela esticada: o cliente dividido ao meio em dois monitores; o principal é o da direita
+    const vw = await page.evaluate(() => window.innerWidth); const vh = await page.evaluate(() => window.innerHeight); const half = Math.round(vw / 2);
+    const fake = (screens: unknown[]) => app.evaluate(({ BrowserWindow }, s) => BrowserWindow.getAllWindows()[0]!.webContents.send("mess:win-state", { maximized: false, focused: true, spanned: true, displays: 2, screens: s }), screens);
+    await fake([{ x: 0, y: 0, width: half, height: vh, primary: false }, { x: half, y: 0, width: vw - half, height: vh, primary: true }]);
+    await sleep(200);
+    const pane = (await page.locator("main.canvas .react-flow").boundingBox())!;
+    const zone = (await page.locator('[data-testid="ui-zone"]').boundingBox())!;
+    expect(zone.x + zone.width).toBeLessThanOrEqual(half + 1); // controles só no monitor esquerdo
+    const add = (await page.locator('[data-testid="add"]').boundingBox())!;
+    expect(add.x + add.width).toBeLessThanOrEqual(half + 1);
+
+    // Centralizar: todos os itens dentro do monitor esquerdo
+    await page.click('[data-testid="fit-all"]'); await sleep(500);
+    for (const n of await page.locator(".node.note").all()) { const b = (await n.boundingBox())!; expect(b.x + b.width).toBeLessThanOrEqual(half + 1); }
+
+    // duplo clique numa nota: ela vai para o centro do monitor onde foi o clique
+    const sp = (await page.locator(".node.note .bar .sp").first().boundingBox())!;
+    const cx = sp.x + sp.width / 2; const onRight = cx > half;
+    await page.mouse.dblclick(cx, sp.y + sp.height / 2); await sleep(500);
+    const nb = (await page.locator(".node.note").first().boundingBox())!;
+    const segMid = onRight ? (half + pane.x + pane.width) / 2 : (pane.x + half) / 2;
+    expect(Math.abs(nb.x + nb.width / 2 - segMid)).toBeLessThan(20);
+
+    // controles no monitor principal (direito); o botão alterna e volta
+    await page.click('[data-testid="ui-screen"]'); await sleep(200);
+    const z2 = (await page.locator('[data-testid="ui-zone"]').boundingBox())!;
+    expect(z2.x).toBeGreaterThanOrEqual(half - 1);
+    await page.click('[data-testid="ui-screen"]'); await sleep(200);
+    expect((await page.locator('[data-testid="ui-zone"]').boundingBox())!.x).toBeLessThan(half);
+
+    await fake([]); await sleep(200);
+    expect((await page.locator('[data-testid="ui-zone"]').boundingBox())!.width).toBeCloseTo(pane.width, 0);
+  }, 30_000);
 });

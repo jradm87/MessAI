@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Columns2 } from "lucide-react";
+import { useAtom } from "jotai";
 import type { WinState } from "./api.js";
+import { uiScreenAtom } from "./screens.js";
 
 /**
  * Barra de título própria da janela sem moldura (Windows): arrastar move a janela, duplo clique maximiza (nativo do
@@ -9,6 +11,7 @@ import type { WinState } from "./api.js";
  */
 export function TitleBar() {
   const [st, setSt] = useState<WinState>({ maximized: false, focused: true });
+  const [ui, setUi] = useAtom(uiScreenAtom);
   useEffect(() => {
     void window.messai.winControl?.("state").then((s) => { if (s) setSt(s); });
     return window.messai.onWinState?.(setSt);
@@ -30,6 +33,12 @@ export function TitleBar() {
         </button>
       </div>
       <div className="tb-title">MessAI</div>
+      {(st.screens?.length ?? 1) > 1 && (
+        <button className="tb-zone" data-testid="ui-screen" onClick={() => setUi(ui === "left" ? "primary" : "left")}
+          title="Monitor onde ficam a paleta, a barra de baixo, o minimapa e a barra de seleção (clique alterna)">
+          {ui === "left" ? "Controles: monitor esquerdo" : "Controles: monitor principal"}
+        </button>
+      )}
       {(st.displays ?? 1) > 1 && (
         <button className={`tb-span ${st.spanned ? "on" : ""}`} data-testid="win-span" onClick={() => act("span")}
           title={st.spanned ? "Voltar ao tamanho anterior" : `Esticar em todas as telas (${st.displays} monitores)`}>

@@ -4,7 +4,7 @@ export type Connection = { baseUrl: string; wsUrl: string; token: string; homeDi
 export type RunningEntry = { title: string; agentType: string; isAgent: boolean; workspace: string };
 export type FocusTarget = { workspaceId: string; nodeId: string };
 /** `spanned`: esticada em todas as telas; `displays`: monitores conectados. */
-export type WinState = { maximized: boolean; focused: boolean; spanned?: boolean; displays?: number };
+export type WinState = { maximized: boolean; focused: boolean; spanned?: boolean; displays?: number; screens?: { x: number; y: number; width: number; height: number; primary?: boolean }[] };
 declare global { interface Window { messai: {
   connection(): Promise<Connection | null>; pickDirectory?: () => Promise<string | null>; pathForFile?: (f: File) => string;
   onShutdownPrompt?: (cb: (data: { running: RunningEntry[] }) => void) => void; shutdownDecision?: (action: "background" | "all" | "cancel") => Promise<void>;

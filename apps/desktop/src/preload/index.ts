@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from "electron";
 /** Assina um canal e devolve a função que remove o ouvinte (evita acumular em re-montagens). */
-type WinStateMsg = { maximized: boolean; focused: boolean; spanned?: boolean; displays?: number };
+type WinStateMsg = { maximized: boolean; focused: boolean; spanned?: boolean; displays?: number; screens?: { x: number; y: number; width: number; height: number; primary?: boolean }[] };
 const on = <T,>(channel: string, cb: (data: T) => void): (() => void) => { const h = (_e: IpcRendererEvent, data: T) => cb(data); ipcRenderer.on(channel, h); return () => { ipcRenderer.removeListener(channel, h); }; };
 contextBridge.exposeInMainWorld("messai", {
   connection: (): Promise<{ baseUrl: string; wsUrl: string; token: string } | null> => ipcRenderer.invoke("mess:connection"),
