@@ -90,6 +90,17 @@ describe("Duplo clique na barra centraliza o item", () => {
     expect(await tr()).not.toBe(t1);
   }, 30_000);
 
+  it("esticar em todas as telas: com um monitor, sem botão e sem efeito", async () => {
+    const displays = await app.evaluate(({ screen }) => screen.getAllDisplays().length);
+    const before = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.getBounds());
+    const st = await page.evaluate(() => (window as unknown as { messai: { winControl?: (a: string) => Promise<unknown> } }).messai.winControl?.("span") ?? null);
+    if (process.platform === "win32") expect(st).toMatchObject({ displays, spanned: false });
+    if (displays === 1) {
+      expect(await page.locator('[data-testid="win-span"]').count()).toBe(0);
+      expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.getBounds())).toEqual(before);
+    }
+  }, 30_000);
+
   it("botão Centralizar mostra todos os itens, sem passar de 100%", async () => {
     await page.click("main.canvas .react-flow__pane", { position: { x: 30, y: 500 } });
     await page.keyboard.press("Control+Shift+D"); // segunda nota

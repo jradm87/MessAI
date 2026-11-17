@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Columns2 } from "lucide-react";
 import type { WinState } from "./api.js";
 
 /**
@@ -12,7 +13,7 @@ export function TitleBar() {
     void window.messai.winControl?.("state").then((s) => { if (s) setSt(s); });
     return window.messai.onWinState?.(setSt);
   }, []);
-  const act = (a: "close" | "min" | "max") => void window.messai.winControl?.(a).then((s) => { if (s) setSt(s); });
+  const act = (a: "close" | "min" | "max" | "span") => void window.messai.winControl?.(a).then((s) => { if (s) setSt(s); });
   return (
     <div className={`titlebar ${st.focused ? "" : "blur"}`} data-testid="titlebar">
       <div className="lights">
@@ -29,6 +30,12 @@ export function TitleBar() {
         </button>
       </div>
       <div className="tb-title">MessAI</div>
+      {(st.displays ?? 1) > 1 && (
+        <button className={`tb-span ${st.spanned ? "on" : ""}`} data-testid="win-span" onClick={() => act("span")}
+          title={st.spanned ? "Voltar ao tamanho anterior" : `Esticar em todas as telas (${st.displays} monitores)`}>
+          <Columns2 size={14} />
+        </button>
+      )}
     </div>
   );
 }

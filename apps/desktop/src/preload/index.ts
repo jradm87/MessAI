@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from "electron";
 /** Assina um canal e devolve a função que remove o ouvinte (evita acumular em re-montagens). */
+type WinStateMsg = { maximized: boolean; focused: boolean; spanned?: boolean; displays?: number };
 const on = <T,>(channel: string, cb: (data: T) => void): (() => void) => { const h = (_e: IpcRendererEvent, data: T) => cb(data); ipcRenderer.on(channel, h); return () => { ipcRenderer.removeListener(channel, h); }; };
 contextBridge.exposeInMainWorld("messai", {
   connection: (): Promise<{ baseUrl: string; wsUrl: string; token: string } | null> => ipcRenderer.invoke("mess:connection"),
@@ -16,8 +17,8 @@ contextBridge.exposeInMainWorld("messai", {
   onFocusNode: (cb: (target: { workspaceId: string; nodeId: string }) => void) => on<{ workspaceId: string; nodeId: string }>("mess:focus-node", cb),
   // Barra de título própria (Windows: janela sem moldura)
   frameless: process.platform === "win32",
-  winControl: (action: "close" | "min" | "max" | "state"): Promise<{ maximized: boolean; focused: boolean } | null> => ipcRenderer.invoke("mess:win", action),
-  onWinState: (cb: (s: { maximized: boolean; focused: boolean }) => void) => on<{ maximized: boolean; focused: boolean }>("mess:win-state", cb),
+  winControl: (action: "close" | "min" | "max" | "span" | "state"): Promise<WinStateMsg | null> => ipcRenderer.invoke("mess:win", action),
+  onWinState: (cb: (s: WinStateMsg) => void) => on<WinStateMsg>("mess:win-state", cb),
   hudDismiss: (nodeId: string): Promise<void> => ipcRenderer.invoke("mess:hud-dismiss", nodeId),
   onHudDismiss: (cb: (nodeId: string) => void) => on<string>("mess:hud-dismiss", cb),
   // #55 — preferências que vivem no processo principal (energia, confirmação ao sair, bandeja)

@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { BUILD_VERSION } from "@messai/contracts";
 import { parsePowerMode, shouldBlock, type PowerMode } from "./power.js";
 import { applyUpdateEvent, friendlyUpdateError, initialUpdateState, type UpdateState } from "./updates.js";
+import { nearRect, uncoveredArea, unionRect, type Rect } from "./span.js";
 
 /** Pasta de dados: MESS_DATA_DIR > ponteiro ~/.messai/datadir (#62 "Mudar…") > ~/.messai. Re-resolvida ao reiniciar o runtime. */
 function resolveDataDir(): string {
@@ -151,8 +152,13 @@ function createWindow(): void {
   const win = new BrowserWindow({ width: 1400, height: 900, title: "MessAI", webPreferences: WEB_PREFS, ...(FRAMELESS ? { titleBarStyle: "hidden" as const, backgroundColor: "#0a0a0b" } : {}) });
   if (FRAMELESS) {
     win.removeMenu();
-    const send = () => { if (!win.isDestroyed()) win.webContents.send("mess:win-state", { maximized: win.isMaximized(), focused: win.isFocused() }); };
-    for (const ev of ["maximize", "unmaximize", "focus", "blur", "enter-full-screen", "leave-full-screen"] as const) win.on(ev as "focus", send);
+    const send = () => { if (!win.isDestroyed()) win.webContents.send("mess:win-state", winState(win)); };
+    for (const ev of ["maximize", "unmaximize", "focus", "blur", "enter-full-screen", "leave-full-screen", "moved", "resized"] as const) win.on(ev as "focus", send);
+    // Monitor ligado/desligado: o botão de esticar aparece/some; se a janela estava esticada, maximiza no que sobrou.
+    const onAdded = () => send();
+    const onRemoved = () => { if (spanPrev && !win.isDestroyed()) { spanPrev = null; win.maximize(); } send(); };
+    screen.on("display-added", onAdded); screen.on("display-removed", onRemoved);
+    win.on("closed", () => { screen.off("display-added", onAdded); screen.off("display-removed", onRemoved); });
   }
   mainWin = win;
   win.on("close", (e) => {
@@ -218,12 +224,30 @@ ipcMain.handle("mess:hud-focus", (_e, target: { workspaceId: string; nodeId: str
 });
 // Usuário focou o terminal na janela principal: o cartão correspondente sai do HUD.
 // Barra de título própria (Windows): botões fechar/minimizar/maximizar. Fechar passa pelo "close" (tela de encerramento).
+// Esticar em todas as telas: a janela cobre a união das áreas úteis dos monitores; de novo, volta ao tamanho anterior.
+let spanPrev: Rect | null = null;
+const workAreas = (): Rect[] => screen.getAllDisplays().map((d) => d.workArea);
+const isSpanned = (w: BrowserWindow): boolean => { const t = unionRect(workAreas()); return !!spanPrev && !!t && nearRect(w.getBounds(), t); };
+function toggleSpan(w: BrowserWindow): void {
+  if (isSpanned(w)) { const p = spanPrev!; spanPrev = null; w.setBounds(p); w.setBounds(p); return; }
+  const areas = workAreas(); const t = unionRect(areas);
+  if (!t || areas.length < 2) return;
+  if (w.isFullScreen()) w.setFullScreen(false);
+  spanPrev = w.isMaximized() ? w.getNormalBounds() : w.getBounds();
+  if (w.isMaximized()) w.unmaximize();
+  // Monitores com escalas diferentes: ao cruzar a divisa, o Windows reajusta o tamanho; a 2ª chamada corrige.
+  w.setBounds(t); w.setBounds(t);
+  const gap = uncoveredArea(areas);
+  if (gap > 0) console.warn(`[messai] esticar: ${gap}px² da janela ficam fora das telas (monitores desalinhados ou de alturas diferentes)`);
+}
+const winState = (w: BrowserWindow) => ({ maximized: w.isMaximized(), focused: w.isFocused(), spanned: isSpanned(w), displays: screen.getAllDisplays().length });
 ipcMain.handle("mess:win", (e, action: string) => {
   const w = BrowserWindow.fromWebContents(e.sender); if (!w) return null;
   if (action === "close") w.close();
   else if (action === "min") w.minimize();
   else if (action === "max") { if (w.isMaximized()) w.unmaximize(); else w.maximize(); }
-  return { maximized: w.isMaximized(), focused: w.isFocused() };
+  else if (action === "span") toggleSpan(w);
+  return winState(w);
 });
 ipcMain.handle("mess:hud-dismiss", (_e, nodeId: string) => { if (hudOpen() && typeof nodeId === "string") hudWin!.webContents.send("mess:hud-dismiss", nodeId); });
 
