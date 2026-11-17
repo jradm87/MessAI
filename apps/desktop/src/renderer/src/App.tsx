@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Background, BackgroundVariant, MiniMap, ReactFlow, applyNodeChanges, applyEdgeChanges, type EdgeChange, useReactFlow, ReactFlowProvider, useOnViewportChange, type Connection as FlowConnection, type Edge, type EdgeTypes, type Node as FlowNode, type NodeChange, type NodeTypes } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Map as MapIcon, Minus, Plus, Activity, Layers, AlignStartVertical, AlignCenterVertical, AlignEndVertical, AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal, LayoutGrid, Sun, Moon, Monitor, Sparkles, Undo2, Redo2, Magnet, Clock } from "lucide-react";
+import { Map as MapIcon, Minus, Plus, Scan, Activity, Layers, AlignStartVertical, AlignCenterVertical, AlignEndVertical, AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal, LayoutGrid, Sun, Moon, Monitor, Sparkles, Undo2, Redo2, Magnet, Clock } from "lucide-react";
 import { useAtomValue } from "jotai";
 import { themeAtom } from "./atoms.js";
 import { getThemePref, setThemePref, nextTheme, THEME_LABEL, cssVar } from "./theme.js";
@@ -75,7 +75,7 @@ function ZoomBar({ minimap, setMinimap, onUsage, onRoutines, agents, wsName, inF
   useAtomValue(themeAtom); // re-renderiza o botão quando o tema efetivo muda
   const pref = getThemePref(); const ThemeIcon = pref === "light" ? Sun : pref === "dark" ? Moon : Monitor;
   // #38 Agent Usage: desligado em Preferências → Agentes → Uso some da barra; provedores escondidos também
-  const hMini = useHint("minimap.toggle"); const hIn = useHint("zoom.in"); const hOut = useHint("zoom.out"); const hMagnet = useHint("snap.toggle"); // #58 tooltips seguem o keymap
+  const hMini = useHint("minimap.toggle"); const hIn = useHint("zoom.in"); const hOut = useHint("zoom.out"); const hMagnet = useHint("snap.toggle"); const hFit = useHint("view.fit"); // #58 tooltips seguem o keymap
   const magnetOn = usePref("snapMagnetic"); // #78
   const usageOn = usePref("usageEnabled"); const hidden = new Set(usePref("usageDisabled").split(",").filter(Boolean));
   const shownAgents = usageOn ? agents.filter((a) => !hidden.has(a.kind)) : [];
@@ -95,6 +95,7 @@ function ZoomBar({ minimap, setMinimap, onUsage, onRoutines, agents, wsName, inF
         <button className="tb" title={`Reduzir${hOut}`} onClick={() => void rf.zoomOut({ duration: 120 })}><Minus size={14} /></button>
         <span className="pct" onClick={() => void rf.zoomTo(1, { duration: 150 })} title="100%">{z}%</span>
         <button className="tb" title={`Ampliar${hIn}`} onClick={() => void rf.zoomIn({ duration: 120 })}><Plus size={14} /></button>
+        <button className="tb" title={`Centralizar: mostrar todo o canvas${hFit}`} data-testid="fit-all" onClick={() => void rf.fitView({ padding: 0.15, duration: 250, maxZoom: 1 })}><Scan size={14} /></button>
       </div>
     </div>
   );
@@ -556,6 +557,8 @@ function Canvas({ conn }: { conn: Connection }) {
     });
   }, [snap, composerFor, chatFor, roles, skills, renameSig, stackFocus]);
 
+  /** Enquadra e centraliza um nó (duplo clique na barra, clique no minimapa). */
+  const frameNode = (id: string) => void rf.fitView({ nodes: [{ id }], padding: 0.08, duration: 250, maxZoom: 2 });
   /** Seleciona um nó e o traz para a vista. */
   const selectNode = (id: string) => {
     const next = flowRef.current.map((n) => ({ ...n, selected: n.id === id }));
@@ -1082,12 +1085,19 @@ function Canvas({ conn }: { conn: Connection }) {
           onOpenTerminal={(t) => { if (!current) { toast("Abra um espaço para criar o terminal de login"); return; } setPrefsOpen(false); createTerminal(freeSpot(snap?.nodes ?? [], SIZE.terminal), { title: t.title, command: t.command }); }} />}
         {rolesDialog && <RolesDialog api={api} workspaceCwd={snap?.workspace.cwd ?? ""} onClose={() => setRolesDialog(false)} onChanged={() => void loadRoles()} />}
         <ReactFlow nodes={flow} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onNodeDragStart={onNodeDragStart} onNodeDragStop={onNodeDragStop} onEdgesChange={onEdgesChange} onConnect={onConnect} onEdgesDelete={onEdgesDelete}
-          onNodeClick={(_, n) => { if (linkingRef.current) finishLink(n.id); }} onPaneClick={() => { if (linkingRef.current) setLinking(null); if (selDrawingsRef.current.size) setSelDrawings(new Set()); }}
+          onNodeClick={(_, n) => { if (linkingRef.current) finishLink(n.id); }}
+          onNodeDoubleClick={(e, n) => { // duplo clique na barra (fora do título e dos controles): enquadra e centraliza o nó
+            const t = e.target as HTMLElement;
+            if (!t.closest(".bar") || t.closest(".title, .title-edit, button, input, textarea, select, .menu, .role-pill")) return;
+            frameNode(n.id);
+          }}
+          onPaneClick={() => { if (linkingRef.current) setLinking(null); if (selDrawingsRef.current.size) setSelDrawings(new Set()); }}
           nodesDraggable={selectMode} nodesConnectable={selectMode} elementsSelectable={selectMode} panOnDrag={tool === "pan" ? [0, 1, 2] : selectMode ? [1, 2] : false} selectionOnDrag={selectMode} panOnScroll zoomOnScroll={false} zoomActivationKeyCode="Alt" panActivationKeyCode="Control" multiSelectionKeyCode={null}
           nodesFocusable={false} fitView minZoom={0.1} maxZoom={3} proOptions={{ hideAttribution: true }} colorMode={theme} deleteKeyCode="Delete"
           onNodesDelete={() => {}} onBeforeDelete={async ({ nodes: ns, edges: es }) => ({ nodes: [], edges: ns.length ? [] : es })}>
           <Background variant={BackgroundVariant.Lines} gap={48} size={1} color={cssVar("--grid") || "#2c2c30"} />
-          {minimap && <MiniMap pannable zoomable />}
+          {minimap && <MiniMap pannable zoomable onNodeClick={(_, n) => frameNode(n.id)}
+            onClick={(e, p) => { if ((e.target as Element).closest(".react-flow__minimap-node")) return; void rf.setCenter(p.x, p.y, { zoom: rf.getZoom(), duration: 250 }); }} />}
           <GroupLayer groups={snap?.groups ?? []} flow={flow} guides={guides} onSelect={(gid) => selectNodes(membersOf(gid))} onRename={(gid, label) => patchGroup(gid, { label })} onColor={(gid, color) => patchGroup(gid, { color })} onUngroup={(gid) => void ungroup(gid)} />
           <DrawingLayer tool={tool} style={style} drawings={drawings}
             selected={selDrawings} onSelect={selectDrawing} onMovePoints={moveDrawing}
